@@ -1079,6 +1079,7 @@ def main():
 
 # -----------------------------------------------------------------------------------------
 # :::::::  OLD COMMENTS  :::::::
+
 # \s*(.*)$             # comment
 # regex_trailing_line = re.compile(r"(.*)[ \t]+$")
 # print(regex_trailing_line.sub("$1dz", "Dz", "dziendobry"))
@@ -1102,5 +1103,6 @@ def main():
 #   for res in results:
 #       print(res)
 # exif_file.close()
+
 if __name__ == "__main__":
     main()
