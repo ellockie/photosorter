@@ -267,7 +267,7 @@ RAW_EXTENSIONS__FOLDERS_MAP = {
 PHOTO_SELECTION_COPIER = {
     "DESTINATION_LOCATION": "z:\\__shared_photos",
     "PATTERNS_TO_INCLUDE": [r"*.jpg", r"*.JPG"],
-    "PATTERNS_TO_IGNORE": SUBFOLDER_NAMES.values() + [r"*__RAW", r"*\.cr2", r"*\.CR2"] + EXTENSIONS_RAW_IMAGES,
+    "PATTERNS_TO_IGNORE": list(SUBFOLDER_NAMES.values()) + [r"*__RAW", r"*\.cr2", r"*\.CR2"] + EXTENSIONS_RAW_IMAGES,
     "SHAREABLE_FOLDER_MARKER_FILE_NAME": "marker_ok_to_share",
     "SOURCE_PHOTO_FOLDER_PATHS": [
         PHOTO_BASE_FOLDER + r"\\2012\\",
