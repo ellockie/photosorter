@@ -1,8 +1,11 @@
 import os
 from os.path import join
 
-assert os.environ["PHOTO_BASE_FOLDER"] and os.environ[
-    "PHOTO_BASE_FOLDER"] != "", "'PHOTO_BASE_FOLDER' environment variable is missing. Set it with SETX ('https://ss64.com/nt/setx.html')"
+assert "PHOTO_BASE_FOLDER" in os.environ \
+    and os.environ["PHOTO_BASE_FOLDER"] \
+    and os.environ["PHOTO_BASE_FOLDER"] != "", \
+    "'PHOTO_BASE_FOLDER' environment variable is missing.\
+    Set it with SETX ('https://ss64.com/nt/setx.html')"
 
 
 # path_to_exiftool_script = "_exiftool.bat"
