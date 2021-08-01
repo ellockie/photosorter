@@ -1,5 +1,6 @@
 import os
 from os.path import join
+from photosorter import full_path_of
 
 assert "PHOTO_BASE_FOLDER" in os.environ \
     and os.environ["PHOTO_BASE_FOLDER"] \
@@ -53,7 +54,7 @@ FOLDERS_RAW = [FOLDER_CR2_CONV, FOLDER_CRW_CONV, FOLDER_MPO_CONV,
 FOLDERS_RESULT = FOLDERS_RAW + [FOLDER_ORIG_JPG,
                                 FOLDER_SORT_READY, FOLDER_EXTRACTED_JPG]
 FOLDERS_ALL = FOLDERS_RESULT + [FOLDER_UNSORTED, FOLDER_PROBLEMATIC, FOLDER_READY, FOLDER_TIMEZONE_CORR,
-                                FOLDER_PROBLEMATIC_OLD_EXIF]
+                                FOLDER_PROBLEMATIC_OLD_EXIF, full_path_of(FOLDER_UNSORTED)]
 
 # Problematic subfolders
 SUBFOLDER_UNSUP_EXT = "##   UNSUPPORTED EXTENSIONS   ##"
@@ -69,6 +70,8 @@ SUBFOLDER_NAMES = {
     "META": "[==   meta   ==]"
 }
 READY_FOLDER_DECORATION_STRING = ") - 1. ######"
+
+FOLDERS_TO_CREATE = []
 
 DAY_DIVISION_TIME = "04.44.44"
 PATH_TO_REPORT = "RAPORT.txt"
@@ -298,17 +301,10 @@ MONTH_FOLDERS = {
     "12": "12. December"
 }
 
-INDENT_VERY_SMALL = \
-    "         "
-INDENT_SMALL = \
-    "             "
-INDENT_1_TAB = \
-    "\t"
-INDENT_2_TABS = \
-    "\t\t"
-NEWLINE_AND_INDENT_1_TAB = \
-    "\n\t"
-NEWLINE_AND_INDENT_2_TABS = \
-    "\n\t\t"
-TWO_NEWLINES = \
-    "\n\n"
+INDENT_VERY_SMALL = "         "
+INDENT_SMALL = "             "
+INDENT_1_TAB = "\t"
+INDENT_2_TABS = "\t\t"
+NEWLINE_AND_INDENT_1_TAB = "\n\t"
+NEWLINE_AND_INDENT_2_TABS = "\n\t\t"
+TWO_NEWLINES = "\n\n"
