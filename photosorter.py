@@ -391,7 +391,7 @@ def get_camera_symbol(camera_name, exif_file):
                 INDENT_SMALL + "Enter camera symbol: ")
             # raise ValueError('UNKNOWN camera encountered (' + camera_name + ')')
         print((Colorise.green(INDENT_SMALL + "Adding " + camera_name + " - " +
-                             new_camera_symbol + " to the known list. Please hard-code it later!")))
+                              new_camera_symbol + " to the known list. Please hard-code it later!")))
         KNOWN_CAMERAS_SYMBOLS.append((camera_name, new_camera_symbol))
         write_camera_symbol_to_file(camera_name, new_camera_symbol)
         return new_camera_symbol
@@ -794,7 +794,7 @@ def _TASK_rename_and_move_images_and_EXIF_files():
             os.rename(source_img_path, full_path_of(destination_img_path))
         except:
             print((Colorise.red(INDENT_SMALL +
-                               "DUPLICATE IMG - THIS SHOULDN'T HAVE HAPPENED")))
+                                "DUPLICATE IMG - THIS SHOULDN'T HAVE HAPPENED")))
             print((INDENT_SMALL + "  source_img_path: " + source_img_path))
             print((INDENT_SMALL + "  destination_img_path: " +
                   full_path_of(destination_img_path)))
@@ -809,7 +809,7 @@ def _TASK_rename_and_move_images_and_EXIF_files():
             print((Colorise.red(
                 INDENT_SMALL + "DUPLICATE EXIF OR FILE DOESN'T EXIST - THIS SHOULDN'T HAVE HAPPENED (?)")))
             print((INDENT_SMALL + "  source_exif_path: " + full_path_of(FOLDER_UNSORTED,
-                                                                       original_file_name + original_file_ext + EXIF_EXTENSION)))
+                                                                        original_file_name + original_file_ext + EXIF_EXTENSION)))
             print((INDENT_SMALL + "  destination_exif_path: " +
                   full_path_of(destination_exif_path)))
 
@@ -832,15 +832,15 @@ def _TASK_process_RAWs():
         _TASK_launch_sony_converter()
     if len(os.listdir(full_path_of(FOLDER_MPO_CONV))):
         print((Colorise.bg_yellow(INDENT_SMALL +
-                                 "FOLDER_MPO_CONV - non-empty, BUT converter not specified")))
+                                  "FOLDER_MPO_CONV - non-empty, BUT converter not specified")))
         print((os.listdir(full_path_of(FOLDER_MPO_CONV))))
     if len(os.listdir(full_path_of(FOLDER_RW2_CONV))):
         print((Colorise.bg_yellow(INDENT_SMALL +
-                                 "FOLDER_RW2_CONV - non-empty, BUT converter not specified")))
+                                  "FOLDER_RW2_CONV - non-empty, BUT converter not specified")))
         print((os.listdir(full_path_of(FOLDER_RW2_CONV))))
     if len(os.listdir(full_path_of(FOLDER_DNG_CONV))):
         print((Colorise.bg_yellow(INDENT_SMALL +
-                                 "FOLDER_DNG_CONV - non-empty, BUT converter not specified")))
+                                  "FOLDER_DNG_CONV - non-empty, BUT converter not specified")))
         print((os.listdir(full_path_of(FOLDER_DNG_CONV))))
 
 
@@ -1018,12 +1018,12 @@ def display_total_time(processing_start_time, all_files_count):
     m, s = divmod(processing_duration, 60)
     h, m = divmod(m, 60)
     print((Colorise.yellow(NEWLINE_AND_INDENT_2_TABS +
-                          "Total processing time: ") + "%d:%02d:%02d" % (h, m, s)))
+                           "Total processing time: ") + "%d:%02d:%02d" % (h, m, s)))
     if all_files_count:
         print((Colorise.yellow(INDENT_2_TABS + "Time per photo: ") +
               str(round(processing_duration / all_files_count, 2)) + " s"))
     print((Colorise.yellow(INDENT_2_TABS +
-                          "All files (photos + other): ") + str(all_files_count)))
+                           "All files (photos + other): ") + str(all_files_count)))
 
 
 def tada():
@@ -1040,7 +1040,7 @@ def ask_if_generate_exifs():
     while True:
         winsound.Beep(4444, 444)
         answer = input(NEWLINE_AND_INDENT_1_TAB +
-                           "Do you want to generate EXIF files? (y/n): ")
+                       "Do you want to generate EXIF files? (y/n): ")
         if answer == "y":
             print("")
             return True
