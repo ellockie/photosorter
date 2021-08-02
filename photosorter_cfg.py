@@ -1,8 +1,11 @@
 import os
 from os.path import join
 
-assert os.environ["PHOTO_BASE_FOLDER"] and os.environ[
-    "PHOTO_BASE_FOLDER"] != "", "'PHOTO_BASE_FOLDER' environment variable is missing. Set it with SETX ('https://ss64.com/nt/setx.html')"
+assert "PHOTO_BASE_FOLDER" in os.environ \
+    and os.environ["PHOTO_BASE_FOLDER"] \
+    and os.environ["PHOTO_BASE_FOLDER"] != "", \
+    "'PHOTO_BASE_FOLDER' environment variable is missing.\
+    Set it with SETX ('https://ss64.com/nt/setx.html')"
 
 
 # path_to_exiftool_script = "_exiftool.bat"
@@ -16,13 +19,15 @@ TESTING_MODE = False
 
 # folder names
 PHOTO_BASE_FOLDER = os.environ['PHOTO_BASE_FOLDER']
+
+# global ROOT_FOLDER_PATH
 FOLDER_TO_BE_SORTED = "____TO_SORT"
 FOLDER_TO_BE_SORTED_FULL_PATH = join(PHOTO_BASE_FOLDER, FOLDER_TO_BE_SORTED)
+ROOT_FOLDER_PATH = FOLDER_TO_BE_SORTED_FULL_PATH
 if TESTING_MODE:
     ROOT_FOLDER_PATH = "__TEST_folder"
-else:
-    ROOT_FOLDER_PATH = FOLDER_TO_BE_SORTED_FULL_PATH
 FOLDER_UNSORTED = "____UNSORTED"
+FOLDER_UNSORTED_FULL_PATH = join(ROOT_FOLDER_PATH, FOLDER_UNSORTED)
 FOLDER_PROBLEMATIC = "__PROBLEMATIC"
 FOLDER_PROBLEMATIC_OLD_EXIF = join("__PROBLEMATIC", "old_EXIF")
 FOLDER_READY = "__READY"
@@ -47,10 +52,10 @@ FOLDER_SORT_READY = "3. Ready to be sorted"
 
 FOLDERS_RAW = [FOLDER_CR2_CONV, FOLDER_CRW_CONV, FOLDER_MPO_CONV,
                FOLDER_ARW_CONV, FOLDER_RW2_CONV, FOLDER_DNG_CONV]
-FOLDERS_RESULT = FOLDERS_RAW + [FOLDER_ORIG_JPG,
-                                FOLDER_SORT_READY, FOLDER_EXTRACTED_JPG]
-FOLDERS_ALL = FOLDERS_RESULT + [FOLDER_UNSORTED, FOLDER_PROBLEMATIC, FOLDER_READY, FOLDER_TIMEZONE_CORR,
-                                FOLDER_PROBLEMATIC_OLD_EXIF]
+FOLDERS_RESULT = FOLDERS_RAW + \
+    [FOLDER_ORIG_JPG, FOLDER_SORT_READY, FOLDER_EXTRACTED_JPG]
+FOLDERS_ALL = FOLDERS_RESULT + [
+    FOLDER_UNSORTED, FOLDER_PROBLEMATIC, FOLDER_READY, FOLDER_TIMEZONE_CORR, FOLDER_PROBLEMATIC_OLD_EXIF]
 
 # Problematic subfolders
 SUBFOLDER_UNSUP_EXT = "##   UNSUPPORTED EXTENSIONS   ##"
@@ -68,7 +73,7 @@ SUBFOLDER_NAMES = {
 READY_FOLDER_DECORATION_STRING = ") - 1. ######"
 
 DAY_DIVISION_TIME = "04.44.44"
-PATH_TO_REPORT = "RAPORT.txt"
+PATH_TO_REPORT = "REPORT.txt"
 RAW_MARKER_STR = "RAW__"
 KNOWN_CAMERAS_SYMBOLS = [
     ("", "NOID"),
@@ -267,7 +272,7 @@ RAW_EXTENSIONS__FOLDERS_MAP = {
 PHOTO_SELECTION_COPIER = {
     "DESTINATION_LOCATION": "z:\\__shared_photos",
     "PATTERNS_TO_INCLUDE": [r"*.jpg", r"*.JPG"],
-    "PATTERNS_TO_IGNORE": SUBFOLDER_NAMES.values() + [r"*__RAW", r"*\.cr2", r"*\.CR2"] + EXTENSIONS_RAW_IMAGES,
+    "PATTERNS_TO_IGNORE": list(SUBFOLDER_NAMES.values()) + [r"*__RAW", r"*\.cr2", r"*\.CR2"] + EXTENSIONS_RAW_IMAGES,
     "SHAREABLE_FOLDER_MARKER_FILE_NAME": "marker_ok_to_share",
     "SOURCE_PHOTO_FOLDER_PATHS": [
         PHOTO_BASE_FOLDER + r"\\2012\\",
@@ -295,17 +300,10 @@ MONTH_FOLDERS = {
     "12": "12. December"
 }
 
-INDENT_VERY_SMALL = \
-    "         "
-INDENT_SMALL = \
-    "             "
-INDENT_1_TAB = \
-    "\t"
-INDENT_2_TABS = \
-    "\t\t"
-NEWLINE_AND_INDENT_1_TAB = \
-    "\n\t"
-NEWLINE_AND_INDENT_2_TABS = \
-    "\n\t\t"
-TWO_NEWLINES = \
-    "\n\n"
+INDENT_VERY_SMALL = "         "
+INDENT_SMALL = "             "
+INDENT_1_TAB = "\t"
+INDENT_2_TABS = "\t\t"
+NEWLINE_AND_INDENT_1_TAB = "\n\t"
+NEWLINE_AND_INDENT_2_TABS = "\n\t\t"
+TWO_NEWLINES = "\n\n"
