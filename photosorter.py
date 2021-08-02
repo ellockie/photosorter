@@ -14,6 +14,8 @@ import dateutil.parser  # import parse as dateutil_parser
 from colorise import Colorise
 from photosorter_cfg import *
 
+print("\n Current python version:  {}\n".format(sys.version))
+assert sys.version.startswith("3."), "Error: Python 3 is required!"
 
 #  Command line option(s):
 #  - generate-exifs:   generate exif files (without asking)
@@ -531,29 +533,35 @@ def create_folders_subfolder(folder, subfolder):
 @print_current_task_name_decorator
 @display_timing
 def create_missing_folders(all_folders, missing_folders):
-    global ROOT_FOLDER_PATH
 
     if len(missing_folders) == len(all_folders):
         print((NEWLINE_AND_INDENT_1_TAB +
               "[ WARNING ] None of the required folders is present.\n"))
-        print((INDENT_SMALL + "The root folder path is: " + ROOT_FOLDER_PATH))
-        print((INDENT_SMALL + "Current working directory is: " + os.getcwd()))
-        answer = input(
-            "\n    Use the current working directory? (Enter=yes): ")
-        if answer == "":
-            ROOT_FOLDER_PATH = os.path.join(os.getcwd(), "__PROC_PHOTOS")
-            print((NEWLINE_AND_INDENT_1_TAB +
-                  "Will use the following path: " + ROOT_FOLDER_PATH + "\n"))
-        else:
-            answer = input(
-                "\n  Continue with original root folder path? (Enter=yes): ")
-            if answer != "":
-                print((NEWLINE_AND_INDENT_1_TAB + "Quitting\n"))
-                quit()
+        print((INDENT_SMALL + "The root folder path is:       " + ROOT_FOLDER_PATH))
+        print((INDENT_SMALL + "Current working directory is:  " + os.getcwd()))
+        # currently disabled:
+        # ask_different_root_folder()
     for folder_name in missing_folders:
         os.makedirs(full_path_of(folder_name))
         print((INDENT_SMALL + "Folder '" + folder_name + "' created."))
     print(TWO_NEWLINES)
+
+@print_current_task_name_decorator
+@display_timing
+def ask_different_root_folder():
+    global ROOT_FOLDER_PATH
+    answer = input(
+        "\n    Use the current working directory? (Enter=yes): ")
+    if answer == "":
+        ROOT_FOLDER_PATH = os.path.join(os.getcwd(), "__PROC_PHOTOS")
+        print((NEWLINE_AND_INDENT_1_TAB +
+               "Will use the following path: " + ROOT_FOLDER_PATH + "\n"))
+    else:
+        answer = input(
+            "\n  Continue with original root folder path? (Enter=yes): ")
+        if answer != "":
+            print((NEWLINE_AND_INDENT_1_TAB + "Quitting\n"))
+            quit()
 
 
 @print_current_task_name_decorator
@@ -1051,13 +1059,13 @@ def ask_if_generate_exifs():
 
 def main():
     processing_start_time = time.time()
+    _TASK_verify_if_folders_exist(FOLDERS_ALL)
     all_files_count = get_all_files_count()
 
     print(" -----------------------------------------------------------------------------------------")
     # print("Some tasks TEMPORARILY DISABLED, but should be ON!")
 
     generate_exifs = ask_if_generate_exifs()
-    _TASK_verify_if_folders_exist(FOLDERS_ALL)
     _TASK_remove_empty_image_files()
     if generate_exifs:
         _TASK_move_old_exif_files()
