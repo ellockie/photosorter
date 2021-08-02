@@ -209,7 +209,7 @@ def reformat_focal_length(focal_length_string):
     return focal_length_string.replace("mm", "")
 
 
-def extract_data_from_EXIF_file_and_rename_original_image(exif_file, image_name):
+def extract_data_from_EXIF_file_and_rename_original_image(exif_file_handler, image_name):
     global file_info_array, fail_counter, info_extraction_critical_fail_counter
 
     camera_symbol = ""
@@ -222,7 +222,7 @@ def extract_data_from_EXIF_file_and_rename_original_image(exif_file, image_name)
     # name example:  name_template = "2014-05-26_(Mon)_13.24.40__f2.2...T1_33..4.2mm125.jpg"
 
     camera_symbol, unformatted_image_datetime = extract_basic_info_from_EXIF(
-        camera_symbol, exif_file, img, unformatted_image_datetime)
+        camera_symbol, exif_file_handler, img, unformatted_image_datetime)
     # assert isinstance(fail_counter, int)
     missing_parts, fail_counter, info_extraction_critical_fail_counter = identify_missing_image_info(
         img, fail_counter, info_extraction_critical_fail_counter)
@@ -316,7 +316,9 @@ def extract_basic_info_from_EXIF(camera_symbol, exif_file, img, unformatted_imag
             camera_name = extract_value_of_EXIF_key(line)
             camera_symbol = get_camera_symbol(camera_name, exif_file)
             img["camera_symbol"] = camera_symbol
-        if line.startswith('Date/Time Original'):
+        elif line.startswith('File Modification Date/Time'):
+            unformatted_image_datetime = extract_value_of_EXIF_key(line)
+        elif line.startswith('Date/Time Original'):
             unformatted_image_datetime = extract_value_of_EXIF_key(line)
         elif line.startswith('Aperture'):
             aperture = "f" + extract_value_of_EXIF_key(line)
@@ -546,6 +548,7 @@ def create_missing_folders(all_folders, missing_folders):
         print((INDENT_SMALL + "Folder '" + folder_name + "' created."))
     print(TWO_NEWLINES)
 
+
 @print_current_task_name_decorator
 @display_timing
 def ask_different_root_folder():
@@ -739,9 +742,9 @@ def _TASK_collect_info_from_EXIF_files():
             #   camera_symbol, focal_length.  Need to mark the original photo too!
             # *** PROBLEMATIC:  m_db7a3ffacfa13c5a9756779d51f5122b.jpg,  missing: exposure_time, iso, aperture,
             #   camera_symbol, focal_length.  Need to mark the original photo too!
-        with open(exif_file_name) as exif_file:
+        with open(exif_file_name) as exif_file_handler:
             extraction_success = extract_data_from_EXIF_file_and_rename_original_image(
-                exif_file, image_file_name)
+                exif_file_handler, image_file_name)
         if extraction_success:
             rename_exif_file(exif_file_name, image_file_name)
         else:
@@ -750,7 +753,7 @@ def _TASK_collect_info_from_EXIF_files():
                                                 os.path.splitext(image_file_name)[0] + EXIF_EXTENSION)
             try:
                 os.rename(
-                    exif_file.name,
+                    exif_file_handler.name,
                     moved_exif_file_name
                 )
             except:
