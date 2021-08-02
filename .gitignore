@@ -1,4 +1,5 @@
 /.idea/
 /venv/
 *.pyc
+setx_PHOTO_BASE_FOLDER_env_variable.bat
 desktop.ini
