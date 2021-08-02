@@ -1,1 +1,0 @@
-setx PHOTO_BASE_FOLDER c:\____TEMP_PHOTOS\ & echo It won't be visible in the current terminal
