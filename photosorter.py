@@ -14,7 +14,8 @@ import dateutil.parser  # import parse as dateutil_parser
 from colorise import Colorise
 from photosorter_cfg import *
 
-print("\n Current python version:  {}\n".format(sys.version))
+print("\n Python executable used:  {}".format(sys.executable))
+print(" Current python version:  {}\n".format(sys.version))
 assert sys.version.startswith("3."), "Error: Python 3 is required!"
 
 #  Command line option(s):
@@ -127,7 +128,7 @@ def yield_image_files_from_location(root, include_paths):
             filename, file_extension = os.path.splitext(image_file)
             filename = filename.lower()
             file_extension = file_extension.lower()
-            if file_extension in EXTENSIONS_SUPPORTED_IMAGES:
+            if file_extension in EXTENSIONS_SUPPORTED_IMAGES:  # TODO: add support for videos, yield them too
                 if include_paths:
                     # yield full pathname
                     yield os.path.join(root, image_file)
@@ -139,15 +140,16 @@ def yield_image_files_from_location(root, include_paths):
             else:
                 print((INDENT_VERY_SMALL + "[ WARNING ] File_extension: " +
                       file_extension + " not supported ( '" + image_file + "' ). File moved."))
-                os.rename(
-                    full_path_of(FOLDER_UNSORTED, image_file),
-                    full_path_of(FOLDER_PROBLEMATIC,
-                                 SUBFOLDER_UNSUP_EXT, filename + file_extension)
-                )
-                problematic_files_counter += 1
-                # except:
-                # print("\n  Problem when moving not supported extension files (duplicate already exists?)")
-                # raise ValueError("  file_extension: " + file_extension + " not supported ( '" + image_file + "'' )")
+                try:
+                    os.rename(
+                        full_path_of(FOLDER_UNSORTED, image_file),
+                        full_path_of(FOLDER_PROBLEMATIC,
+                                     SUBFOLDER_UNSUP_EXT, filename + file_extension)
+                    )
+                    problematic_files_counter += 1
+                except:
+                    print(INDENT_VERY_SMALL + "  Problem when moving not supported extension files (duplicate already exists?)\n")
+                    # raise ValueError("  file_extension: " + file_extension + " not supported ( '" + image_file + "'' )")
 
 
 def get_filename_from_path(path):
@@ -221,8 +223,13 @@ def extract_data_from_EXIF_file_and_rename_original_image(exif_file_handler, ima
     img_name, img_ext = os.path.splitext(image_name)
     # name example:  name_template = "2014-05-26_(Mon)_13.24.40__f2.2...T1_33..4.2mm125.jpg"
 
+    # try:
     camera_symbol, unformatted_image_datetime = extract_basic_info_from_EXIF(
         camera_symbol, exif_file_handler, img, unformatted_image_datetime)
+    # except:
+    #     print("ERROR extracting camera_symbol and unformatted_image_datetime. filename:")
+    #     print(image_name)
+    #     exit(1)
     # assert isinstance(fail_counter, int)
     missing_parts, fail_counter, info_extraction_critical_fail_counter = identify_missing_image_info(
         img, fail_counter, info_extraction_critical_fail_counter)
@@ -480,11 +487,18 @@ def get_one_day_before_folder_name(folder_name):
 def create_date_folder(photo_name):
     """Create folder name like 2014-05-08_(Thu) - 1. ######."""
 
+    assert ")_" in photo_name, "Error: Wrong name:\n" + photo_name
     global created_folders
 
     split_name = photo_name.split(")_")
     folder_name = split_name[0]
-    photo_time = split_name[1].split("__f")[0]
+    try:
+        photo_time = split_name[1].split("__f")[0]
+    except:
+        print((INDENT_SMALL + "Problem when splitting image name"))
+        print(split_name)
+        raise ValueError(split_name)
+
     if int(photo_time[:2]) <= int(DAY_DIVISION_TIME[:2]):
         if int(photo_time[:2]) == int(DAY_DIVISION_TIME[:2]):
             if int(photo_time[3:5]) <= int(DAY_DIVISION_TIME[3:5]):
@@ -714,6 +728,7 @@ def _TASK_collect_info_from_EXIF_files():
                 INDENT_SMALL + "Exif file belonging to special RAW    NOT   ignored (OK) - (check this logic)"))
             print(image_file_name)
             # continue
+        # TODO: add handling for video files
 
         # exif_file_name = full_path_of(FOLDER_UNSORTED, image_file_name_only + image_file_extension +
         # EXIF_EXTENSION)
@@ -742,7 +757,14 @@ def _TASK_collect_info_from_EXIF_files():
             #   camera_symbol, focal_length.  Need to mark the original photo too!
             # *** PROBLEMATIC:  m_db7a3ffacfa13c5a9756779d51f5122b.jpg,  missing: exposure_time, iso, aperture,
             #   camera_symbol, focal_length.  Need to mark the original photo too!
-        with open(exif_file_name) as exif_file_handler:
+        # possible encodings:
+        # - utf8
+        # - utf-16
+        # - utf-16-le
+        # - utf-16-be
+        # - iso-8859-1
+        # Try problematic file with http://www.mimastech.com/charset-detector-free-online-text-files-charset-detector/
+        with open(exif_file_name, encoding="iso-8859-1") as exif_file_handler:
             extraction_success = extract_data_from_EXIF_file_and_rename_original_image(
                 exif_file_handler, image_file_name)
         if extraction_success:
@@ -852,6 +874,7 @@ def _TASK_process_RAWs():
     if len(os.listdir(full_path_of(FOLDER_DNG_CONV))):
         print((Colorise.bg_yellow(INDENT_SMALL +
                                   "FOLDER_DNG_CONV - non-empty, BUT converter not specified")))
+        print((Colorise.bg_yellow(INDENT_SMALL + "CONVERSION FROM DNG NOT YET SUPPORTED!")))
         print((os.listdir(full_path_of(FOLDER_DNG_CONV))))
 
 
@@ -888,7 +911,8 @@ def _TASK_launch_dpviewer():
 @print_current_task_name_decorator
 @display_timing
 def _TASK_launch_sony_converter():
-    print((INDENT_SMALL + "Will launch DPViewer converter..."))
+    print((INDENT_SMALL + "Will launch Sony converter..."))
+    print(PATH_TO_SONY_CONVERTER)
     subprocess.check_call(
         [
             PATH_TO_SONY_CONVERTER,
@@ -919,6 +943,7 @@ def _TASK_move_the_results():
 
 
 def move_lossy_image_files(image_file_name):
+    assert ")_" in image_file_name[1], "Error: Wrong name:\n" + image_file_name
     try:
         os.rename(
             image_file_name[0],
@@ -1068,7 +1093,9 @@ def main():
     print(" -----------------------------------------------------------------------------------------")
     # print("Some tasks TEMPORARILY DISABLED, but should be ON!")
 
-    generate_exifs = ask_if_generate_exifs()
+    generate_exifs = True
+    # generate_exifs = ask_if_generate_exifs()
+    print("Will generate exifs")
     _TASK_remove_empty_image_files()
     if generate_exifs:
         _TASK_move_old_exif_files()
@@ -1117,3 +1144,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    print("\n\n\tZaimplementowac licznik nienazwanych folderow i nowych, moze starych?")

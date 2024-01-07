@@ -14,7 +14,8 @@ EXIFTOOL_NAME = "exiftool"
 PATH_TO_IRFANVIEW = r"c:\_[SOFT] - Grafika\__Browsers, Viewers\IrfanView\i_view32.exe"
 PATH_TO_DPVIEWER = r"c:\Program Files (x86)\Canon\Digital Photo Professional\DPPViewer.exe"
 # PATH_TO_SONY_CONVERTER = r"f:\_[SOFT] - Grafika\__Cameras\Sony\Viewer.exe"
-PATH_TO_SONY_CONVERTER = r"C:\Program Files\Sony\Imaging Edge\Viewer.exe"
+# PATH_TO_SONY_CONVERTER = r"C:\Program Files\Sony\Imaging Edge\Viewer.exe"
+PATH_TO_SONY_CONVERTER = r"c:\Program Files\Sony\Imaging Edge Desktop\ied.exe"
 TESTING_MODE = False
 
 # folder names
@@ -136,25 +137,32 @@ KNOWN_CAMERAS_SYMBOLS = [
     ("EZ Controller", "EZCtrl"),
     ("EZ Controller", "EZCtrl"),
     ("FC300X", "FC300X"),
+    ("FC7303", "DRMV2"),
     ("FinePix F770EXR", "FPF770"),
+    ("FinePix REAL 3D W1", "3DW1"),
     ("FinePix REAL 3D W3", "3DW3"),
     ("FinePix XP30", "XP30"),
     ("GT-I5500", "SG5"),
     ("GT-I9505", "S4"),
+    ("GoPro Max", "GoProMX"),
     ("HC-V700", "VID1"),
+    ("HERO8 Black", "HR8B"),
     ("Hipsteroku", "HPR"),
     ("iDV", "3DAP"),
     ("ILCA-77M2", "ILCA-77M2"),
+    ("ILCE-5000", "ILC5K"),
     ("ILCE-6000", "ILC6K"),
     ("ILCE-7", "ILC7"),
     ("ILCE-7M2", "ILC7M2"),
     ("ILCE-7R", "ILC7R"),
     ("ILCE-7RM2", "ILC7R2"),
+    ("ILCE-7RM5", "ILC7R5"),
     ("iPhone 4s", "iP4s"),
     ("iPhone 5", "iP5"),
     ("iPhone 5s", "iP5s"),
     ("iPhone 6", "iP6"),
     ("IQ260", "IQ260"),
+    ("KeyMission 360", "KMis360"),
     ("KODAK EASYSHARE C533 ZOOM DIGITAL CAMERA", "KDC533"),
     ("KODAK Z740 ZOOM DIGITAL CAMERA", "KDZ740"),
     ("LEICA M (Typ 240)", "LEIM"),
@@ -206,6 +214,7 @@ KNOWN_CAMERAS_SYMBOLS = [
     ("SLT-A77V", "SLTA77V"),
     ("SM-N910F", "SGN4"),
     ("SM-G965F", "SG9"),
+    ("SM-S9080", "SG22U"),
     ("SM-T520", "SGTab10"),
     ("SP-3000", "SP3K"),
     ("SZ-10", "SZ10"),
