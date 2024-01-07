@@ -235,8 +235,10 @@ def extract_data_from_EXIF_file_and_rename_original_image(exif_file_handler, ima
         img, fail_counter, info_extraction_critical_fail_counter)
 
     # move file if problematic (new errors)
-    if info_extraction_critical_fail_counter > previous_critical_fail_counter:
-        move_image(image_name, img_ext, img_name, missing_parts)
+    if len(missing_parts) == 1 and missing_parts[0] == 'aperture':
+        img['aperture'] = 'fNA'
+    elif info_extraction_critical_fail_counter > previous_critical_fail_counter:
+        move_image_to_problematic_folder(image_name, img_ext, img_name, missing_parts)
         return False
 
     # process image date_time, apply timezone correction if necessary
@@ -251,7 +253,7 @@ def extract_data_from_EXIF_file_and_rename_original_image(exif_file_handler, ima
     return True
 
 
-def move_image(image_name, img_ext, img_name, missing_parts):
+def move_image_to_problematic_folder(image_name, img_ext, img_name, missing_parts):
     global problematic_files_counter
     print((Colorise.red(INDENT_SMALL + "*** PROBLEMATIC:  ") + Colorise.yellow(
         img_name) + img_ext + ",  missing: " + Colorise.yellow(", ".join(missing_parts)) +
