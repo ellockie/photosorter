@@ -1,2 +1,2 @@
-pytest
+python -m pytest
 PAUSE

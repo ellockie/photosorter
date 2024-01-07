@@ -5,6 +5,7 @@ import pytest
 
 def test_get_photo_monthly_folder_path_correct_date1():
     assert odf.get_photo_monthly_folder_path("2018-10-01") == r"h:\\__ Photos\2018\10. October"
+
 def test_get_photo_monthly_folder_path_correct_date2():
     assert odf.get_photo_monthly_folder_path("2018-10-01") == r"h:\\__ Photos\2018\10. October"
 
@@ -26,4 +27,4 @@ def test_get_photo_monthly_folder_path_incorrect_date4():
         # e_info saves the exception object so you can extract details from it. For example,
         # if you want to check the exception call stack or another nested exception inside.
         # (didn't show any message)
-        print e_info
+        print(e_info)
