@@ -54,6 +54,7 @@ def print_current_task_name_decorator(fn):
         print_function_name(inspect.stack()[1][4][0], task_counter)
         result = fn(*args, **kwargs)
         return result
+
     return wrapper
 
 
@@ -68,14 +69,16 @@ def print_function_name(raw_stack_name, task_counter):
 
 def display_timing(fn):
     """Outputs the time a function takes to execute."""
+
     def wrapper(*args, **kwargs):
         t = time.time()
         result = fn(*args, **kwargs)
         t_diff = time.time() - t
         if t_diff >= 0.01:
             print((Colorise.yellow(INDENT_2_TABS + "Execution time: ") +
-                  str(round(t_diff, 2)) + Colorise.yellow(" s")))
+                   str(round(t_diff, 2)) + Colorise.yellow(" s")))
         return result
+
     return wrapper
 
 
@@ -103,6 +106,7 @@ def yield_pattern_matching_files_from_location(root, pattern):
     for filename in fnmatch.filter(files, pattern) if pattern else files:
         # if include_paths:
         yield (os.path.join(root, filename), filename)
+
 
 # def yield_any_files_from_location(root):
 #     files = [f for f in os.listdir(root) if os.path.isfile(os.path.join(root, f))]
@@ -139,7 +143,7 @@ def yield_image_files_from_location(root, include_paths):
                 pass
             else:
                 print((INDENT_VERY_SMALL + "[ WARNING ] File_extension: " +
-                      file_extension + " not supported ( '" + image_file + "' ). File moved."))
+                       file_extension + " not supported ( '" + image_file + "' ). File moved."))
                 try:
                     os.rename(
                         full_path_of(FOLDER_UNSORTED, image_file),
@@ -148,7 +152,8 @@ def yield_image_files_from_location(root, include_paths):
                     )
                     problematic_files_counter += 1
                 except:
-                    print(INDENT_VERY_SMALL + "  Problem when moving not supported extension files (duplicate already exists?)\n")
+                    print(
+                        INDENT_VERY_SMALL + "  Problem when moving not supported extension files (duplicate already exists?)\n")
                     # raise ValueError("  file_extension: " + file_extension + " not supported ( '" + image_file + "'' )")
 
 
@@ -260,7 +265,7 @@ def move_image_to_problematic_folder(image_name, img_ext, img_name, missing_part
     global problematic_files_counter
     print((Colorise.red(INDENT_SMALL + "*** PROBLEMATIC:  ") + Colorise.yellow(
         img_name) + img_ext + ",  missing: " + Colorise.yellow(", ".join(missing_parts)) +
-        ".  (Need to mark the original photo too!)"))
+           ".  (Need to mark the original photo too!)"))
     if img_ext.lower() in EXTENSIONS_SPECIAL_RAW_IMAGES:
         # 'special' raw, BUT also .MPO! need to handle that case
         target_folder = get_target_folder_for_extension(image_name, img_ext)
@@ -347,27 +352,27 @@ def extract_basic_info_from_EXIF(camera_symbol, exif_file, img, unformatted_imag
             img["aperture"] = aperture
         elif line.startswith('Exposure Time'):
             exposure_time = "T" + \
-                reformat_exposure_time(extract_value_of_EXIF_key(line))
+                            reformat_exposure_time(extract_value_of_EXIF_key(line))
             img["exposure_time"] = exposure_time
         elif line.startswith('ISO  '):
             iso = "I" + extract_value_of_EXIF_key(line)
             img["iso"] = iso
         elif line.startswith('Focal Length'):
             focal_length = "L" + \
-                reformat_focal_length(extract_value_of_EXIF_key(line))
+                           reformat_focal_length(extract_value_of_EXIF_key(line))
             img["focal_length"] = focal_length
             if "camera_symbol" in list(img.keys()):
                 if img["camera_symbol"] == "NE71":
                     print((INDENT_SMALL + "NE71 - " +
-                          str(float(float(reformat_focal_length(extract_value_of_EXIF_key(line)))))))
+                           str(float(float(reformat_focal_length(extract_value_of_EXIF_key(line)))))))
                 elif img["camera_symbol"] == "SH50":
                     print((INDENT_SMALL + "SH50 - " +
-                          str(float(reformat_focal_length(extract_value_of_EXIF_key(line))))))
+                           str(float(reformat_focal_length(extract_value_of_EXIF_key(line))))))
             else:
                 print((INDENT_SMALL + "NO CAMERA MODEL"))
         elif line.startswith("Focal Units"):
             print((Colorise.red(INDENT_SMALL + "TODO: try to use Focal Units information: ") +
-                  extract_value_of_EXIF_key(line)))
+                   extract_value_of_EXIF_key(line)))
     return camera_symbol, unformatted_image_datetime
 
 
@@ -407,7 +412,7 @@ def get_camera_symbol(camera_name, exif_file):
 
     if cam_symb is None:
         print((Colorise.red(INDENT_SMALL + "UNKNOWN camera encountered: ") +
-              Colorise.yellow(camera_name)))
+               Colorise.yellow(camera_name)))
         print((INDENT_SMALL + " - EXIF file:  " + exif_file.name))
         winsound.Beep(4444, 4444)
         winsound.Beep(8444, 2222)
@@ -479,7 +484,7 @@ def get_the_destination_path(file_name, file_ext, source_img_path, iterator=0):
 
         if os.path.exists(destination_img_duplicate_path):
             print((INDENT_SMALL + "Renaming an inter-second name:  " +
-                  destination_img_duplicate_path))
+                   destination_img_duplicate_path))
 
         return get_the_destination_path(file_name, file_ext, source_img_path, (iterator + 1))
     else:
@@ -491,7 +496,7 @@ def get_one_day_before_folder_name(folder_name):
 
     d = date_time - datetime.timedelta(days=1)
     print((INDENT_SMALL + "Shifting date: " +
-          folder_name + "  -->  " + str(d)[:-9]))
+           folder_name + "  -->  " + str(d)[:-9]))
 
     weekday = d.strftime("%a")
     d = str(d)
@@ -502,7 +507,7 @@ def get_one_day_before_folder_name(folder_name):
 def create_date_folder(photo_name):
     """Create folder name like 2014-05-08_(Thu) - 1. ######."""
 
-    assert ")_" in photo_name, "Error: Wrong name:\n" + photo_name
+    assert ")_" in photo_name, f"Error: Wrong name:  '{photo_name}'"
     global created_folders
 
     split_name = photo_name.split(")_")
@@ -541,10 +546,11 @@ def file_sizes_the_same(file_1, file_2):
         return True
     else:
         print((INDENT_SMALL + "Sizes, file 1: ",
-              file_1, os.path.getsize(file_1)))
+               file_1, os.path.getsize(file_1)))
         print((INDENT_SMALL + "Sizes, file 2: ",
-              file_2, os.path.getsize(file_2)))
+               file_2, os.path.getsize(file_2)))
         return False
+
 
 # -------  TASKS  --------------------------------------------------------------------------
 # -------  TASKS  --------------------------------------------------------------------------
@@ -564,10 +570,9 @@ def create_folders_subfolder(folder, subfolder):
 @print_current_task_name_decorator
 @display_timing
 def create_missing_folders(all_folders, missing_folders):
-
     if len(missing_folders) == len(all_folders):
         print((NEWLINE_AND_INDENT_1_TAB +
-              "[ WARNING ] None of the required folders is present.\n"))
+               "[ WARNING ] None of the required folders is present.\n"))
         print((INDENT_SMALL + "The root folder path is:       " + ROOT_FOLDER_PATH))
         print((INDENT_SMALL + "Current working directory is:  " + os.getcwd()))
         # currently disabled:
@@ -615,7 +620,6 @@ def create_problematic_folders():
 @print_current_task_name_decorator
 @display_timing
 def _TASK_verify_if_folders_exist(all_folders):
-
     missing_folder_count = 0
     missing_folders = []
     for folder_name in all_folders:
@@ -654,7 +658,7 @@ def _TASK_move_old_exif_files():
             )
         except:
             print((
-                INDENT_SMALL + "Problem when moving PRE-EXISTING EXIF files (2 files of the same sizes?)"))
+                    INDENT_SMALL + "Problem when moving PRE-EXISTING EXIF files (2 files of the same sizes?)"))
 
 
 @print_current_task_name_decorator
@@ -713,7 +717,7 @@ def _TASK_generate_exif_files():
         print((NEWLINE_AND_INDENT_1_TAB + "Some exiftool error happened!\n"))
         with open(PATH_TO_REPORT, "w") as report_file:
             print((NEWLINE_AND_INDENT_1_TAB + "Report:" +
-                  TWO_NEWLINES + report_file.read()))
+                   TWO_NEWLINES + report_file.read()))
         raise ValueError(NEWLINE_AND_INDENT_1_TAB +
                          "Some exiftool error happened!\n" + str(exiftool_output))
 
@@ -740,7 +744,7 @@ def _TASK_collect_info_from_EXIF_files():
             # these special RAW files should be manually procesed, but shouldn't stay here,
             # they should be moved to their dedicated folders and stay there
             print((
-                INDENT_SMALL + "Exif file belonging to special RAW    NOT   ignored (OK) - (check this logic)"))
+                    INDENT_SMALL + "Exif file belonging to special RAW    NOT   ignored (OK) - (check this logic)"))
             print(image_file_name)
             # continue
         # TODO: add handling for video files
@@ -752,7 +756,7 @@ def _TASK_collect_info_from_EXIF_files():
         if not os.path.exists(exif_file_name):
             # TIP: there could be file extension in exif file name!
             print((Colorise.red(INDENT_SMALL + "WARNING: EXIF was probably already moved! (") +
-                  image_file_name + " > " + os.path.basename(exif_file_name) + Colorise.red("),")))
+                   image_file_name + " > " + os.path.basename(exif_file_name) + Colorise.red("),")))
             continue
 
             # output:
@@ -815,10 +819,10 @@ def get_file_name(img_data, raw_marker):
     file_name = \
         img_data['image_datetime'] + "__" + \
         raw_marker + \
-        img_data['aperture'] + "__" + \
+        img_data.get('aperture', 'fNA') + "__" + \
         img_data['exposure_time'] + "__" + \
-        img_data['focal_length'] + "__" + \
-        img_data['iso'] + "__" + \
+        img_data.get('focal_length', 'LNA') + "__" + \
+        img_data.get('iso', 'INA') + "__" + \
         img_data['camera_symbol']
     return file_name
 
@@ -845,7 +849,7 @@ def _TASK_rename_and_move_images_and_EXIF_files():
                                 "DUPLICATE IMG - THIS SHOULDN'T HAVE HAPPENED")))
             print((INDENT_SMALL + "  source_img_path: " + source_img_path))
             print((INDENT_SMALL + "  destination_img_path: " +
-                  full_path_of(destination_img_path)))
+                   full_path_of(destination_img_path)))
         # now renaming EXIFs. they have original file extension as part of the file name
         try:
             os.rename(
@@ -859,7 +863,7 @@ def _TASK_rename_and_move_images_and_EXIF_files():
             print((INDENT_SMALL + "  source_exif_path: " + full_path_of(FOLDER_UNSORTED,
                                                                         original_file_name + original_file_ext + EXIF_EXTENSION)))
             print((INDENT_SMALL + "  destination_exif_path: " +
-                  full_path_of(destination_exif_path)))
+                   full_path_of(destination_exif_path)))
 
 
 @print_current_task_name_decorator
@@ -867,7 +871,7 @@ def _TASK_rename_and_move_images_and_EXIF_files():
 def _TASK_process_RAWs():
     if len(os.listdir(full_path_of(FOLDER_CR2_CONV))):
         print((INDENT_SMALL +
-              "FOLDER_CR2_CONV - non-empty, will launch dpviewer converter"))
+               "FOLDER_CR2_CONV - non-empty, will launch dpviewer converter"))
         print((os.listdir(full_path_of(FOLDER_CR2_CONV))))
         _TASK_launch_dpviewer()
     if len(os.listdir(full_path_of(FOLDER_CRW_CONV))):
@@ -988,7 +992,7 @@ def move_file_to_destination(created_folders, image_file_name, file_type_name, s
 def move_duplicate_file(image_file_name, file_type):
     global problematic_files_counter
     print((INDENT_SMALL + " Problem when sorting/moving PRE-EXISTING " +
-          file_type + " file (will move): " + image_file_name[1]))
+           file_type + " file (will move): " + image_file_name[1]))
     try:
         os.rename(
             image_file_name[0],
@@ -999,6 +1003,7 @@ def move_duplicate_file(image_file_name, file_type):
     except:
         print((Colorise.red(INDENT_2_TABS + "ERROR! File: ") + image_file_name[0] + Colorise.red(
             " already exists in PROBLEMATIC/DUPLICATE folder: " + DUPLICATE_FILE_NAMES_subfolder_full_path)))
+
 
 # @print_current_task_name_decorator
 # @display_timing
@@ -1011,10 +1016,10 @@ def move_duplicate_file(image_file_name, file_type):
 def _TASK_show_stats():
     if moved_old_exif_counter > 0:
         print((NEWLINE_AND_INDENT_1_TAB + "(Re)moved " +
-              str(moved_old_exif_counter) + " old EXIF files"))
+               str(moved_old_exif_counter) + " old EXIF files"))
     if problematic_files_counter > 0:
         print((NEWLINE_AND_INDENT_1_TAB +
-              str(problematic_files_counter) + " problematic files"))
+               str(problematic_files_counter) + " problematic files"))
         redate_problematic_folder()
         redate_problematic_folder(False)
     if (fail_counter == duplicate_counter == 0):
@@ -1039,14 +1044,14 @@ def redate_problematic_folder(should_delete=True):
 def show_issues_info():
     if fail_counter > 0:
         print((INDENT_SMALL + str(fail_counter) +
-              " problems with " + "some files"))
+               " problems with " + "some files"))
     if info_extraction_critical_fail_counter > 0:
         print((INDENT_SMALL + str(info_extraction_critical_fail_counter) +
-              " CRITICAL problems with " + "some files"))
+               " CRITICAL problems with " + "some files"))
         print((INDENT_SMALL + "Files moved to 'PROBLEMATIC' folder"))
     if duplicate_counter > 0:
         print((NEWLINE_AND_INDENT_1_TAB + "Found " +
-              str(duplicate_counter) + " same-size files!"))
+               str(duplicate_counter) + " same-size files!"))
 
 
 def display_extra_messages():
@@ -1072,7 +1077,7 @@ def display_total_time(processing_start_time, all_files_count):
                            "Total processing time: ") + "%d:%02d:%02d" % (h, m, s)))
     if all_files_count:
         print((Colorise.yellow(INDENT_2_TABS + "Time per photo: ") +
-              str(round(processing_duration / all_files_count, 2)) + " s"))
+               str(round(processing_duration / all_files_count, 2)) + " s"))
     print((Colorise.yellow(INDENT_2_TABS +
                            "All files (photos + other): ") + str(all_files_count)))
 
@@ -1129,6 +1134,7 @@ def main():
     tada()
 
     print(" -----------------------------------------------------------------------------------------")
+
 
 # -----------------------------------------------------------------------------------------
 # :::::::  OLD COMMENTS  :::::::
