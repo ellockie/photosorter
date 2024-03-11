@@ -235,9 +235,14 @@ def extract_data_from_EXIF_file_and_rename_original_image(exif_file_handler, ima
         img, fail_counter, info_extraction_critical_fail_counter)
 
     # move file if problematic (new errors)
-    if info_extraction_critical_fail_counter > previous_critical_fail_counter:
-        move_image_to_problematic_folder(image_name, img_ext, img_name, missing_parts)
-        return False
+    if (info_extraction_critical_fail_counter > previous_critical_fail_counter):
+        if img_ext == '.MPO':
+            pass
+        if img_ext == '.JPG' and camera_symbol == "N3DS":
+            pass
+        else:
+            move_image_to_problematic_folder(image_name, img_ext, img_name, missing_parts)
+            return False
 
     # process image date_time, apply timezone correction if necessary
     # image_date_time = convert_to_date_time(unformatted_image_datetime, True)
