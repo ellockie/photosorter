@@ -13,6 +13,7 @@ import dateutil.parser  # import parse as dateutil_parser
 # local imports
 from colorise import Colorise
 from photosorter_cfg import *
+import photo_mover_from_ready
 
 print("\n Python executable used:  {}".format(sys.executable))
 print(" Current python version:  {}\n".format(sys.version))
@@ -1005,10 +1006,10 @@ def move_duplicate_file(image_file_name, file_type):
             " already exists in PROBLEMATIC/DUPLICATE folder: " + DUPLICATE_FILE_NAMES_subfolder_full_path)))
 
 
-# @print_current_task_name_decorator
-# @display_timing
-# def _TASK_sort_the_results():
-#     return
+@print_current_task_name_decorator
+@display_timing
+def _TASK_sort_the_results():
+    photo_mover_from_ready.main()
 
 
 @print_current_task_name_decorator
@@ -1126,7 +1127,7 @@ def main():
     _TASK_rename_and_move_images_and_EXIF_files()
     _TASK_process_RAWs()
     _TASK_move_the_results()
-    # _TASK_sort_the_results()  # empty
+    _TASK_sort_the_results()
     _TASK_show_stats()
 
     display_total_time(processing_start_time, all_files_count)
