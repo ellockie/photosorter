@@ -13,7 +13,8 @@ import dateutil.parser  # import parse as dateutil_parser
 # local imports
 from colorise import Colorise
 from photosorter_cfg import *
-import photo_mover_from_ready
+from folder_sorter import folder_sorter
+
 
 print("\n Python executable used:  {}".format(sys.executable))
 print(" Current python version:  {}\n".format(sys.version))
@@ -1009,7 +1010,7 @@ def move_duplicate_file(image_file_name, file_type):
 @print_current_task_name_decorator
 @display_timing
 def _TASK_sort_the_results():
-    photo_mover_from_ready.main()
+    folder_sorter()
 
 
 @print_current_task_name_decorator

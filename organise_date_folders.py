@@ -5,7 +5,7 @@ from distutils.dir_util import mkpath
 
 from colorise import Colorise
 from photo__config import READY_PHOTOS_SOURCE_FOLDER_FULL_PATH, PHOTO_BASE_FOLDER, MONTH_FOLDERS, FOLDER_ORGANISER_WORKING_FOLDER
-from photo_mover_from_ready import ReadyPhotosFolderMover
+# from folder_sorter import ReadyPhotosFolderMover
 from photo_sorter import create_folders_subfolder
 
 

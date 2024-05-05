@@ -176,7 +176,7 @@ class ReadyPhotosFolderMover(object):
         print(("  Problematic: " + str(self.problematic_folders)))
 
 
-def main():
+def folder_sorter():
     src_path = READY_PHOTOS_SOURCE_FOLDER_FULL_PATH
     # src_path = "\\\\MMHH_Serv_1/PHOTO_BACKUP_2/SORTING_TEST"
     # src_path = "\\\\MMHH_Serv_1/PHOTO_BACKUP_2/__PHOTOS__SOURCE/__UNSORTED"
@@ -200,7 +200,7 @@ def main():
         print("\n Quit\n")
         exit(0)
 
-    print("\n ======= Parsing: =======\n")
+    print("\n =======  Folders to move:  =======\n")
     folder_mover = ReadyPhotosFolderMover(
         source_folder=src_path, destination_base_folder=dest_base_folder)
     folder_mover.get_subfolders()
@@ -224,4 +224,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    folder_sorter()
