@@ -30,7 +30,7 @@ class ReadyPhotosFolderMover(object):
             if not match:
                 match_year_folder = re.search(r'^(\d{4})$', folder_name)
                 if not match_year_folder:
-                    print("    WRONG FOLDER NAME: " + folder_name)
+                    print("    Ignored folder: " + folder_name)
                     self.problematic_folders += 1
                 continue
             year = match.group(1)
@@ -52,8 +52,7 @@ class ReadyPhotosFolderMover(object):
                     "source_path": source_path,
                     "destination_path": destination_path,
                 })
-            print((str(source_path) + "   >> " + marker +
-                   " >>   " + str(destination_path)))
+            print(f"  — {str(source_path)}   >> {marker} >>   {str(destination_path)}")
 
     def get_sub_subfolder_counts(self):
         for photo_folder in self.all_folders:
