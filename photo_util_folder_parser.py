@@ -1,6 +1,6 @@
 import os
 
-from photosorter_cfg import SUBFOLDER_NAMES, PHOTO_SELECTION_COPIER
+from constants import SUBFOLDER_NAMES, PHOTO_SELECTION_COPIER
 
 
 class FolderParser(object):

@@ -13,7 +13,7 @@ import dateutil.parser  # import parse as dateutil_parser
 from colorise import Colorise
 
 # local imports
-from photosorter_cfg import *
+from constants import *
 from move_other_images import move_other_images
 from folder_sorter import folder_sorter
 from colorise import Colorise

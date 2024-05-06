@@ -4,7 +4,7 @@ from fnmatch import filter
 from os.path import normpath
 from shutil import copytree  # from distutils.dir_util import copy_tree
 
-from photosorter_cfg import PHOTO_SELECTION_COPIER, PHOTO_BASE_FOLDER
+from constants import PHOTO_SELECTION_COPIER, PHOTO_BASE_FOLDER
 
 
 class FolderCopier(object):

@@ -1,5 +1,5 @@
 import os
-from photosorter_cfg import FOLDER_READY, FOLDER_TO_BE_SORTED_FULL_PATH
+from constants import FOLDER_READY, FOLDER_TO_BE_SORTED_FULL_PATH
 
 root_folder_path = os.path.join(
     FOLDER_TO_BE_SORTED_FULL_PATH, "__READY", "2018-05-19_(Sat) - 1. ######")

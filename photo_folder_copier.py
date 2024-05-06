@@ -1,4 +1,4 @@
-from photosorter_cfg import PHOTO_SELECTION_COPIER
+from constants import PHOTO_SELECTION_COPIER
 from photo_util_folder_copier import FolderCopier
 from photo_util_folder_parser import FolderParser
 
