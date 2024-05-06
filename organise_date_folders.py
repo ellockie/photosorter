@@ -1,10 +1,6 @@
 import os
-import shutil
-import winsound
-from distutils.dir_util import mkpath
 
-from colorise import Colorise
-from constants import READY_PHOTOS_SOURCE_FOLDER_FULL_PATH, PHOTO_BASE_FOLDER, MONTH_FOLDERS, FOLDER_ORGANISER_WORKING_FOLDER
+from src.constants.constants import READY_PHOTOS_SOURCE_FOLDER_FULL_PATH, PHOTO_BASE_FOLDER, MONTH_FOLDERS, FOLDER_ORGANISER_WORKING_FOLDER
 # from folder_sorter import ReadyPhotosFolderMover
 from main import create_folders_subfolder
 

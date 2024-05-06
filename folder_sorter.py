@@ -4,8 +4,8 @@ import shutil
 import winsound
 import pandas as pd
 
-from colorise import Colorise
-from constants import READY_PHOTOS_SOURCE_FOLDER_FULL_PATH, PHOTO_BASE_FOLDER, MONTH_FOLDERS
+from src.utils.colorise import Colorise
+from src.constants.constants import READY_PHOTOS_SOURCE_FOLDER_FULL_PATH, PHOTO_BASE_FOLDER, MONTH_FOLDERS
 
 
 class ReadyPhotosFolderMover(object):

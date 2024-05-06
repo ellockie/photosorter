@@ -9,13 +9,12 @@ import inspect
 import ntpath
 import subprocess
 import dateutil.parser  # import parse as dateutil_parser
-from colorise import Colorise
 
 # local imports
-from constants import *
+from src.constants.constants import *
 from move_other_images import move_other_images
 from folder_sorter import folder_sorter
-from colorise import Colorise
+from src.utils.colorise import Colorise
 
 
 print("\n Python executable used:  {}".format(sys.executable))

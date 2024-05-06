@@ -1,6 +1,6 @@
 import os
 
-from constants import SUBFOLDER_NAMES, PHOTO_SELECTION_COPIER
+from src.constants.constants import SUBFOLDER_NAMES, PHOTO_SELECTION_COPIER
 
 
 class FolderParser(object):

@@ -8,7 +8,7 @@ print("\n  ( Install correct exiftool wrapper via:  pip install git+https://gith
 # https://github.com/smarnach/pyexiftool
 import exiftool
 
-from constants import CAMERA_UPLOADS_PATH, SUBROUTINE_LOG_INDENTATION
+from src.constants.constants import CAMERA_UPLOADS_PATH, SUBROUTINE_LOG_INDENTATION
 
 print("\n Python executable used:  {}".format(sys.executable))
 print(" Current python version:  {}\n".format(sys.version))
