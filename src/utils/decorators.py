@@ -30,7 +30,7 @@ def print_function_name(raw_stack_name, task_counter):
 
 def verify_if_function_is_a_task(raw_stack_name):
     if not "_TASK_" in raw_stack_name:
-        error_message = f"Error: function name does not contain '_TASK_': {raw_stack_name} - remove 'print_function_name' decorator."
+        error_message = f"Error: function name does not contain the '_TASK_' substring: {raw_stack_name} - remove 'print_function_name' decorator."
         print((Colorise.red(error_message)))
         exit(1)
 

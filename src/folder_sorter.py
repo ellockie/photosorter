@@ -52,7 +52,7 @@ class ReadyPhotosFolderMover(object):
                     "source_path": source_path,
                     "destination_path": destination_path,
                 })
-            print(f"  — {str(source_path)}   >> {marker} >>   {str(destination_path)}")
+            print(f"    — {str(source_path)}   >>   {marker}   >>   {str(destination_path)}")
 
     def get_sub_subfolder_counts(self):
         for photo_folder in self.all_folders:
