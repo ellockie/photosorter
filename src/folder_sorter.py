@@ -4,8 +4,8 @@ import shutil
 import winsound
 import pandas as pd
 
-from src.utils.colorise import Colorise
-from src.constants.constants import READY_PHOTOS_SOURCE_FOLDER_FULL_PATH, PHOTO_BASE_FOLDER, MONTH_FOLDERS
+from utils.colorise import Colorise
+from constants.constants import READY_PHOTOS_SOURCE_FOLDER_FULL_PATH, PHOTO_BASE_FOLDER, MONTH_FOLDERS
 
 
 class ReadyPhotosFolderMover(object):
@@ -154,11 +154,11 @@ class ReadyPhotosFolderMover(object):
         source_file_path = os.path.join(root, file)
         dest_file_path = source_file_path.replace(
             source_path, destination_path)
-        print(("\n source_file_path: " + source_file_path))
-        print(("   dest_file_path: " + dest_file_path))
+        print(("\n source_file_path:  " + source_file_path))
+        print(("   dest_file_path:  " + dest_file_path))
         # dest_file_path = os.path.join(destination_path, file)
         if os.path.isfile(dest_file_path):
-            print("     exists ")
+            print("     Already exists!")
         else:
             self.move_file_safely(dest_file_path, source_file_path)
 

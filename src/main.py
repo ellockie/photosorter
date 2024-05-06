@@ -11,10 +11,10 @@ import subprocess
 import dateutil.parser  # import parse as dateutil_parser
 
 # local imports
-from src.constants.constants import *
+from constants.constants import *
 from move_other_images import move_other_images
 from folder_sorter import folder_sorter
-from src.utils.colorise import Colorise
+from utils.colorise import Colorise
 
 
 print("\n Python executable used:  {}".format(sys.executable))

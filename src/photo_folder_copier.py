@@ -1,4 +1,4 @@
-from src.constants.constants import PHOTO_SELECTION_COPIER
+from constants.constants import PHOTO_SELECTION_COPIER
 from photo_util_folder_copier import FolderCopier
 from photo_util_folder_parser import FolderParser
 

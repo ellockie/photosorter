@@ -1,5 +1,5 @@
 # from organise_date_folders import process_date
-import organise_date_folders as odf
+from src import organise_date_folders as odf
 import pytest
 
 
