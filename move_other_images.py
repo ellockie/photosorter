@@ -1,93 +1,93 @@
+import ntpath
 import shutil
-from os.path import isfile, join
+from os.path import isfile, join, normpath
 from os import listdir
 import sys
+
 print("\n  ( Install correct exiftool wrapper via:  pip install git+https://github.com/smarnach/pyexiftool )")
 # https://github.com/smarnach/pyexiftool
 import exiftool
 
+from photosorter_cfg import CAMERA_UPLOADS_PATH, SUBROUTINE_LOG_INDENTATION
 
 print("\n Python executable used:  {}".format(sys.executable))
 print(" Current python version:  {}\n".format(sys.version))
 assert sys.version.startswith("3."), "Error: Python 3 is required!"
 
-mypath = '..'
 MY_CAMERA_MODELS = ["SM-G965F", "SM-S9080"]
 OTHER_IMAGES_FOLDER = "_Other images"
 OTHER_FILES_FOLDER = "_Other files"
 NOT_MOVEABLE_FILE = 'desktop.ini'
 
 counter = {
-    "MY_IMAGES": 0,
+    "PHOTOS": 0,
     "OTHER_IMAGES": 0,
     "OTHER_FILES": 0,
 }
 
 
-def get_jpgs():
-    my_jpgs = ["../" + f for f in listdir(mypath) if isfile(
-        join(mypath, f)) and f.endswith(".jpg")]
-    print(("jpgs: " + str(len(my_jpgs))))
+def get_jpgs(src_path):
+    my_jpgs = [join(src_path, f) for f in listdir(src_path) if isfile(
+        join(src_path, f)) and f.endswith(".jpg")]
     return my_jpgs
 
 
-def get_other_files():
-    other_files = ["../" + f for f in listdir(mypath) if isfile(
-        join(mypath, f)) and not f.endswith(".jpg") and not f.endswith(".mp4")]
-    print(("other files: " + str(len(other_files))))
+def get_other_files(src_path):
+    other_files = [join(src_path, f) for f in listdir(src_path) if isfile(
+        join(src_path, f)) and not f.endswith(".jpg") and not f.endswith(".mp4") and not f.endswith("desktop.ini")]
     return other_files
 
 
-def process_jpgs(files):
+def get_filename_from_path(path):
+    return ntpath.basename(path)
+
+
+def process_jpgs(files, src_path):
+    if len(files) == 0:
+        return
     with exiftool.ExifTool() as et:
         metadata = et.get_metadata_batch(files)
     for d in metadata:
         if "EXIF:Model" in list(d.keys()) and d["EXIF:Model"] in MY_CAMERA_MODELS:
-            # msg = "============== own image =============="
-            counter["MY_IMAGES"] += 1
+            counter["PHOTOS"] += 1
         else:
-            msg = ":::::::::::: moving 'other' image: {} :::::::::::::::::".format(
-                d["SourceFile"])
-            shutil.move(d["SourceFile"], d["SourceFile"]
-                        [:3] + '/' + OTHER_IMAGES_FOLDER + '/' + d["SourceFile"][3:])
+            msg = f":::::::::::: moving 'other' image:   {d['SourceFile']}   :::::::::::::::::"
+            print(msg)
+            dest = join(src_path, OTHER_IMAGES_FOLDER, get_filename_from_path(d["SourceFile"]))
+            shutil.move(d["SourceFile"], dest)
             counter["OTHER_IMAGES"] += 1
-            print(("{} {}".format(msg, d["SourceFile"])))
-        # print(("{:40.40} {:40.40}".format(msg, d["SourceFile"])))
 
 
-def process_other_files(files):
-    for f in files:
-        if NOT_MOVEABLE_FILE in f:
+def process_other_files(files, src_path):
+    for src_file_path in files:
+        if NOT_MOVEABLE_FILE in src_file_path:
             continue
         msg = "[[[[[[[[[[[::::::::::::]]]]]]]]]]] Moving 'other' file: {}  [[[[[[[[[[[::::::::::::]]]]]]]]]]]"
         try:
-            shutil.move(f, f[:3] + '/' + OTHER_FILES_FOLDER + '/' + f[3:])
-            print((msg.format(f)))
+            dest = join(src_path, OTHER_FILES_FOLDER, get_filename_from_path(src_file_path))
+            print(dest)
+            shutil.move(src_file_path, dest)
             counter["OTHER_FILES"] += 1
         except Exception as e:
-            print(("Could not move file: {}".format(f)))
-            print("Error:")
-            print("============")
-            print(e)
-            print("============")
-        # print("{:50.50} {:40.40}".format(msg, f))
+            print(("Could not move file: {}".format(src_file_path)))
+            print(f"Error:\n============\n  {e}\n============")
 
 
-def display_stats(jpg_files, other_files):
-    print(("\n\tThere were {} JPG files and {} 'other' files.".format(
-        len(jpg_files), len(other_files))))
-
-    print("\n\t   MY_IMAGES:  {}".format(counter["MY_IMAGES"]))
-    print("\tOTHER_IMAGES:  {}".format(counter["OTHER_IMAGES"]))
-    print("\t OTHER_FILES:  {}".format(counter["OTHER_FILES"]))
+def display_stats():
+    print(f"{SUBROUTINE_LOG_INDENTATION}Files found in the uploads folder:")
+    print(f"{SUBROUTINE_LOG_INDENTATION}                           PHOTOS:  {counter['PHOTOS']}")
+    print(f"{SUBROUTINE_LOG_INDENTATION}                     OTHER_IMAGES:  {counter['OTHER_IMAGES']}")
+    print(f"{SUBROUTINE_LOG_INDENTATION}                      OTHER_FILES:  {counter['OTHER_FILES']}")
 
 
 def move_other_images():
-    jpg_files = get_jpgs()
-    process_jpgs(jpg_files)
-    other_files = get_other_files()
-    process_other_files(other_files)
-    display_stats(jpg_files, other_files)
+    src_path = CAMERA_UPLOADS_PATH
+    src_path = normpath(src_path)
+    jpg_files = get_jpgs(src_path)
+    process_jpgs(jpg_files, src_path)
+    other_files = get_other_files(src_path)
+    process_other_files(other_files, src_path)
+    display_stats()
 
 
 if __name__ == "__main__":

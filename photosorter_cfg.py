@@ -11,17 +11,16 @@ assert "PHOTO_BASE_FOLDER" in os.environ \
 # path_to_exiftool_script = "_exiftool.bat"
 EXIFTOOL_NAME = "exiftool"
 
-PATH_TO_IRFANVIEW = r"c:\_[SOFT] - Grafika\__Browsers, Viewers\IrfanView\i_view32.exe"
-PATH_TO_DPVIEWER = r"c:\Program Files (x86)\Canon\Digital Photo Professional\DPPViewer.exe"
-# PATH_TO_SONY_CONVERTER = r"f:\_[SOFT] - Grafika\__Cameras\Sony\Viewer.exe"
-# PATH_TO_SONY_CONVERTER = r"C:\Program Files\Sony\Imaging Edge\Viewer.exe"
-PATH_TO_SONY_CONVERTER = r"c:\Program Files\Sony\Imaging Edge Desktop\ied.exe"
+PATH_TO_IRFANVIEW = os.path.normpath(r"c:\_[SOFT] - Grafika\__Browsers, Viewers\IrfanView\i_view32.exe")
+PATH_TO_DPVIEWER = os.path.normpath(r"c:\Program Files (x86)\Canon\Digital Photo Professional\DPPViewer.exe")
+PATH_TO_SONY_CONVERTER = os.path.normpath(r"c:\Program Files\Sony\Imaging Edge Desktop\ied.exe")
 TESTING_MODE = False
 
 # folder names
 PHOTO_BASE_FOLDER = os.environ['PHOTO_BASE_FOLDER']
 
 # global ROOT_FOLDER_PATH
+CAMERA_UPLOADS_PATH = os.path.normpath('c:/Users/luxxa/Dropbox/Camera Uploads')
 FOLDER_TO_BE_SORTED = "____TO_SORT"
 FOLDER_TO_BE_SORTED_FULL_PATH = join(PHOTO_BASE_FOLDER, FOLDER_TO_BE_SORTED)
 ROOT_FOLDER_PATH = FOLDER_TO_BE_SORTED_FULL_PATH
@@ -304,3 +303,4 @@ INDENT_2_TABS = "\t\t"
 NEWLINE_AND_INDENT_1_TAB = "\n\t"
 NEWLINE_AND_INDENT_2_TABS = "\n\t\t"
 TWO_NEWLINES = "\n\n"
+SUBROUTINE_LOG_INDENTATION = " " * 20

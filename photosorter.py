@@ -3,17 +3,20 @@ import os
 import sys
 import time
 import winsound
+import re
 
 import fnmatch
 import inspect
 import ntpath
 import subprocess
 import dateutil.parser  # import parse as dateutil_parser
+from colorise import Colorise
 
 # local imports
-from colorise import Colorise
 from photosorter_cfg import *
+from move_other_images import move_other_images
 from folder_sorter import folder_sorter
+from colorise import Colorise
 
 
 print("\n Python executable used:  {}".format(sys.executable))
@@ -56,17 +59,25 @@ def print_current_task_name_decorator(fn):
         print_function_name(inspect.stack()[1][4][0], task_counter)
         result = fn(*args, **kwargs)
         return result
-
     return wrapper
 
 
 def print_function_name(raw_stack_name, task_counter):
+    verify_if_function_is_a_task(raw_stack_name)
     fn_name = raw_stack_name.replace('_TASK_', '').strip()
     fn_name = fn_name.split(" = ")[1] if " = " in fn_name else fn_name
     fn_name = fn_name.replace('_', ' ')
-    fn_name = fn_name.replace('()', ' ')
-    fn_name = " TASK " + str(task_counter) + ":\t" + fn_name
-    print((Colorise.green(fn_name)))
+    fn_name = re.sub(r'\([^()]*\)', '', fn_name)
+    fn_name = fn_name[0].upper() + fn_name[1:]
+    fn_name = fn_name.ljust(38, ' ')  # Fill the string with "_" characters
+    fn_name2 = f"########  TASK {str(task_counter).rjust(2, ' ')}:  {fn_name}  ######################################################################"
+    print((Colorise.green(fn_name2)))
+
+def verify_if_function_is_a_task(raw_stack_name):
+    if not "_TASK_" in raw_stack_name:
+        error_message = f"Error: function name does not contain '_TASK_': {raw_stack_name} - remove 'print_function_name' decorator."
+        print((Colorise.red(error_message)))
+        exit(1)
 
 
 def display_timing(fn):
@@ -77,7 +88,7 @@ def display_timing(fn):
         result = fn(*args, **kwargs)
         t_diff = time.time() - t
         if t_diff >= 0.01:
-            print((Colorise.yellow(INDENT_2_TABS + "Execution time: ") +
+            print((Colorise.yellow(INDENT_2_TABS + "    Execution time: ") +
                    str(round(t_diff, 2)) + Colorise.yellow(" s")))
         return result
 
@@ -558,8 +569,6 @@ def file_sizes_the_same(file_1, file_2):
 # -------  TASKS  --------------------------------------------------------------------------
 # -------  TASKS  --------------------------------------------------------------------------
 
-# @print_current_task_name_decorator
-
 
 @display_timing
 def create_folders_subfolder(folder, subfolder):
@@ -603,7 +612,6 @@ def ask_different_root_folder():
             quit()
 
 
-@print_current_task_name_decorator
 @display_timing
 def create_problematic_folders():
     global ROOT_FOLDER_PATH, UNSUP_EXT_subfolder_full_path, EMPTY_FILES_subfolder_full_path, \
@@ -635,6 +643,26 @@ def _TASK_verify_if_folders_exist(all_folders):
     if missing_folder_count:
         create_missing_folders(all_folders, missing_folders)
     create_problematic_folders()
+
+
+@print_current_task_name_decorator
+@display_timing
+def _TASK_move_other_images():
+    move_other_images()
+
+
+@print_current_task_name_decorator
+@display_timing
+def _TASK_get_photos_from_uploads_folder():
+    src_path = CAMERA_UPLOADS_PATH
+    uploaded_images = [join(src_path, f) for f in os.listdir(src_path) if os.path.isfile(
+        join(src_path, f)) and f.endswith(".jpg")]
+    if len(uploaded_images) == 0:
+        print(f"{SUBROUTINE_LOG_INDENTATION}No images or photos were found in the uploads folder.")
+        return
+    print(f"{SUBROUTINE_LOG_INDENTATION}Moving {len(uploaded_images)} images / videos found in the uploads folder")
+    for img in uploaded_images:
+        os.rename(img, join(FOLDER_UNSORTED_FULL_PATH, ntpath.basename(img)))
 
 
 @print_current_task_name_decorator
@@ -1075,13 +1103,13 @@ def display_total_time(processing_start_time, all_files_count):
     processing_duration = time.time() - processing_start_time
     m, s = divmod(processing_duration, 60)
     h, m = divmod(m, 60)
-    print((Colorise.yellow(NEWLINE_AND_INDENT_2_TABS +
-                           "Total processing time: ") + "%d:%02d:%02d" % (h, m, s)))
+    print(Colorise.yellow(NEWLINE_AND_INDENT_2_TABS +
+                           "Total processing time: ") + "%d:%02d:%02d" % (h, m, s))
     if all_files_count:
         print((Colorise.yellow(INDENT_2_TABS + "Time per photo: ") +
                str(round(processing_duration / all_files_count, 2)) + " s"))
-    print((Colorise.yellow(INDENT_2_TABS +
-                           "All files (photos + other): ") + str(all_files_count)))
+    print(Colorise.yellow(INDENT_2_TABS +
+                           "All files (photos + other): ") + str(all_files_count))
 
 
 def tada():
@@ -1107,17 +1135,23 @@ def ask_if_generate_exifs():
             return False
 
 
+def print_header_footer():
+    str = "#" * 130
+    print(Colorise.green(str))
+
+
 def main():
+    print_header_footer()
     processing_start_time = time.time()
+    _TASK_move_other_images()
+    _TASK_get_photos_from_uploads_folder()
     _TASK_verify_if_folders_exist(FOLDERS_ALL)
     all_files_count = get_all_files_count()
 
-    print(" -----------------------------------------------------------------------------------------")
     # print("Some tasks TEMPORARILY DISABLED, but should be ON!")
 
     generate_exifs = True
     # generate_exifs = ask_if_generate_exifs()
-    print("Will generate exifs")
     _TASK_remove_empty_image_files()
     if generate_exifs:
         _TASK_move_old_exif_files()
@@ -1135,7 +1169,7 @@ def main():
 
     tada()
 
-    print(" -----------------------------------------------------------------------------------------")
+    print_header_footer()
 
 
 # -----------------------------------------------------------------------------------------
