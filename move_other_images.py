@@ -75,9 +75,9 @@ def process_other_files(files, src_path):
 
 def display_stats():
     print(f"{SUBROUTINE_LOG_INDENTATION}Files found in the uploads folder:")
-    print(f"{SUBROUTINE_LOG_INDENTATION}                           PHOTOS:  {counter['PHOTOS']}")
-    print(f"{SUBROUTINE_LOG_INDENTATION}                     OTHER_IMAGES:  {counter['OTHER_IMAGES']}")
-    print(f"{SUBROUTINE_LOG_INDENTATION}                      OTHER_FILES:  {counter['OTHER_FILES']}")
+    print(f"{SUBROUTINE_LOG_INDENTATION}                           Photos:  {counter['PHOTOS']}")
+    print(f"{SUBROUTINE_LOG_INDENTATION}                     Other images:  {counter['OTHER_IMAGES']}")
+    print(f"{SUBROUTINE_LOG_INDENTATION}                      Other files:  {counter['OTHER_FILES']}")
 
 
 def move_other_images():
