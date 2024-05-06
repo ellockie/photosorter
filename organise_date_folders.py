@@ -4,9 +4,9 @@ import winsound
 from distutils.dir_util import mkpath
 
 from colorise import Colorise
-from photo__config import READY_PHOTOS_SOURCE_FOLDER_FULL_PATH, PHOTO_BASE_FOLDER, MONTH_FOLDERS, FOLDER_ORGANISER_WORKING_FOLDER
+from constants import READY_PHOTOS_SOURCE_FOLDER_FULL_PATH, PHOTO_BASE_FOLDER, MONTH_FOLDERS, FOLDER_ORGANISER_WORKING_FOLDER
 # from folder_sorter import ReadyPhotosFolderMover
-from photo_sorter import create_folders_subfolder
+from main import create_folders_subfolder
 
 
 WORKING_FOLDER = "___WORKING_FOLDER"
@@ -45,16 +45,17 @@ def main():
     matching_ready_folders = get_matching_folders(parent_folder_path)
     create_folders_subfolder()
     for folder in matching_ready_folders:
-        print folder, FOLDER_ORGANISER_WORKING_FOLDER
-
-        # TODO: check if it should be inversed
-        if not os.path.isdir(destination_path):
-            marker = " folder "
-            self.folders_to_move.append({
-                "source_path": source_path,
-                "destination_path": destination_path,
-            })
-        else:
-            print FOLDER_ORGANISER_WORKING_FOLDER
+        print(folder, FOLDER_ORGANISER_WORKING_FOLDER)
+        print("Further code commented out")
+        continue
+        # # TODO: check if it should be inversed
+        # if not os.path.isdir(destination_path):
+        #     marker = " folder "
+        #     self.folders_to_move.append({
+        #         "source_path": source_path,
+        #         "destination_path": destination_path,
+        #     })
+        # else:
+        #     print FOLDER_ORGANISER_WORKING_FOLDER
 
 main()
