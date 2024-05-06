@@ -2,20 +2,21 @@ import datetime
 import sys
 import time
 import winsound
-import re
 
 import fnmatch
-import inspect
 import ntpath
 import subprocess
-import dateutil.parser  # import parse as dateutil_parser
+import dateutil.parser
+
+from common.globals import COUNTERS, file_info_array, FULL_PATH_SUBFOLDER, created_folders
 
 # local imports
 from constants.constants import *
+from constants.constants import crw_pattern, duplicate_str, COMMAND_LINE_OPTION_GENERATE_EXIFS
+from utils.decorators import print_current_task_name, display_timing
 from move_other_images import move_other_images
 from folder_sorter import folder_sorter
 from utils.colorise import Colorise
-
 
 print("\n Python executable used:  {}".format(sys.executable))
 print(" Current python version:  {}\n".format(sys.version))
@@ -25,72 +26,7 @@ assert sys.version.startswith("3."), "Error: Python 3 is required!"
 #  - generate-exifs:   generate exif files (without asking)
 
 
-# TODO: move these to config file
-pattern_name = "*.*"
-crw_pattern = "*.CRW"
-duplicate_str = "__DUPL"
-
-fail_counter = 0
-info_extraction_critical_fail_counter = 0
-duplicate_counter = 0
-orig_raw_counter = 0
-moved_old_exif_counter = 0
-problematic_files_counter = 0
-task_counter = 0
-
-file_info_array = []
-created_folders = []
-
-UNSUP_EXT_subfolder_full_path = None
-EMPTY_FILES_subfolder_full_path = None
-NOT_ENOUGH_INFO_subfolder_full_path = None
-DUPLICATE_FILE_NAMES_subfolder_full_path = None
-COMMAND_LINE_OPTION_GENERATE_EXIFS = "generate-exifs"
-
-
 # --------------   FUNCTIONS   -----------------
-
-def print_current_task_name_decorator(fn):
-    def wrapper(*args, **kwargs):
-        global task_counter
-        task_counter += 1
-        print_function_name(inspect.stack()[1][4][0], task_counter)
-        result = fn(*args, **kwargs)
-        return result
-    return wrapper
-
-
-def print_function_name(raw_stack_name, task_counter):
-    verify_if_function_is_a_task(raw_stack_name)
-    fn_name = raw_stack_name.replace('_TASK_', '').strip()
-    fn_name = fn_name.split(" = ")[1] if " = " in fn_name else fn_name
-    fn_name = fn_name.replace('_', ' ')
-    fn_name = re.sub(r'\([^()]*\)', '', fn_name)
-    fn_name = fn_name[0].upper() + fn_name[1:]
-    fn_name = fn_name.ljust(38, ' ')  # Fill the string with "_" characters
-    fn_name2 = f"########  TASK {str(task_counter).rjust(2, ' ')}:  {fn_name}  ######################################################################"
-    print((Colorise.green(fn_name2)))
-
-def verify_if_function_is_a_task(raw_stack_name):
-    if not "_TASK_" in raw_stack_name:
-        error_message = f"Error: function name does not contain '_TASK_': {raw_stack_name} - remove 'print_function_name' decorator."
-        print((Colorise.red(error_message)))
-        exit(1)
-
-
-def display_timing(fn):
-    """Outputs the time a function takes to execute."""
-
-    def wrapper(*args, **kwargs):
-        t = time.time()
-        result = fn(*args, **kwargs)
-        t_diff = time.time() - t
-        if t_diff >= 0.01:
-            print((Colorise.yellow(INDENT_2_TABS + "    Execution time: ") +
-                   str(round(t_diff, 2)) + Colorise.yellow(" s")))
-        return result
-
-    return wrapper
 
 
 def convert_CRW(file_name):
@@ -137,7 +73,6 @@ def get_lowercase_extension(filename):
 
 
 def yield_image_files_from_location(root, include_paths):
-    global problematic_files_counter
     for image_file in os.listdir(root):
         if os.path.isfile(os.path.join(root, image_file)):
             filename, file_extension = os.path.splitext(image_file)
@@ -159,9 +94,9 @@ def yield_image_files_from_location(root, include_paths):
                     os.rename(
                         full_path_of(FOLDER_UNSORTED, image_file),
                         full_path_of(FOLDER_PROBLEMATIC,
-                                     SUBFOLDER_UNSUP_EXT, filename + file_extension)
+                                     SUBFOLDER_UNSUPPORTED_EXT, filename + file_extension)
                     )
-                    problematic_files_counter += 1
+                    COUNTERS["PROBLEMATIC_FILES"] += 1
                 except:
                     print(
                         INDENT_VERY_SMALL + "  Problem when moving not supported extension files (duplicate already exists?)\n")
@@ -228,12 +163,10 @@ def reformat_focal_length(focal_length_string):
 
 
 def extract_data_from_EXIF_file_and_rename_original_image(exif_file_handler, image_name):
-    global file_info_array, fail_counter, info_extraction_critical_fail_counter
-
     camera_symbol = ""
     img = {}
     unformatted_image_datetime = ""
-    previous_critical_fail_counter = info_extraction_critical_fail_counter
+    previous_critical_fail_counter = COUNTERS["INFO_EXTRACTION_CRITICAL_FAILS"]
 
     img["orig_full_file_name"] = image_name
     img_name, img_ext = os.path.splitext(image_name)
@@ -246,12 +179,11 @@ def extract_data_from_EXIF_file_and_rename_original_image(exif_file_handler, ima
     #     print("ERROR extracting camera_symbol and unformatted_image_datetime. filename:")
     #     print(image_name)
     #     exit(1)
-    # assert isinstance(fail_counter, int)
-    missing_parts, fail_counter, info_extraction_critical_fail_counter = identify_missing_image_info(
-        img, fail_counter, info_extraction_critical_fail_counter)
+    # assert isinstance(COUNTERS["FAILS"], int)
+    missing_parts = identify_missing_image_info(img)
 
     # move file if problematic (new errors)
-    if (info_extraction_critical_fail_counter > previous_critical_fail_counter):
+    if (COUNTERS["INFO_EXTRACTION_CRITICAL_FAILS"] > previous_critical_fail_counter):
         if img_ext == '.MPO':
             pass
         if img_ext == '.JPG' and camera_symbol == "N3DS":
@@ -273,7 +205,6 @@ def extract_data_from_EXIF_file_and_rename_original_image(exif_file_handler, ima
 
 
 def move_image_to_problematic_folder(image_name, img_ext, img_name, missing_parts):
-    global problematic_files_counter
     print((Colorise.red(INDENT_SMALL + "*** PROBLEMATIC:  ") + Colorise.yellow(
         img_name) + img_ext + ",  missing: " + Colorise.yellow(", ".join(missing_parts)) +
            ".  (Need to mark the original photo too!)"))
@@ -287,10 +218,10 @@ def move_image_to_problematic_folder(image_name, img_ext, img_name, missing_part
     else:
         os.rename(
             full_path_of(FOLDER_UNSORTED, image_name),
-            os.path.join(NOT_ENOUGH_INFO_subfolder_full_path,
+            os.path.join(FULL_PATH_SUBFOLDER["NOT_ENOUGH_INFO"],
                          img_name + img_ext)
         )
-        problematic_files_counter += 1
+        COUNTERS["PROBLEMATIC_FILES"] += 1
 
 
 def get_target_folder_for_extension(image_name, img_ext):
@@ -312,40 +243,40 @@ def get_target_folder_for_extension(image_name, img_ext):
     return target_folder
 
 
-def identify_missing_image_info(img, fail_counter, info_extraction_critical_fail_counter):
+def identify_missing_image_info(img):
     """Some rescue operations"""
     missing_parts = []
     if "exposure_time" not in list(img.keys()):
         missing_parts.append("exposure_time")
         img["exposure_time"] = "T---"
-        fail_counter += 1
+        COUNTERS["FAILS"] += 1
     if "iso" not in list(img.keys()):
         missing_parts.append("iso")
         img["iso"] = "I---s"
-        fail_counter += 1
+        COUNTERS["FAILS"] += 1
     if "aperture" not in list(img.keys()):
         missing_parts.append("aperture")
-        fail_counter += 1
-        info_extraction_critical_fail_counter += 1
+        COUNTERS["FAILS"] += 1
+        COUNTERS["INFO_EXTRACTION_CRITICAL_FAILS"] += 1
     if "camera_symbol" not in list(img.keys()):
         missing_parts.append("camera_symbol")
-        fail_counter += 1
-        info_extraction_critical_fail_counter += 1
+        COUNTERS["FAILS"] += 1
+        COUNTERS["INFO_EXTRACTION_CRITICAL_FAILS"] += 1
     if "focal_length" not in list(img.keys()):
         missing_parts.append("focal_length")
-        fail_counter += 1
-        info_extraction_critical_fail_counter += 1
+        COUNTERS["FAILS"] += 1
+        COUNTERS["INFO_EXTRACTION_CRITICAL_FAILS"] += 1
 
     # fill missing info
     if len(missing_parts) == 1 and missing_parts[0] == 'aperture':
         img['aperture'] = 'fNA'
         missing_parts.clear()
-        fail_counter -= 1
-        info_extraction_critical_fail_counter -= 1
+        COUNTERS["FAILS"] -= 1
+        COUNTERS["INFO_EXTRACTION_CRITICAL_FAILS"] -= 1
     if "focal_length" in list(img.keys()) and img["focal_length"] == "L0.0":
         img["focal_length"] = "LNA"
 
-    return missing_parts, fail_counter, info_extraction_critical_fail_counter
+    return missing_parts
 
 
 def extract_basic_info_from_EXIF(camera_symbol, exif_file, img, unformatted_image_datetime):
@@ -455,8 +386,6 @@ def iterator_str(iterator):
 
 
 def get_the_destination_path(file_name, file_ext, source_img_path, iterator=0):
-    global duplicate_counter, orig_raw_counter
-
     # TODO: handle RAW paths one-by-one!
     if is_raw_file(file_ext):
         path_to_destination_photos = RAW_EXTENSIONS__FOLDERS_MAP[file_ext.lower(
@@ -467,7 +396,7 @@ def get_the_destination_path(file_name, file_ext, source_img_path, iterator=0):
         #     path_to_destination_photos = full_path_of(FOLDER_ARW_CONV)
         # else:
         #     path_to_destination_photos = full_path_of(FOLDER_CRW_CONV)
-        #     orig_raw_counter += 1
+        #     COUNTERS["ORIG_RAWS"] += 1
     else:
         path_to_destination_photos = full_path_of(FOLDER_ORIG_JPG)
 
@@ -483,7 +412,7 @@ def get_the_destination_path(file_name, file_ext, source_img_path, iterator=0):
                 os.path.getsize(source_img_path):
             # when exifs existed on both sides, was giving this message
             # print(">>> the same size")
-            duplicate_counter += 1
+            COUNTERS["DUPLICATES"] += 1
             if duplicate_str not in file_name:
                 file_name = file_name + duplicate_str
                 return get_the_destination_path(file_name, file_ext, source_img_path, 0)
@@ -519,7 +448,6 @@ def create_date_folder(photo_name):
     """Create folder name like 2014-05-08_(Thu) - 1. ######."""
 
     assert ")_" in photo_name, f"Error: Wrong name:  '{photo_name}'"
-    global created_folders
 
     split_name = photo_name.split(")_")
     folder_name = split_name[0]
@@ -576,7 +504,7 @@ def create_folders_subfolder(folder, subfolder):
     return target_folder
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def create_missing_folders(all_folders, missing_folders):
     if len(missing_folders) == len(all_folders):
@@ -592,7 +520,7 @@ def create_missing_folders(all_folders, missing_folders):
     print(TWO_NEWLINES)
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def ask_different_root_folder():
     global ROOT_FOLDER_PATH
@@ -612,20 +540,17 @@ def ask_different_root_folder():
 
 @display_timing
 def create_problematic_folders():
-    global ROOT_FOLDER_PATH, UNSUP_EXT_subfolder_full_path, EMPTY_FILES_subfolder_full_path, \
-        NOT_ENOUGH_INFO_subfolder_full_path, DUPLICATE_FILE_NAMES_subfolder_full_path
-
-    UNSUP_EXT_subfolder_full_path = create_folders_subfolder(
-        FOLDER_PROBLEMATIC, SUBFOLDER_UNSUP_EXT)
-    EMPTY_FILES_subfolder_full_path = create_folders_subfolder(
+    FULL_PATH_SUBFOLDER["UNSUPPORTED_EXT"] = create_folders_subfolder(
+        FOLDER_PROBLEMATIC, SUBFOLDER_UNSUPPORTED_EXT)
+    FULL_PATH_SUBFOLDER["EMPTY_FILES"] = create_folders_subfolder(
         FOLDER_PROBLEMATIC, SUBFOLDER_EMPTY_FILES)
-    NOT_ENOUGH_INFO_subfolder_full_path = create_folders_subfolder(
+    FULL_PATH_SUBFOLDER["NOT_ENOUGH_INFO"] = create_folders_subfolder(
         FOLDER_PROBLEMATIC, SUBFOLDER_NOT_ENOUGH_INFO)
-    DUPLICATE_FILE_NAMES_subfolder_full_path = create_folders_subfolder(
+    FULL_PATH_SUBFOLDER["DUPLICATE_FILE_NAMES"] = create_folders_subfolder(
         FOLDER_PROBLEMATIC, SUBFOLDER_DUPLICATE_FILE_NAMES)
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def _TASK_verify_if_folders_exist(all_folders):
     missing_folder_count = 0
@@ -643,13 +568,13 @@ def _TASK_verify_if_folders_exist(all_folders):
     create_problematic_folders()
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def _TASK_move_other_images():
     move_other_images()
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def _TASK_get_photos_from_uploads_folder():
     src_path = CAMERA_UPLOADS_PATH
@@ -663,15 +588,13 @@ def _TASK_get_photos_from_uploads_folder():
         os.rename(img, join(FOLDER_UNSORTED_FULL_PATH, ntpath.basename(img)))
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def _TASK_move_old_exif_files():
     """ Generate EXIF files."""
 
-    global moved_old_exif_counter
-
     for exif_file_name in yield_pattern_matching_files_from_location(full_path_of(FOLDER_UNSORTED), "*._exif"):
-        moved_old_exif_counter += 1
+        COUNTERS["MOVED_OLD_EXIFS"] += 1
         # print(exif_file_name, exif_file_name[0] + " " + exif_file_name[1])
         # moved_old_exif_src_file_name = full_path_of(FOLDER_UNSORTED, exif_file_name)
         moved_old_exif_dest_file_name = full_path_of(
@@ -689,13 +612,12 @@ def _TASK_move_old_exif_files():
                     INDENT_SMALL + "Problem when moving PRE-EXISTING EXIF files (2 files of the same sizes?)"))
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def _TASK_remove_empty_image_files():
     """Remove empty image files."""
 
     # This task needs to run before EXIF generation because probably empty files cause exiftool crash
-    global file_info_array, problematic_files_counter
 
     for image_file_name_with_path in yield_image_files_from_location(full_path_of(FOLDER_UNSORTED), include_paths=True):
         # image_file_name_only, image_file_extension = os.path.splitext(image_file_name_with_path)
@@ -703,17 +625,17 @@ def _TASK_remove_empty_image_files():
         if os.path.getsize(image_file_name_with_path) == 0:
             print((INDENT_SMALL + "Empty file: " + image_file_name))
             moved_empty_file_name_destination = os.path.join(
-                EMPTY_FILES_subfolder_full_path, image_file_name)
+                FULL_PATH_SUBFOLDER["EMPTY_FILES"], image_file_name)
             try:
                 os.rename(image_file_name_with_path,
                           moved_empty_file_name_destination)
-                problematic_files_counter += 1
+                COUNTERS["PROBLEMATIC_FILES"] += 1
             except:
                 print((INDENT_SMALL + "Problem when moving EMPTY image files"))
     # raw_input("Proceed? ")
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def _TASK_generate_exif_files():
     """ Generate EXIF files."""
@@ -750,14 +672,14 @@ def _TASK_generate_exif_files():
                          "Some exiftool error happened!\n" + str(exiftool_output))
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def _TASK_rename_exif_files():
     for exif_file_name in yield_exif_files_from_location(full_path_of(FOLDER_UNSORTED)):
         print(exif_file_name)
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def _TASK_collect_info_from_EXIF_files():
     # global file_info_array
@@ -818,7 +740,7 @@ def _TASK_collect_info_from_EXIF_files():
             rename_exif_file(exif_file_name, image_file_name)
         else:
             # print("WARNING, will be problem with '.jpeg' (4-letter) extensions". probably solved)
-            moved_exif_file_name = os.path.join(NOT_ENOUGH_INFO_subfolder_full_path,
+            moved_exif_file_name = os.path.join(FULL_PATH_SUBFOLDER["NOT_ENOUGH_INFO"],
                                                 os.path.splitext(image_file_name)[0] + EXIF_EXTENSION)
             try:
                 os.rename(
@@ -855,7 +777,7 @@ def get_file_name(img_data, raw_marker):
     return file_name
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def _TASK_rename_and_move_images_and_EXIF_files():
     for img_data in file_info_array:
@@ -894,7 +816,7 @@ def _TASK_rename_and_move_images_and_EXIF_files():
                    full_path_of(destination_exif_path)))
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def _TASK_process_RAWs():
     if len(os.listdir(full_path_of(FOLDER_CR2_CONV))):
@@ -925,7 +847,7 @@ def _TASK_process_RAWs():
         print((os.listdir(full_path_of(FOLDER_DNG_CONV))))
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def _TASK_convert_CRWs():
     # TODO: check if we can use lowercase (fnmatch is used), if so, use EXTENSION_RAW_CRW
@@ -940,10 +862,10 @@ def _TASK_convert_CRWs():
     #   convert_CRW(CRW_file)
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def _TASK_launch_dpviewer():
-    # if orig_raw_counter > 0:
+    # if COUNTERS["ORIG_RAWS"] > 0:
     print((INDENT_SMALL + "Will launch DPViewer converter..."))
     subprocess.check_call(
         [
@@ -955,7 +877,7 @@ def _TASK_launch_dpviewer():
     #     print(INDENT_SMALL + "No RAWs to process by DPViewer")
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def _TASK_launch_sony_converter():
     print((INDENT_SMALL + "Will launch Sony converter..."))
@@ -968,11 +890,9 @@ def _TASK_launch_sony_converter():
     )
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def _TASK_move_the_results():
-    global created_folders
-
     for result_folder in FOLDERS_RESULT:
         for image_file_name in yield_pattern_matching_files_from_location(full_path_of(result_folder), ""):
             file_extension = get_lowercase_extension(image_file_name[1])
@@ -1018,39 +938,38 @@ def move_file_to_destination(created_folders, image_file_name, file_type_name, s
 
 
 def move_duplicate_file(image_file_name, file_type):
-    global problematic_files_counter
     print((INDENT_SMALL + " Problem when sorting/moving PRE-EXISTING " +
            file_type + " file (will move): " + image_file_name[1]))
     try:
         os.rename(
             image_file_name[0],
             os.path.join(os.path.join(
-                DUPLICATE_FILE_NAMES_subfolder_full_path, image_file_name[1]))
+                FULL_PATH_SUBFOLDER["DUPLICATE_FILE_NAMES"], image_file_name[1]))
         )
-        problematic_files_counter += 1
+        COUNTERS["PROBLEMATIC_FILES"] += 1
     except:
         print((Colorise.red(INDENT_2_TABS + "ERROR! File: ") + image_file_name[0] + Colorise.red(
-            " already exists in PROBLEMATIC/DUPLICATE folder: " + DUPLICATE_FILE_NAMES_subfolder_full_path)))
+            " already exists in PROBLEMATIC/DUPLICATE folder: " + FULL_PATH_SUBFOLDER["DUPLICATE_FILE_NAMES"])))
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def _TASK_sort_the_results():
     folder_sorter()
 
 
-@print_current_task_name_decorator
+@print_current_task_name
 @display_timing
 def _TASK_show_stats():
-    if moved_old_exif_counter > 0:
+    if COUNTERS["MOVED_OLD_EXIFS"] > 0:
         print((NEWLINE_AND_INDENT_1_TAB + "(Re)moved " +
-               str(moved_old_exif_counter) + " old EXIF files"))
-    if problematic_files_counter > 0:
+               str(COUNTERS["MOVED_OLD_EXIFS"]) + " old EXIF files"))
+    if COUNTERS["PROBLEMATIC_FILES"] > 0:
         print((NEWLINE_AND_INDENT_1_TAB +
-               str(problematic_files_counter) + " problematic files"))
+               str(COUNTERS["PROBLEMATIC_FILES"]) + " problematic files"))
         redate_problematic_folder()
         redate_problematic_folder(False)
-    if (fail_counter == duplicate_counter == 0):
+    if (COUNTERS["FAILS"] == COUNTERS["DUPLICATES"] == 0):
         print((INDENT_SMALL + "All OK!"))
     else:
         show_issues_info()
@@ -1063,23 +982,23 @@ def redate_problematic_folder(should_delete=True):
     temporary_file_path = full_path_of(FOLDER_PROBLEMATIC, ".marker.temp")
     temporary_file = open(temporary_file_path, "w")
     temporary_file.write("problematic files: " +
-                         str(problematic_files_counter))
+                         str(COUNTERS["PROBLEMATIC_FILES"]))
     temporary_file.close()
     if os.path.exists(temporary_file_path) and should_delete:
         os.remove(temporary_file_path)
 
 
 def show_issues_info():
-    if fail_counter > 0:
-        print((INDENT_SMALL + str(fail_counter) +
+    if COUNTERS["FAILS"] > 0:
+        print((INDENT_SMALL + str(COUNTERS["FAILS"]) +
                " problems with " + "some files"))
-    if info_extraction_critical_fail_counter > 0:
-        print((INDENT_SMALL + str(info_extraction_critical_fail_counter) +
+    if COUNTERS["INFO_EXTRACTION_CRITICAL_FAILS"] > 0:
+        print((INDENT_SMALL + str(COUNTERS["INFO_EXTRACTION_CRITICAL_FAILS"]) +
                " CRITICAL problems with " + "some files"))
         print((INDENT_SMALL + "Files moved to 'PROBLEMATIC' folder"))
-    if duplicate_counter > 0:
+    if COUNTERS["DUPLICATES"] > 0:
         print((NEWLINE_AND_INDENT_1_TAB + "Found " +
-               str(duplicate_counter) + " same-size files!"))
+               str(COUNTERS["DUPLICATES"]) + " same-size files!"))
 
 
 def display_extra_messages():
@@ -1089,7 +1008,7 @@ def display_extra_messages():
 
 
 def display_task_stats():
-    print((INDENT_SMALL + str(task_counter) + " tasks performed"))
+    print((INDENT_SMALL + str(COUNTERS["TASKS"]) + " tasks performed"))
 
 
 def get_all_files_count():
@@ -1102,12 +1021,12 @@ def display_total_time(processing_start_time, all_files_count):
     m, s = divmod(processing_duration, 60)
     h, m = divmod(m, 60)
     print(Colorise.yellow(NEWLINE_AND_INDENT_2_TABS +
-                           "Total processing time: ") + "%d:%02d:%02d" % (h, m, s))
+                          "Total processing time: ") + "%d:%02d:%02d" % (h, m, s))
     if all_files_count:
         print((Colorise.yellow(INDENT_2_TABS + "Time per photo: ") +
                str(round(processing_duration / all_files_count, 2)) + " s"))
     print(Colorise.yellow(INDENT_2_TABS +
-                           "All files (photos + other): ") + str(all_files_count))
+                          "All files (photos + other): ") + str(all_files_count))
 
 
 def tada():

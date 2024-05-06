@@ -51,10 +51,10 @@ def process_jpgs(files, src_path):
         if "EXIF:Model" in list(d.keys()) and d["EXIF:Model"] in MY_CAMERA_MODELS:
             counter["PHOTOS"] += 1
         else:
-            msg = f":::::::::::: moving 'other' image:   {d['SourceFile']}   :::::::::::::::::"
-            print(msg)
+            msg = f"{SUBROUTINE_LOG_INDENTATION}Moved 'other' image:   {ntpath.basename(d['SourceFile'])}"
             dest = join(src_path, OTHER_IMAGES_FOLDER, get_filename_from_path(d["SourceFile"]))
             shutil.move(d["SourceFile"], dest)
+            print(msg)
             counter["OTHER_IMAGES"] += 1
 
 
@@ -62,11 +62,10 @@ def process_other_files(files, src_path):
     for src_file_path in files:
         if NOT_MOVEABLE_FILE in src_file_path:
             continue
-        msg = "[[[[[[[[[[[::::::::::::]]]]]]]]]]] Moving 'other' file: {}  [[[[[[[[[[[::::::::::::]]]]]]]]]]]"
         try:
             dest = join(src_path, OTHER_FILES_FOLDER, get_filename_from_path(src_file_path))
-            print(dest)
             shutil.move(src_file_path, dest)
+            print(f"{SUBROUTINE_LOG_INDENTATION}Moved 'other' file:    {ntpath.basename(dest)}")
             counter["OTHER_FILES"] += 1
         except Exception as e:
             print(("Could not move file: {}".format(src_file_path)))
