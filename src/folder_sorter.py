@@ -5,7 +5,8 @@ import winsound
 import pandas as pd
 
 from utils.colorise import Colorise
-from constants.constants import READY_PHOTOS_SOURCE_FOLDER_FULL_PATH, PHOTO_BASE_FOLDER, MONTH_FOLDERS
+from constants.constants import READY_PHOTOS_SOURCE_FOLDER_FULL_PATH, PHOTO_BASE_FOLDER, MONTH_FOLDERS, \
+    SUBROUTINE_LOG_INDENTATION
 
 
 class ReadyPhotosFolderMover(object):
@@ -30,7 +31,7 @@ class ReadyPhotosFolderMover(object):
             if not match:
                 match_year_folder = re.search(r'^(\d{4})$', folder_name)
                 if not match_year_folder:
-                    print("    Ignored folder: " + folder_name)
+                    print(f"{SUBROUTINE_LOG_INDENTATION} — {folder_name} [ IGNORED ]")
                     self.problematic_folders += 1
                 continue
             year = match.group(1)
@@ -52,7 +53,7 @@ class ReadyPhotosFolderMover(object):
                     "source_path": source_path,
                     "destination_path": destination_path,
                 })
-            print(f"    — {str(source_path)}   >>   {marker}   >>   {str(destination_path)}")
+            print(f"{SUBROUTINE_LOG_INDENTATION} — {str(source_path)}   >>   {marker}   >>   {str(destination_path)}")
 
     def get_sub_subfolder_counts(self):
         for photo_folder in self.all_folders:
@@ -69,43 +70,44 @@ class ReadyPhotosFolderMover(object):
 
     def show_ready_folder_stats(self):
         counter = 0
-        unnamed = 0
+        not_named = 0
         folders = self.all_folders
-        print((Colorise.yellow("\n    READY folder contents:\n")))
+        print((Colorise.yellow(f"\n{SUBROUTINE_LOG_INDENTATION}READY folder contents:\n")))
         for folder in folders:
             counter += 1
             if "######" in folder:
-                unnamed += 1
+                not_named += 1
         # print(("    - folders: " + str(counter)))
-        # print(("    - renamed: " + str(counter - unnamed)))
-        # print(("    - unnamed: " + str(unnamed)))
+        # print(("    - renamed: " + str(counter - not_named)))
+        # print(("    - not_named: " + str(not_named)))
 
+        self.print_folder_naming_stats(counter, not_named)
+        self.print_folder_lists()
+
+        print(f"\n{SUBROUTINE_LOG_INDENTATION}— sub-subfolders: {str(len(list(self.sub_subfolders_counts.keys())))}")
+        # print(self.sub_subfolders_counts)
+
+    def print_folder_naming_stats(self, counter, not_named):
         folder_data = {
-            '[ ENTITY ]': ['', '    - folders:', '    - renamed:', '    - unnamed:'],
-            '[ VALUE ]': ['', str(counter), str(counter - unnamed), str(unnamed)]
+            f'{SUBROUTINE_LOG_INDENTATION}  [ ENTITY ]': ['', f'{SUBROUTINE_LOG_INDENTATION}— folders:  ', f'{SUBROUTINE_LOG_INDENTATION}— renamed:  ', f'{SUBROUTINE_LOG_INDENTATION}— to rename:'],
+            '[ VALUE ]': ['', str(counter), str(counter - not_named), str(not_named)]
         }
-
         df = pd.DataFrame(folder_data)
-
-        print("Displaying the DataFrame:")
         print(df.to_string(index=False))
 
+    def print_folder_lists(self):
+        print("")
         month_folder_data = {
-            '    [ folder_name ]': [''],
-            '[ subfolders_counts ]': ['']
+            f'{SUBROUTINE_LOG_INDENTATION}[ FOLDER NAME ]': [''],
+            '[ COUNT ]': ['']
         }
         for folder_name in list(self.sub_subfolders_counts.keys()):
             # print(("\t\t" + folder_name + ":    \t" +
             #        str(self.sub_subfolders_counts[folder_name])))
-            month_folder_data['    [ folder_name ]'].append(folder_name.ljust(14, " "))
-            month_folder_data['[ subfolders_counts ]'].append(str(self.sub_subfolders_counts[folder_name]))
-
+            month_folder_data[f'{SUBROUTINE_LOG_INDENTATION}[ FOLDER NAME ]'].append(folder_name.ljust(14, " "))
+            month_folder_data['[ COUNT ]'].append(str(self.sub_subfolders_counts[folder_name]))
         df = pd.DataFrame(month_folder_data)
         print(df.to_string(index=False))
-
-        print(("\n    - sub-subfolders: " +
-               str(len(list(self.sub_subfolders_counts.keys())))))
-        # print(self.sub_subfolders_counts)
 
     def move_folders(self):
         for folder in self.folders_to_move:
@@ -169,11 +171,11 @@ class ReadyPhotosFolderMover(object):
         os.rename(source_file_path, dest_file_path)
 
     def print_stats(self):
-        print("\n\n Folders SUMMARY:\n")
-        print(("  Total: " + str(self.total_folders)))
-        print(("  Existing: " + str(self.existing_folders)))
-        print(("  Moved: " + str(self.moved_folders)))
-        print(("  Problematic: " + str(self.problematic_folders)))
+        print(Colorise.yellow(f"\n{SUBROUTINE_LOG_INDENTATION}Folders counts:"))
+        print(Colorise.yellow(f"{SUBROUTINE_LOG_INDENTATION}         Total:   " + str(self.total_folders)))
+        print(Colorise.yellow(f"{SUBROUTINE_LOG_INDENTATION}      Existing:   " + str(self.existing_folders)))
+        print(Colorise.yellow(f"{SUBROUTINE_LOG_INDENTATION}         Moved:   " + str(self.moved_folders)))
+        print(Colorise.yellow(f"{SUBROUTINE_LOG_INDENTATION}   Problematic:   " + str(self.problematic_folders)))
 
 
 def folder_sorter():
@@ -185,41 +187,40 @@ def folder_sorter():
     # dest_base_folder = "\\\\MMHH_Serv_1/PHOTO_BACKUP_2/SORTING_TEST"
     dest_base_folder = src_path
 
-    print("\n\n\n")
-    print(f"  READY_PHOTOS_SOURCE_FOLDER_FULL_PATH:    {READY_PHOTOS_SOURCE_FOLDER_FULL_PATH}")
-    print(f"                     PHOTO_BASE_FOLDER:    {PHOTO_BASE_FOLDER}")
-    print(f"                              src_path:    {src_path}")
-    print(f"                 src_path: Path exists:    {os.path.exists(src_path)}")
-    print(f"          src_path: Path is accessible:    {os.access(src_path, os.R_OK)}")
-    print(f"                      dest_base_folder:    {dest_base_folder}")
-    print(f"         dest_base_folder: Path exists:    {os.path.exists(dest_base_folder)}")
-    print(f"  dest_base_folder: Path is accessible:    {os.access(dest_base_folder, os.R_OK)}")
-    answer = input(Colorise.yellow(
-        "\n\tDo you want to proceed? (y/n): "))
-    if answer != "y":
-        print("\n Quit\n")
-        exit(0)
+    # print(f"                     PHOTO_BASE_FOLDER:    {PHOTO_BASE_FOLDER}")
+    print(Colorise.blue(f"{SUBROUTINE_LOG_INDENTATION}READY_PHOTOS_SOURCE_FOLDER_FULL_PATH:   {READY_PHOTOS_SOURCE_FOLDER_FULL_PATH}"))
+    print(Colorise.blue(f"{SUBROUTINE_LOG_INDENTATION}                            src_path:   {src_path}"))
+    print(Colorise.blue(f"{SUBROUTINE_LOG_INDENTATION}                    dest_base_folder:   {dest_base_folder}"))
 
-    print("\n =======  Folders to move:  =======\n")
+    assert os.path.exists(src_path), "src_path: does not exist!"
+    assert os.access(src_path, os.R_OK), "src_path: is not accessible!"
+    assert os.path.exists(dest_base_folder), "dest_base_folder: does not exists!"
+    assert os.access(dest_base_folder, os.R_OK), "dest_base_folder: is not accessible!"
+
+    # answer = input(Colorise.yellow(
+    #     "\n\tDo you want to proceed? (y/n): "))
+    # if answer != "y":
+    #     print("\n Quit\n")
+    #     exit(0)
+
+    print(f"\n{SUBROUTINE_LOG_INDENTATION}Folders to move:\n")
     folder_mover = ReadyPhotosFolderMover(
         source_folder=src_path, destination_base_folder=dest_base_folder)
     folder_mover.get_subfolders()
     folder_mover.get_sub_subfolder_counts()
     folder_mover.show_ready_folder_stats()
 
-    while True:
-        winsound.Beep(4444, 444)
-        print(("\n\n" + str(len(folder_mover.folders_to_move)) + " folders to move"))
-        print((str(len(folder_mover.folders_with_contents_to_move)) +
-               " folders with contents to move"))
-        answer = input(Colorise.red(
-            "\n\tDo you want to move files and folders? (y/n): "))
-        if answer == "y" or answer == "n":
-            break
-    if answer == "y":
-        print("\n ======= Moving: =======\n")
-        folder_mover.move_folders()
-        folder_mover.move_individual_files()
+    winsound.Beep(4444, 444)
+    print(f"\n\n{SUBROUTINE_LOG_INDENTATION}{str(len(folder_mover.folders_to_move))} folders to move")
+    print(f"{SUBROUTINE_LOG_INDENTATION}{str(len(folder_mover.folders_with_contents_to_move))} folders with contents to move")
+    # while True:
+    #     answer = input(Colorise.red("\n\tDo you want to move files and folders? (y/n): "))
+    #     if answer == "y" or answer == "n":
+    #         break
+    # if answer == "y":
+    print(f"\n{SUBROUTINE_LOG_INDENTATION}Moving:\n")
+    folder_mover.move_folders()
+    folder_mover.move_individual_files()
     folder_mover.print_stats()
 
 

@@ -64,10 +64,10 @@ from move_other_images import move_other_images
 from folder_sorter import folder_sorter
 from utils.colorise import Colorise
 
-
 print(Colorise.blue(f"\n Python executable used:  {sys.executable}"))
 print(Colorise.blue(f" Current python version:  {sys.version}\n"))
 assert sys.version.startswith("3."), "Error: Python 3 is required!"
+
 
 #  Command line option(s):
 #  - generate-exifs:   generate exif files (without asking)
@@ -107,7 +107,7 @@ def _TASK_get_photos_from_uploads_folder():
     uploaded_images = [os.path.join(src_path, f) for f in os.listdir(src_path) if os.path.isfile(
         os.path.join(src_path, f)) and f.endswith(".jpg")]
     if len(uploaded_images) == 0:
-        print(f"{SUBROUTINE_LOG_INDENTATION}No images or photos were found in the uploads folder.")
+        print(Colorise.blue(f"{SUBROUTINE_LOG_INDENTATION}No images or photos were found in the uploads folder."))
         return
     print(f"{SUBROUTINE_LOG_INDENTATION}Moving {len(uploaded_images)} images / videos found in the uploads folder")
     for img in uploaded_images:
@@ -167,7 +167,7 @@ def _TASK_generate_exif_files():
     """ Generate EXIF files."""
     exiftool_output = "exiftool_output:NOT_POPULATED_YET"
     try:
-        print((Colorise.yellow("   ======== EXIFTOOL: ======")))
+        print((Colorise.yellow(f"{SUBROUTINE_LOG_INDENTATION}======== EXIFTOOL: ======")))
         # http://stackoverflow.com/questions/36169571/python-subprocess-check-call-vs-check-output
         # subprocess.call(path)
         exiftool_output = subprocess.check_call(
@@ -185,15 +185,15 @@ def _TASK_generate_exif_files():
             ]
         )
         if exiftool_output:
-            print((len(exiftool_output), exiftool_output))
+            print(len(exiftool_output), exiftool_output)
         else:
-            print((INDENT_SMALL + "( no exiftool report )"))
-        print((Colorise.yellow("   =========================")))
+            print(Colorise.blue(SUBROUTINE_LOG_INDENTATION + "( no exiftool report )"))
+        print(Colorise.yellow(f"{SUBROUTINE_LOG_INDENTATION}========================="))
     except:
-        print((NEWLINE_AND_INDENT_1_TAB + "Some exiftool error happened!\n"))
+        print(NEWLINE_AND_INDENT_1_TAB + "Some exiftool error happened!\n")
         with open(PATH_TO_REPORT, "w") as report_file:
-            print((NEWLINE_AND_INDENT_1_TAB + "Report:" +
-                   TWO_NEWLINES + report_file.read()))
+            print(NEWLINE_AND_INDENT_1_TAB + "Report:" +
+                  TWO_NEWLINES + report_file.read())
         raise ValueError(NEWLINE_AND_INDENT_1_TAB +
                          "Some exiftool error happened!\n" + str(exiftool_output))
 
@@ -411,7 +411,7 @@ def _TASK_move_the_results():
 
 @print_current_task_name
 @display_timing
-def _TASK_sort_the_results():
+def _TASK_sort_the_resulting_folders():
     folder_sorter()
 
 
@@ -427,7 +427,7 @@ def _TASK_show_stats():
         redate_problematic_folder()
         redate_problematic_folder(False)
     if (COUNTERS["FAILS"] == COUNTERS["DUPLICATES"] == 0):
-        print((INDENT_SMALL + "All OK!"))
+        print(f"{SUBROUTINE_LOG_INDENTATION}All OK!")
     else:
         show_issues_info()
     display_extra_messages()
@@ -457,7 +457,7 @@ def main():
     _TASK_rename_and_move_images_and_EXIF_files()
     _TASK_process_RAWs()
     _TASK_move_the_results()
-    _TASK_sort_the_results()
+    _TASK_sort_the_resulting_folders()
     _TASK_show_stats()
 
     display_total_time(processing_start_time, all_files_count)
@@ -468,4 +468,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    print("\n\n\tZaimplementowac licznik nienazwanych folderow i nowych, moze starych?")
+    print(Colorise.yellow("\n\n\tTODO: Zaimplementowac licznik nienazwanych folderow i nowych, moze starych?"))

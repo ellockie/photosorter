@@ -651,25 +651,22 @@ def redate_problematic_folder(should_delete=True):
 
 def show_issues_info():
     if COUNTERS["FAILS"] > 0:
-        print((INDENT_SMALL + str(COUNTERS["FAILS"]) +
-               " problems with " + "some files"))
+        print(f"{SUBROUTINE_LOG_INDENTATION}{str(COUNTERS['FAILS'])} problems with some files")
     if COUNTERS["INFO_EXTRACTION_CRITICAL_FAILS"] > 0:
-        print((INDENT_SMALL + str(COUNTERS["INFO_EXTRACTION_CRITICAL_FAILS"]) +
-               " CRITICAL problems with " + "some files"))
-        print((INDENT_SMALL + "Files moved to 'PROBLEMATIC' folder"))
+        print(f"{SUBROUTINE_LOG_INDENTATION}{str(COUNTERS['INFO_EXTRACTION_CRITICAL_FAILS'])} CRITICAL problems with some files")
+        print(f"{SUBROUTINE_LOG_INDENTATION}Files moved to 'PROBLEMATIC' folder")
     if COUNTERS["DUPLICATES"] > 0:
-        print((NEWLINE_AND_INDENT_1_TAB + "Found " +
-               str(COUNTERS["DUPLICATES"]) + " same-size files!"))
+        print(f"{NEWLINE_AND_INDENT_1_TAB}Found {str(COUNTERS['DUPLICATES'])} same-size files!")
 
 
 def display_extra_messages():
-    print((Colorise.yellow(INDENT_SMALL + "CRW not extracted")))
-    print((Colorise.yellow(INDENT_SMALL + "MPO not extracted")))
-    print((Colorise.yellow(INDENT_SMALL + "RW2 not extracted")))
+    print(Colorise.red(f"{SUBROUTINE_LOG_INDENTATION}CRW not extracted"))
+    print(Colorise.red(f"{SUBROUTINE_LOG_INDENTATION}MPO not extracted"))
+    print(Colorise.red(f"{SUBROUTINE_LOG_INDENTATION}RW2 not extracted"))
 
 
 def display_task_stats():
-    print((INDENT_SMALL + str(COUNTERS["TASKS"]) + " tasks performed"))
+    print(f"\n{SUBROUTINE_LOG_INDENTATION}{str(COUNTERS['TASKS'])} tasks performed")
 
 
 def get_all_files_count():
@@ -681,12 +678,12 @@ def display_total_time(processing_start_time, all_files_count):
     processing_duration = time.time() - processing_start_time
     m, s = divmod(processing_duration, 60)
     h, m = divmod(m, 60)
-    print(Colorise.yellow(NEWLINE_AND_INDENT_2_TABS +
+    print(Colorise.yellow(SUBROUTINE_LOG_INDENTATION +
                           "Total processing time: ") + "%d:%02d:%02d" % (h, m, s))
     if all_files_count:
-        print((Colorise.yellow(INDENT_2_TABS + "Time per photo: ") +
+        print((Colorise.yellow(SUBROUTINE_LOG_INDENTATION + "Time per photo: ") +
                str(round(processing_duration / all_files_count, 2)) + " s"))
-    print(Colorise.yellow(INDENT_2_TABS +
+    print(Colorise.yellow(SUBROUTINE_LOG_INDENTATION +
                           "All files (photos + other): ") + str(all_files_count))
 
 
