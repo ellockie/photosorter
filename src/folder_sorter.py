@@ -72,7 +72,7 @@ class ReadyPhotosFolderMover(object):
         counter = 0
         not_named = 0
         folders = self.all_folders
-        print((Colorise.yellow(f"\n{SUBROUTINE_LOG_INDENTATION}READY folder contents:\n")))
+        print(Colorise.yellow(f"\n{SUBROUTINE_LOG_INDENTATION}READY folder contents:\n"))
         for folder in folders:
             counter += 1
             if "######" in folder:
@@ -172,10 +172,10 @@ class ReadyPhotosFolderMover(object):
 
     def print_stats(self):
         print(Colorise.yellow(f"\n{SUBROUTINE_LOG_INDENTATION}Folders counts:"))
-        print(Colorise.yellow(f"{SUBROUTINE_LOG_INDENTATION}         Total:   " + str(self.total_folders)))
-        print(Colorise.yellow(f"{SUBROUTINE_LOG_INDENTATION}      Existing:   " + str(self.existing_folders)))
-        print(Colorise.yellow(f"{SUBROUTINE_LOG_INDENTATION}         Moved:   " + str(self.moved_folders)))
-        print(Colorise.yellow(f"{SUBROUTINE_LOG_INDENTATION}   Problematic:   " + str(self.problematic_folders)))
+        print(Colorise.yellow(f"{SUBROUTINE_LOG_INDENTATION}         Total:    ") + str(self.total_folders))
+        print(Colorise.yellow(f"{SUBROUTINE_LOG_INDENTATION}      Existing:    ") + str(self.existing_folders))
+        print(Colorise.yellow(f"{SUBROUTINE_LOG_INDENTATION}         Moved:    ") + str(self.moved_folders))
+        print(Colorise.yellow(f"{SUBROUTINE_LOG_INDENTATION}   Problematic:    ") + str(self.problematic_folders))
 
 
 def folder_sorter():
@@ -203,7 +203,7 @@ def folder_sorter():
     #     print("\n Quit\n")
     #     exit(0)
 
-    print(f"\n{SUBROUTINE_LOG_INDENTATION}Folders to move:\n")
+    print(Colorise.yellow(f"\n{SUBROUTINE_LOG_INDENTATION}Folders to move:\n"))
     folder_mover = ReadyPhotosFolderMover(
         source_folder=src_path, destination_base_folder=dest_base_folder)
     folder_mover.get_subfolders()
@@ -218,7 +218,7 @@ def folder_sorter():
     #     if answer == "y" or answer == "n":
     #         break
     # if answer == "y":
-    print(f"\n{SUBROUTINE_LOG_INDENTATION}Moving:\n")
+    print(Colorise.yellow(f"\n{SUBROUTINE_LOG_INDENTATION}Moving:\n"))
     folder_mover.move_folders()
     folder_mover.move_individual_files()
     folder_mover.print_stats()

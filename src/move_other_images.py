@@ -25,6 +25,7 @@ NOT_MOVEABLE_FILE = 'desktop.ini'
 
 counter = {
     "PHOTOS": 0,
+    "VIDEOS": 0,
     "OTHER_IMAGES": 0,
     "OTHER_FILES": 0,
 }
@@ -32,13 +33,19 @@ counter = {
 
 def get_jpgs(src_path):
     my_jpgs = [join(src_path, f) for f in listdir(src_path) if isfile(
-        join(src_path, f)) and (f.endswith(".jpg") or f.endswith(".jpeg"))]
+        join(src_path, f)) and (f.lower().endswith(".jpg") or f.lower().endswith(".jpeg"))]
     return my_jpgs
+
+
+def get_videos(src_path):
+    my_videos = [join(src_path, f) for f in listdir(src_path) if isfile(
+        join(src_path, f)) and f.lower().endswith(".mp4")]
+    counter["VIDEOS"] = len(my_videos)
 
 
 def get_other_files(src_path):
     other_files = [join(src_path, f) for f in listdir(src_path) if isfile(
-        join(src_path, f)) and not f.endswith(".jpg") and not f.endswith(".mp4") and not f.endswith("desktop.ini")]
+        join(src_path, f)) and not f.lower().endswith(".jpg") and not f.lower().endswith(".mp4") and not f.endswith("desktop.ini")]
     return other_files
 
 
@@ -47,20 +54,25 @@ def get_filename_from_path(path):
 
 
 def process_jpgs(files, src_path):
+    print(files)
     if len(files) == 0:
         return
-    print(f"{SUBROUTINE_LOG_INDENTATION}Moving images:")
+    print(Colorise.yellow(f"{SUBROUTINE_LOG_INDENTATION}Moving images:"))
     with exiftool.ExifTool() as et:
         metadata = et.get_metadata_batch(files)
     for d in metadata:
         if "EXIF:Model" in list(d.keys()) and d["EXIF:Model"] in MY_CAMERA_SYMBOLS:
             counter["PHOTOS"] += 1
         else:
-            msg = f"{SUBROUTINE_LOG_INDENTATION} - 'other' image:   {ntpath.basename(d['SourceFile'])}"
-            dest = join(src_path, OTHER_IMAGES_FOLDER, get_filename_from_path(d["SourceFile"]))
-            shutil.move(d["SourceFile"], dest)
-            print(msg)
-            counter["OTHER_IMAGES"] += 1
+            move_other_image(d, src_path)
+
+
+def move_other_image(d, src_path):
+    msg = f"{SUBROUTINE_LOG_INDENTATION} - 'other' image:   {ntpath.basename(d['SourceFile'])}"
+    dest = join(src_path, OTHER_IMAGES_FOLDER, get_filename_from_path(d["SourceFile"]))
+    shutil.move(d["SourceFile"], dest)
+    print(msg)
+    counter["OTHER_IMAGES"] += 1
 
 
 def process_other_files(files, src_path):
@@ -82,6 +94,7 @@ def display_stats():
     print(f"{SUBROUTINE_LOG_INDENTATION}                 My camera photos:  {counter['PHOTOS']}")
     print(f"{SUBROUTINE_LOG_INDENTATION}                     Other images:  {counter['OTHER_IMAGES']}")
     print(f"{SUBROUTINE_LOG_INDENTATION}                      Other files:  {counter['OTHER_FILES']}")
+    print(f"{SUBROUTINE_LOG_INDENTATION}                           Videos:  {counter['VIDEOS']}")
 
 
 def move_other_images():
@@ -91,6 +104,7 @@ def move_other_images():
     process_jpgs(jpg_files, src_path)
     other_files = get_other_files(src_path)
     process_other_files(other_files, src_path)
+    get_videos(src_path)
     display_stats()
 
 

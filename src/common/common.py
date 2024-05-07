@@ -678,8 +678,8 @@ def display_total_time(processing_start_time, all_files_count):
     processing_duration = time.time() - processing_start_time
     m, s = divmod(processing_duration, 60)
     h, m = divmod(m, 60)
-    print(Colorise.yellow(SUBROUTINE_LOG_INDENTATION +
-                          "Total processing time: ") + "%d:%02d:%02d" % (h, m, s))
+    s = round(s)
+    print(Colorise.yellow(f"{SUBROUTINE_LOG_INDENTATION}Total processing time:  ") + '%02d:%02d' % (m, s))
     if all_files_count:
         print((Colorise.yellow(SUBROUTINE_LOG_INDENTATION + "Time per photo: ") +
                str(round(processing_duration / all_files_count, 2)) + " s"))

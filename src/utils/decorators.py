@@ -43,7 +43,7 @@ def display_timing(fn):
         result = fn(*args, **kwargs)
         t_diff = time.time() - t
         if t_diff >= 0.01:
-            print((Colorise.yellow(INDENT_2_TABS + "    Execution time: ") +
-                   str(round(t_diff, 2)) + Colorise.yellow(" s")))
+            print(Colorise.yellow(INDENT_2_TABS + "    Execution time: ") +
+                   str(round(t_diff, 2)) + Colorise.yellow(" s"))
         return result
     return wrapper

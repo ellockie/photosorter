@@ -102,10 +102,10 @@ def _TASK_move_other_images():
 
 @print_current_task_name
 @display_timing
-def _TASK_get_photos_from_uploads_folder():
+def _TASK_get_media_from_uploads_folder():
     src_path = CAMERA_UPLOADS_PATH
     uploaded_images = [os.path.join(src_path, f) for f in os.listdir(src_path) if os.path.isfile(
-        os.path.join(src_path, f)) and f.endswith(".jpg")]
+        os.path.join(src_path, f)) and (f.lower().endswith(".jpg") or f.lower().endswith(".mp4"))]
     if len(uploaded_images) == 0:
         print(Colorise.blue(f"{SUBROUTINE_LOG_INDENTATION}No images or photos were found in the uploads folder."))
         return
@@ -419,15 +419,15 @@ def _TASK_sort_the_resulting_folders():
 @display_timing
 def _TASK_show_stats():
     if COUNTERS["MOVED_OLD_EXIFS"] > 0:
-        print((NEWLINE_AND_INDENT_1_TAB + "(Re)moved " +
+        print((SUBROUTINE_LOG_INDENTATION + "(Re)moved " +
                str(COUNTERS["MOVED_OLD_EXIFS"]) + " old EXIF files"))
     if COUNTERS["PROBLEMATIC_FILES"] > 0:
-        print((NEWLINE_AND_INDENT_1_TAB +
-               str(COUNTERS["PROBLEMATIC_FILES"]) + " problematic files"))
+        print(Colorise.red(f"\n{SUBROUTINE_LOG_INDENTATION}{str(COUNTERS['PROBLEMATIC_FILES'])} problematic file(s)\n"))
+        # To mark the PROBLEMATIC folder as edited
         redate_problematic_folder()
         redate_problematic_folder(False)
-    if (COUNTERS["FAILS"] == COUNTERS["DUPLICATES"] == 0):
-        print(f"{SUBROUTINE_LOG_INDENTATION}All OK!")
+    if (COUNTERS["FAILS"] == COUNTERS["DUPLICATES"] == 0) and COUNTERS["PROBLEMATIC_FILES"] == 0:
+        print(Colorise.green(f"\n{SUBROUTINE_LOG_INDENTATION}All OK!\n"))
     else:
         show_issues_info()
     display_extra_messages()
@@ -439,7 +439,7 @@ def main():
 
     processing_start_time = time.time()
     _TASK_move_other_images()
-    _TASK_get_photos_from_uploads_folder()
+    _TASK_get_media_from_uploads_folder()
     _TASK_verify_if_folders_exist(FOLDERS_ALL)
     all_files_count = get_all_files_count()
 
