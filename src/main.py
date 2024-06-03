@@ -102,7 +102,7 @@ def _TASK_move_other_images_from_uploads_folder():
 
 @print_current_task_name
 @display_timing
-def _TASK_move_media_from_uploads_folder_into_to_sort_folder():
+def _TASK_move_media_from_uploads_folder_into_sort_folder():
     src_path = CAMERA_UPLOADS_PATH
     uploaded_images = [os.path.join(src_path, f) for f in os.listdir(src_path) if os.path.isfile(
         os.path.join(src_path, f)) and (f.lower().endswith(".jpg") or f.lower().endswith(".mp4"))]
@@ -439,7 +439,7 @@ def main():
 
     processing_start_time = time.time()
     _TASK_move_other_images_from_uploads_folder()
-    _TASK_move_media_from_uploads_folder_into_to_sort_folder()
+    _TASK_move_media_from_uploads_folder_into_sort_folder()
     _TASK_verify_if_folders_exist(FOLDERS_ALL)
     all_files_count = get_all_files_count()
 
