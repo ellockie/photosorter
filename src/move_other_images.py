@@ -54,7 +54,7 @@ def get_filename_from_path(path):
 
 
 def process_jpgs(files, src_path):
-    print(files)
+    # print(files)
     if len(files) == 0:
         return
     print(Colorise.yellow(f"{SUBROUTINE_LOG_INDENTATION}Moving images:"))
