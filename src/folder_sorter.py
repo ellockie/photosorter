@@ -155,11 +155,11 @@ class ReadyPhotosFolderMover(object):
         source_file_path = os.path.join(root, file)
         dest_file_path = source_file_path.replace(
             source_path, destination_path)
-        print(("\n source_file_path:  " + source_file_path))
-        print(("   dest_file_path:  " + dest_file_path))
+        # print(("\n source_file_path:  " + source_file_path))
+        # print(("   dest_file_path:  " + dest_file_path))
         # dest_file_path = os.path.join(destination_path, file)
         if os.path.isfile(dest_file_path):
-            print("     Already exists!")
+            print("     File already exists: " + dest_file_path)
             # move_duplicate_file(source_file_path, file[-4:])
         else:
             self.move_file_safely(dest_file_path, source_file_path)
