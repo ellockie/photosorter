@@ -113,6 +113,7 @@ KNOWN_CAMERAS_SYMBOLS = [
     ("Canon EOS-1Ds Mark III", "1DsIII"),
     ("Canon PowerShot G1 X Mark II", "G1XII"),
     ("Canon PowerShot G6", "G6"),
+    ("Canon PowerShot S95", "CS95"),
     ("COOLPIX L840", "NCPL840"),
     ("COOLPIX S9100", "NCPS91k"),
     ("DMC-FZ1000", "PF1K"),
