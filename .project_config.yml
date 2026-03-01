@@ -1,0 +1,4 @@
+project:
+  name: "photosorter"
+  python_version: "3.13.3"
+  main_filename: "run-project.sh"
