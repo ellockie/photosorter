@@ -1,0 +1,1 @@
+c:\Python34\python.exe "f:\__ File Sharing\Dropbox\__My files\__Actions, workflows, automation, scripts, AutoHotKey\Python\Photo EXIF image sort\_Ex8. Exif photo sort (py3) (PIL) - list of all available keys of a given image.py"

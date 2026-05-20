@@ -1,0 +1,60 @@
+Software:
+				Adobe Photoshop Lightroom 5.3 (Windows)
+LensSpecification:
+				((24, 1), (105, 1), (0, 0), (0, 0))
+ExifVersion:
+				b'0230'
+ExifOffset:
+				206
+CustomRendered:
+				0
+DateTimeOriginal:
+				2014:04:12 18:22:10
+Make:
+				Canon
+DateTime:
+				2014:04:13 06:50:29
+ExposureMode:
+				0
+MeteringMode:
+				0
+BodySerialNumber:
+				3221300909
+FocalPlaneResolutionUnit:
+				2
+SceneCaptureType:
+				0
+ExposureProgram:
+				3
+LensModel:
+				EF24-105mm f/4L IS USM
+MaxApertureValue:
+				(4, 1)
+FocalPlaneYResolution:
+				(2912000, 942)
+Flash:
+				16
+FocalLength:
+				(60, 1)
+DateTimeDigitized:
+				2014:04:12 18:22:10
+ApertureValue:
+				(4, 1)
+FocalPlaneXResolution:
+				(4368000, 1415)
+ISOSpeedRatings:
+				1000
+YResolution:
+				(240, 1)
+XResolution:
+				(240, 1)
+ResolutionUnit:
+				2
+FNumber:
+				(4, 1)
+Model:
+				Canon EOS 5D
+ExposureTime:
+				(1, 20)
+WhiteBalance:
+				0

@@ -1,0 +1,1 @@
+exiftool -csv "0000-00-00_(Thu)_00.00.00__f-1.0...T1_-1..-1mm-1-001.jpg" > output.csv
