@@ -1,5 +1,6 @@
 import datetime
 import fnmatch
+import hashlib
 import ntpath
 import os
 import subprocess
@@ -12,7 +13,6 @@ from common.globals import COUNTERS, FULL_PATH_SUBFOLDER, created_folders, file_
 from constants.constants import \
     COMMAND_LINE_OPTION_GENERATE_EXIFS, \
     DAY_DIVISION_TIME, \
-    duplicate_str, \
     EXIF_EXTENSION, \
     EXTENSION_RAW_ARW, \
     EXTENSION_RAW_CRW, \
@@ -118,16 +118,18 @@ def yield_image_files_from_location(root, include_paths):
                 print((INDENT_VERY_SMALL + "[ WARNING ] File_extension: " +
                        file_extension + " not supported ( '" + image_file + "' ). File moved."))
                 try:
-                    os.rename(
-                        full_path_of(FOLDER_UNSORTED, image_file),
-                        full_path_of(FOLDER_PROBLEMATIC,
-                                     SUBFOLDER_UNSUPPORTED_EXT, filename + file_extension)
-                    )
-                    COUNTERS["PROBLEMATIC_FILES"] += 1
+                    source = full_path_of(FOLDER_UNSORTED, image_file)
+                    dest = full_path_of(FOLDER_PROBLEMATIC,
+                                        SUBFOLDER_UNSUPPORTED_EXT, filename + file_extension)
+                    if os.path.exists(dest) and file_sizes_the_same(source, dest) \
+                            and file_md5(source) == file_md5(dest):
+                        os.remove(source)
+                    else:
+                        os.rename(source, dest)
+                        COUNTERS["PROBLEMATIC_FILES"] += 1
                 except:
-                    print(
-                        INDENT_VERY_SMALL + "  Problem when moving not supported extension files (duplicate already exists?)\n")
-                    # raise ValueError("  file_extension: " + file_extension + " not supported ( '" + image_file + "'' )")
+                    print(INDENT_VERY_SMALL +
+                          "  Could not move unsupported file (stays in place): " + image_file + "\n")
 
 
 def get_filename_from_path(path):
@@ -355,6 +357,15 @@ def full_path_of(folder_name, trailing_part_1="", trailing_part_2=""):
     return os.path.join(PATHS["ROOT_FOLDER"], folder_name, trailing_part_1, trailing_part_2).rstrip('\\')
 
 
+def file_md5(file_path):
+    """Return MD5 hex digest of a file."""
+    hasher = hashlib.md5()
+    with open(file_path, 'rb') as f:
+        for chunk in iter(lambda: f.read(65536), b''):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
 def rename_exif_file(exif_file_name, image_file_name):
     try:
         os.rename(exif_file_name, full_path_of(
@@ -415,45 +426,66 @@ def get_the_destination_path(file_name, file_ext, source_img_path, iterator=0):
     if is_raw_file(file_ext):
         path_to_destination_photos = RAW_EXTENSIONS__FOLDERS_MAP[file_ext.lower(
         )]
-        # if file_ext.lower() in EXTENSIONS_SPECIAL_RAW_IMAGES:
-        #     path_to_destination_photos = full_path_of(FOLDER_CRW_CONV)
-        # if file_ext.lower() == ".arw":
-        #     path_to_destination_photos = full_path_of(FOLDER_ARW_CONV)
-        # else:
-        #     path_to_destination_photos = full_path_of(FOLDER_CRW_CONV)
-        #     COUNTERS["ORIG_RAWS"] += 1
     else:
         path_to_destination_photos = full_path_of(FOLDER_ORIG_JPG)
 
     destination_img_path = os.path.join(
         path_to_destination_photos, file_name + iterator_str(iterator) + file_ext)
+
+    if os.path.exists(destination_img_path):
+        COUNTERS["DUPLICATES"] += 1
+        source_md5 = file_md5(source_img_path)
+
+        existing_md5 = file_md5(destination_img_path)
+        existing_tag = "_DUPE_" + existing_md5 + "_0"
+        existing_dup_path = os.path.join(
+            path_to_destination_photos, file_name + existing_tag + file_ext)
+        if not os.path.exists(existing_dup_path):
+            os.rename(destination_img_path, existing_dup_path)
+            existing_exif = os.path.join(
+                path_to_destination_photos, file_name + iterator_str(iterator) + EXIF_EXTENSION)
+            existing_exif_dup = os.path.join(
+                path_to_destination_photos, file_name + existing_tag + EXIF_EXTENSION)
+            if os.path.exists(existing_exif):
+                os.rename(existing_exif, existing_exif_dup)
+
+        n = 1
+        while True:
+            new_tag = "_DUPE_" + source_md5 + "_" + str(n)
+            new_img_path = os.path.join(
+                path_to_destination_photos, file_name + new_tag + file_ext)
+            if not os.path.exists(new_img_path):
+                new_exif_path = os.path.join(
+                    path_to_destination_photos, file_name + new_tag + EXIF_EXTENSION)
+                return new_img_path, new_exif_path
+            n += 1
+
+    # basename.ext didn't exist, but this base name may already be dup'd
+    # (the original was renamed to _DUPE_<md5>_0.ext in a prior call)
+    dupe_prefix = file_name + "_DUPE_"
+    dest_dir = os.path.dirname(full_path_of(destination_img_path))
+    try:
+        dir_entries = os.listdir(dest_dir)
+    except:
+        dir_entries = []
+
+    if any(e.startswith(dupe_prefix) and e.endswith(file_ext) for e in dir_entries):
+        COUNTERS["DUPLICATES"] += 1
+        source_md5 = file_md5(source_img_path)
+        n = 1
+        while True:
+            new_tag = "_DUPE_" + source_md5 + "_" + str(n)
+            new_img_path = os.path.join(
+                path_to_destination_photos, file_name + new_tag + file_ext)
+            if not os.path.exists(new_img_path):
+                new_exif_path = os.path.join(
+                    path_to_destination_photos, file_name + new_tag + EXIF_EXTENSION)
+                return new_img_path, new_exif_path
+            n += 1
+
     destination_exif_path = os.path.join(
         path_to_destination_photos, file_name + iterator_str(iterator) + EXIF_EXTENSION)
-
-    # or os.path.exists(destination_exif_path):
-    if os.path.exists(destination_img_path):
-        # TODO:
-        if os.path.exists(destination_img_path) and os.path.getsize(destination_img_path) == \
-                os.path.getsize(source_img_path):
-            # when exifs existed on both sides, was giving this message
-            # print(">>> the same size")
-            COUNTERS["DUPLICATES"] += 1
-            if duplicate_str not in file_name:
-                file_name = file_name + duplicate_str
-                return get_the_destination_path(file_name, file_ext, source_img_path, 0)
-            else:
-                return get_the_destination_path(file_name, file_ext, source_img_path, (iterator + 1))
-
-        destination_img_duplicate_path = os.path.join(
-            path_to_destination_photos, file_name + iterator_str(iterator) + file_ext)
-
-        if os.path.exists(destination_img_duplicate_path):
-            print((INDENT_SMALL + "Renaming an inter-second name:  " +
-                   destination_img_duplicate_path))
-
-        return get_the_destination_path(file_name, file_ext, source_img_path, (iterator + 1))
-    else:
-        return destination_img_path, destination_exif_path
+    return destination_img_path, destination_exif_path
 
 
 def get_one_day_before_folder_name(folder_name):

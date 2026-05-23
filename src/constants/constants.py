@@ -312,5 +312,4 @@ TWO_NEWLINES = "\n\n"
 SUBROUTINE_LOG_INDENTATION = " " * 20
 pattern_name = "*.*"
 crw_pattern = "*.CRW"
-duplicate_str = "__DUPL"
 COMMAND_LINE_OPTION_GENERATE_EXIFS = "generate-exifs"

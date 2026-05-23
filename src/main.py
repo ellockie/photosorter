@@ -24,7 +24,6 @@ from common.common import \
     move_lossy_image_files, \
     print_header_footer, \
     redate_problematic_folder, \
-    rename_exif_file, \
     show_issues_info, \
     tada, \
     yield_exif_files_from_location, \
@@ -179,7 +178,7 @@ def _TASK_generate_exif_files():
                 "-g1",
                 # "-b",  # dump of the binary section
                 "-w!",
-                EXIF_EXTENSION,
+                f"%d%f.%e{EXIF_EXTENSION}",
                 full_path_of(FOLDER_UNSORTED)
                 # + "' > '" + PATH_TO_REPORT + "'"
             ]
@@ -212,7 +211,7 @@ def _TASK_collect_info_from_EXIF_files():
 
     # get filenames of images in unsorted folder
     for image_file_name in yield_image_files_from_location(full_path_of(FOLDER_UNSORTED), include_paths=False):
-        image_file_name_only, image_file_extension = os.path.splitext(
+        _, image_file_extension = os.path.splitext(
             image_file_name)
 
         # print(Colorise.red(INDENT_SMALL + "WARNING: stopped treating EXTENSIONS_SPECIAL_RAW_IMAGES specially"))
@@ -225,13 +224,11 @@ def _TASK_collect_info_from_EXIF_files():
             # continue
         # TODO: add handling for video files
 
-        # exif_file_name = full_path_of(FOLDER_UNSORTED, image_file_name_only + image_file_extension +
-        # EXIF_EXTENSION)
+        # exiftool now creates files with original extension embedded (e.g. IMG_1234.CRW._exif)
         exif_file_name = full_path_of(
-            FOLDER_UNSORTED, image_file_name_only + EXIF_EXTENSION)
+            FOLDER_UNSORTED, image_file_name + EXIF_EXTENSION)
         if not os.path.exists(exif_file_name):
-            # TIP: there could be file extension in exif file name!
-            print((Colorise.red(INDENT_SMALL + "WARNING: EXIF was probably already moved! (") +
+            print((Colorise.red(INDENT_SMALL + "WARNING: EXIF file not found! (") +
                    image_file_name + " > " + os.path.basename(exif_file_name) + Colorise.red("),")))
             continue
 
@@ -263,18 +260,12 @@ def _TASK_collect_info_from_EXIF_files():
             extraction_success = extract_data_from_exif_file_and_rename_original_image(
                 exif_file_handler, image_file_name)
         if extraction_success:
-            rename_exif_file(exif_file_name, image_file_name)
+            # exif file already has original extension embedded; no rename needed
+            pass
         else:
-            # print("WARNING, will be problem with '.jpeg' (4-letter) extensions". probably solved)
-            moved_exif_file_name = os.path.join(FULL_PATH_SUBFOLDER["NOT_ENOUGH_INFO"],
-                                                os.path.splitext(image_file_name)[0] + EXIF_EXTENSION)
-            try:
-                os.rename(
-                    exif_file_handler.name,
-                    moved_exif_file_name
-                )
-            except:
-                print((INDENT_SMALL + "Problem when moving EXIF files"))
+            # leave exif file in working folder; log the failure
+            print((Colorise.red(INDENT_SMALL + "EXIF extraction failed for ") +
+                   image_file_name + Colorise.red(" — leaving in place")))
 
 
 @print_current_task_name
@@ -288,9 +279,8 @@ def _TASK_rename_and_move_images_and_EXIF_files():
         file_name = get_file_name(img_data, raw_marker)
         source_img_path = full_path_of(
             FOLDER_UNSORTED, original_full_file_name)
-        destination_img_path, destination_exif_path = \
-            get_the_destination_path(
-                file_name, original_file_ext, source_img_path, 0)
+        destination_img_path, destination_exif_path = get_the_destination_path(
+            file_name, original_file_ext, source_img_path, 0)
 
         try:
             os.rename(source_img_path, full_path_of(destination_img_path))
@@ -300,20 +290,19 @@ def _TASK_rename_and_move_images_and_EXIF_files():
             print((INDENT_SMALL + "  source_img_path: " + source_img_path))
             print((INDENT_SMALL + "  destination_img_path: " +
                    full_path_of(destination_img_path)))
-        # now renaming EXIFs. they have original file extension as part of the file name
+        source_exif_path = full_path_of(
+            FOLDER_UNSORTED, original_full_file_name + EXIF_EXTENSION)
+        exif_dest_dir = os.path.join(
+            os.path.dirname(full_path_of(destination_img_path)),
+            SUBFOLDER_NAMES["EXIF"])
+        os.makedirs(exif_dest_dir, exist_ok=True)
+        dest_exif_path = os.path.join(
+            exif_dest_dir,
+            os.path.basename(destination_exif_path))
         try:
-            os.rename(
-                full_path_of(FOLDER_UNSORTED, original_file_name +
-                             original_file_ext + EXIF_EXTENSION),
-                full_path_of(destination_exif_path)
-            )
+            os.rename(source_exif_path, dest_exif_path)
         except:
-            print((Colorise.red(
-                INDENT_SMALL + "DUPLICATE EXIF OR FILE DOESN'T EXIST - THIS SHOULDN'T HAVE HAPPENED (?)")))
-            print((INDENT_SMALL + "  source_exif_path: " + full_path_of(FOLDER_UNSORTED,
-                                                                        original_file_name + original_file_ext + EXIF_EXTENSION)))
-            print((INDENT_SMALL + "  destination_exif_path: " +
-                   full_path_of(destination_exif_path)))
+            pass
 
 
 @print_current_task_name
@@ -399,10 +388,7 @@ def _TASK_move_the_results():
             if file_extension not in (EXTENSIONS_SUPPORTED_IMAGES + EXTENSIONS_SUPPORTED_NON_IMAGES):
                 # ignore not recognised extensions
                 continue
-            if file_extension == EXIF_EXTENSION:
-                move_file_to_destination(
-                    created_folders, image_file_name, "EXIF", SUBFOLDER_NAMES["EXIF"])
-            elif file_extension in EXTENSIONS_RAW_IMAGES:
+            if file_extension in EXTENSIONS_RAW_IMAGES:
                 move_file_to_destination(
                     created_folders, image_file_name, "RAW", SUBFOLDER_NAMES["RAW"])
             else:
@@ -448,8 +434,13 @@ def main():
     generate_exifs = True
     # generate_exifs = ask_if_generate_exifs()
     _TASK_remove_empty_image_files()
+    # Remove stale ._exif files before generating fresh ones
+    for exif_name in yield_pattern_matching_files_from_location(full_path_of(FOLDER_UNSORTED), "*._exif"):
+        try:
+            os.remove(exif_name[0])
+        except:
+            pass
     if generate_exifs:
-        _TASK_move_old_exif_files()
         _TASK_generate_exif_files()
     # _TASK_rename_exif_files()  # only lists them atm. renaming actually takes place in the task below.
     # good idea to separate:
