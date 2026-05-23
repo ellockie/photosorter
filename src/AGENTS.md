@@ -2,7 +2,7 @@
 
 ## OVERVIEW
 
-All photosorter application code. 10 Python files, ~6.2k lines. Single-entry pipeline (main.py) calling sequential `_TASK_*()` functions.
+All photosorter application code. 12 Python files, ~100KB. Single-entry pipeline (main.py) calling sequential `_TASK_*()` functions.
 
 ## STRUCTURE
 
@@ -32,6 +32,7 @@ src/
 |---------|------|-------|
 | Pipeline orchestration | `main.py` | `main()` calls 10+ tasks sequentially |
 | EXIF parsing & rename | `common/common.py` | `extract_data_from_exif_file_and_rename_original_image()` |
+| Duplicate detection | `common/common.py` | `file_md5()` — MD5 comparison before overwrite |
 | Folder creation logic | `common/common.py` | `create_date_folder()`, `create_missing_folders()` |
 | All constants | `constants/constants.py` | 316 lines — paths, cameras, extensions |
 | RAW file routing | `constants/constants.py` | `RAW_EXTENSIONS__FOLDERS_MAP` |

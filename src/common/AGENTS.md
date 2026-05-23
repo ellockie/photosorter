@@ -2,7 +2,7 @@
 
 ## OVERVIEW
 
-Core logic layer: EXIF extraction, file renaming, path building, folder creation. Imported by all major modules. 715 lines in `common.py`.
+Core logic layer: EXIF extraction, file renaming, path building, folder creation, duplicate detection. Imported by all major modules. ~830 lines in `common.py`.
 
 ## WHERE TO LOOK
 
@@ -15,6 +15,7 @@ Core logic layer: EXIF extraction, file renaming, path building, folder creation
 | `create_date_folder()` | `common.py:472` | Determines date folder based on time with day-division logic |
 | `get_the_destination_path()` | `common.py:413` | Resolves destination with duplicate handling |
 | `full_path_of()` | `common.py:348` | Path builder: joins root + folder + trailing parts |
+| `file_md5()` | `common.py:358` | MD5 hex digest for duplicate detection |
 | `COUNTERS` | `globals.py:1` | Mutable dict: FAILS, DUPLICATES, PROBLEMATIC_FILES, etc. |
 | `FULL_PATH_SUBFOLDER` | `globals.py:14` | Resolved paths for PROBLEMATIC subfolders |
 
@@ -24,6 +25,7 @@ Core logic layer: EXIF extraction, file renaming, path building, folder creation
 - Yield generators for file iteration (`yield_image_files_from_location`, `yield_exif_files_from_location`)
 - ExifTool output parsed line-by-line (not XML/JSON) via `extract_value_of_EXIF_key()`
 - Unknown camera models trigger terminal beep + interactive input
+- Duplicate files resolved by MD5 comparison before overwrite/remove
 
 ## ANTI-PATTERNS
 
