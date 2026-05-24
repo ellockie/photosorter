@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>photosorter</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>photosorter</h1>
+          <p id="statusLine">Idle</p>
+        </div>
+        <nav class="controls" aria-label="Pipeline controls">
+          <button id="startBtn" type="button" title="Start">▶</button>
+          <button id="pauseBtn" type="button" title="Pause">Ⅱ</button>
+          <button id="resumeBtn" type="button" title="Resume">↻</button>
+          <button id="stepBtn" type="button" title="Step">↦</button>
+        </nav>
+      </header>
+
+      <section id="criticalAlert" class="critical hidden" role="alert"></section>
+
+      <section class="workspace">
+        <div class="graph-band">
+          <svg id="graph" role="img" aria-label="Pipeline stage graph"></svg>
+        </div>
+
+        <aside class="status-panel">
+          <div class="metric-row">
+            <span>Processed</span>
+            <strong id="processedCount">0</strong>
+          </div>
+          <div class="metric-row">
+            <span>Assets</span>
+            <strong id="assetCount">0</strong>
+          </div>
+          <div class="metric-row">
+            <span>State</span>
+            <strong id="runState">idle</strong>
+          </div>
+          <h2>Logs</h2>
+          <ol id="logs"></ol>
+        </aside>
+      </section>
+    </main>
+
+    <dialog id="promptDialog">
+      <form method="dialog" id="promptForm">
+        <h2 id="promptTitle">Decision Required</h2>
+        <div id="promptBody"></div>
+        <menu class="dialog-actions">
+          <button value="cancel" type="button" id="cancelPromptBtn">Cancel</button>
+          <button value="submit" type="submit">Submit</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

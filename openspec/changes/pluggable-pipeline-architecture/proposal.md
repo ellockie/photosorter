@@ -1,0 +1,68 @@
+## Why
+
+The current `photosorter` application is a monolithic, tightly coupled sequence of procedural tasks in `src/main.py`, with shared mutable state in `src/common/globals.py` and file-system side effects spread across `src/common/common.py` and related modules. That makes the pipeline hard to extend, hard to visualize, and risky to refactor because related files, generated sidecars, counters, and manual prompts are not modeled as one coherent execution state.
+
+This change upgrades the application into a pluggable DAG-based pipeline with explicit state, an embedded local FastAPI dashboard, robust post-run safety verification, and deterministic filename collision handling. The safety goal is strict: prevent catastrophic file loss or silent corruption during rename, move, conversion, and sorting operations.
+
+## What Changes
+
+- **BREAKING**: Refactor `src/main.py` from hardcoded sequential `_TASK_*()` calls into a CLI/UI entrypoint that starts either a headless pipeline run or a local dashboard-backed run.
+- **BREAKING**: Deprecate module-level global state in `src/common/globals.py` and replace it with an encapsulated `PipelineContext` passed between stages.
+- Add `src/core.py` containing `MediaAsset`, `PipelineContext`, `PipelineStage`, `StagedWorkspaceStage`, `SafetyValidationStage`, `NameCollisionResolver`, and shared file-operation safety helpers.
+- Add `src/stages.py` containing stage wrappers for the existing pipeline behavior: initialization, upload harvesting, batch ExifTool generation, metadata extraction, rename/sort, raw staged conversion, and folder sorting.
+- Require each pipeline stage to live in its own module, with reusable shared modules allowed for common logic, so individual stages can be developed and reviewed independently with minimal context/token usage.
+- Add `src/server.py` containing a local FastAPI application with REST control routes and WebSocket progress/prompt channels.
+- Add a static local dashboard (`index.html`, `style.css`, `app.js`) using vanilla HTML, CSS, and JavaScript by default to avoid frontend build steps and minimize local runtime fragility.
+- Add dynamic `config.json` persistence for paths, supported extensions, camera symbols, dashboard port, collision thresholds, and external tool locations.
+- Add a robust safety verifier that snapshots input files and validates final output counts, MD5 identities, and zero-byte files.
+- Preserve all legacy observable photo-processing behavior as hard parity requirements, including filename grammar, date grouping, EXIF/RAW subfolders, duplicate suffixes, problematic folder taxonomy, stale EXIF handling, and camera-upload ingestion semantics.
+- Keep the new single-root `____INGEST_PIPELINE` working structure as the internal pipeline layout, with legacy concepts mapped into the new structure rather than reverting the architecture.
+- Add an advanced name collision resolver:
+  - Identical MD5 files are treated as redundant duplicates.
+  - If one file is both older and larger, it is kept as the original and the other is renamed.
+  - If one file is significantly smaller than the other (default threshold: under 50%), it is automatically classified as a low-resolution duplicate and renamed.
+  - Ambiguous collisions pause execution and prompt the user through the dashboard.
+- Replace terminal beeps/blocking prompts for unknown cameras and ambiguous collisions with WebSocket-driven dashboard prompts.
+
+## User Review Required
+
+This is a major architectural refactor. It changes the execution model, runtime entrypoint, configuration ownership, user interaction model, and file-operation safety boundaries. Before implementation, the following assumptions should be reviewed:
+
+- The dashboard frontend will be implemented with vanilla HTML, CSS, and JavaScript unless a heavier framework is explicitly requested.
+- The dashboard frontend will be implemented with React/Vite, committed as a built static bundle for runtime use.
+- The dashboard will bind to `localhost:8888` by default, with an override in `config.json` and CLI args.
+- The pipeline will remain a local, single-user Windows utility; no cloud, database, or multi-user support is included.
+
+## Capabilities
+
+### New Capabilities
+
+- `pipeline-core`: Pluggable DAG execution engine with `PipelineContext`, `MediaAsset`, transaction-like Windows-safe file operations, staged workspaces for external tools, safety snapshots, post-run validation, and collision resolution.
+- `web-ui-dashboard`: Local FastAPI dashboard with WebSocket progress updates, REST controls, stage graph visualization, live logs, unknown camera prompts, collision prompts, and critical safety alerts.
+- `legacy-behavior-parity`: Guarantees that the new staged pipeline preserves legacy naming, grouping, sidecar movement, RAW/EXIF subfolders, duplicate handling, problematic folder taxonomy, and camera-upload semantics while using the new working folder layout.
+- `testing-framework`: Contract, unit, and end-to-end pytest coverage for stages, sandboxing, collision resolution, safety validation, and dashboard control surfaces.
+
+### Modified Capabilities
+
+(None. There are no pre-existing specification files in this repository.)
+
+## Impact
+
+- **Affected Files**:
+  - `src/main.py`: Refactored into the primary runtime entrypoint with `--cli`, `--ui`, and port/config handling.
+  - `src/common/globals.py`: Deprecated in favor of `PipelineContext`.
+  - `src/common/common.py`: Existing helpers are retained where practical but adapted behind stage and asset abstractions.
+  - `src/constants/constants.py`: Static constants are migrated or mirrored into `config.json`.
+- **New Files**:
+  - `src/core.py`
+  - `src/stages.py`
+  - `src/server.py`
+  - Dashboard static files such as `index.html`, `style.css`, and `app.js`
+  - `config.json`
+- **Dependencies Added**:
+  - `fastapi`, `uvicorn`, and `websockets`
+  - Standard-library `dataclasses`, `pathlib`, `threading`, `queue`, and `hashlib` where possible
+- **Runtime Behavior**:
+- `_photosorter.bat` continues to launch the existing legacy CLI pipeline by default until the stage-based pipeline has full parity for date-folder sorting and EXIF sidecar handling.
+- UI mode is available through `python src/main.py --ui` and starts a localhost FastAPI server.
+- CLI/headless legacy mode remains available through `python src/main.py --cli`.

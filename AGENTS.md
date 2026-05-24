@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-05-20
-**Commit:** 2450f1e
+**Generated:** 2026-05-23
+**Commit:** ba189bd
 **Branch:** master
 
 ## OVERVIEW
@@ -30,7 +30,7 @@ photosorter — Python 3.13 photo processing pipeline: rename, sort, and organis
 | Task | Location | Notes |
 |------|----------|-------|
 | Main pipeline logic | `src/main.py` | Sequential `_TASK_*()` calls |
-| EXIF extraction & file rename | `src/common/common.py` | 715 lines — core logic |
+| EXIF extraction & file rename | `src/common/common.py` | ~830 lines — core logic |
 | All paths & camera symbols | `src/constants/constants.py` | `PHOTO_BASE_FOLDER` env var required |
 | Global counters | `src/common/globals.py` | Mutable module-level state |
 | Folder sorting into year/month | `src/folder_sorter.py` | `ReadyPhotosFolderMover` class |
@@ -48,6 +48,8 @@ photosorter — Python 3.13 photo processing pipeline: rename, sort, and organis
 - Print-based logging with `Colorise.*` for terminal colours
 - Bare `except:` blocks (no exception type) are accepted project-wide pattern
 - Path building uses `full_path_of(folder_name, ...)` helper, never raw `os.path.join`
+- Duplicate detection uses MD5 comparison via `file_md5()` before overwriting
+- Stale `._exif` files cleaned before regeneration in pipeline
 
 ## ANTI-PATTERNS (THIS PROJECT)
 

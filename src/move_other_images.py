@@ -1,4 +1,5 @@
 import ntpath
+import os
 import shutil
 from os.path import isfile, join, normpath
 from os import listdir
@@ -22,6 +23,9 @@ assert sys.version.startswith("3."), "Error: Python 3 is required!"
 OTHER_IMAGES_FOLDER = "_Other images"
 OTHER_FILES_FOLDER = "_Other files"
 NOT_MOVEABLE_FILE = 'desktop.ini'
+DEFAULT_CAMERA_IMAGE_EXTENSIONS = (".jpg", ".jpeg")
+DEFAULT_OTHER_IMAGE_EXTENSIONS = (".png", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".heic", ".heif")
+DEFAULT_VIDEO_EXTENSIONS = (".mp4",)
 
 counter = {
     "PHOTOS": 0,
@@ -37,15 +41,32 @@ def get_jpgs(src_path):
     return my_jpgs
 
 
-def get_videos(src_path):
+def normalise_extensions(extensions):
+    return tuple(
+        extension.lower()
+        for extension in extensions
+    )
+
+
+def get_videos(src_path, video_extensions=DEFAULT_VIDEO_EXTENSIONS):
+    video_extensions = normalise_extensions(video_extensions)
     my_videos = [join(src_path, f) for f in listdir(src_path) if isfile(
-        join(src_path, f)) and f.lower().endswith(".mp4")]
+        join(src_path, f)) and f.lower().endswith(video_extensions)]
     counter["VIDEOS"] = len(my_videos)
 
 
-def get_other_files(src_path):
+def get_other_image_files(src_path, other_image_extensions=DEFAULT_OTHER_IMAGE_EXTENSIONS):
+    other_image_extensions = normalise_extensions(other_image_extensions)
+    return [join(src_path, f) for f in listdir(src_path) if isfile(
+        join(src_path, f)) and f.lower().endswith(other_image_extensions)]
+
+
+def get_other_files(src_path, ignored_extensions=None):
+    ignored_extensions = normalise_extensions(ignored_extensions or (
+        DEFAULT_CAMERA_IMAGE_EXTENSIONS + DEFAULT_OTHER_IMAGE_EXTENSIONS + DEFAULT_VIDEO_EXTENSIONS
+    ))
     other_files = [join(src_path, f) for f in listdir(src_path) if isfile(
-        join(src_path, f)) and not f.lower().endswith(".jpg") and not f.lower().endswith(".mp4") and not f.endswith("desktop.ini")]
+        join(src_path, f)) and not f.lower().endswith(ignored_extensions) and not f.endswith("desktop.ini")]
     return other_files
 
 
@@ -75,6 +96,14 @@ def move_other_image(d, src_path):
     counter["OTHER_IMAGES"] += 1
 
 
+def process_other_image_files(files, src_path):
+    for src_file_path in files:
+        dest = join(src_path, OTHER_IMAGES_FOLDER, get_filename_from_path(src_file_path))
+        shutil.move(src_file_path, dest)
+        print(f"{SUBROUTINE_LOG_INDENTATION} - 'other' image:   {ntpath.basename(dest)}")
+        counter["OTHER_IMAGES"] += 1
+
+
 def process_other_files(files, src_path):
     for src_file_path in files:
         if NOT_MOVEABLE_FILE in src_file_path:
@@ -97,14 +126,21 @@ def display_stats():
     print(f"{SUBROUTINE_LOG_INDENTATION}                           Videos:  {counter['VIDEOS']}")
 
 
-def move_other_images():
-    src_path = CAMERA_UPLOADS_PATH
+def move_other_images(
+        src_path=CAMERA_UPLOADS_PATH,
+        other_image_extensions=DEFAULT_OTHER_IMAGE_EXTENSIONS,
+        video_extensions=DEFAULT_VIDEO_EXTENSIONS):
     src_path = normpath(src_path)
+    os.makedirs(join(src_path, OTHER_IMAGES_FOLDER), exist_ok=True)
+    os.makedirs(join(src_path, OTHER_FILES_FOLDER), exist_ok=True)
     jpg_files = get_jpgs(src_path)
     process_jpgs(jpg_files, src_path)
-    other_files = get_other_files(src_path)
+    other_image_files = get_other_image_files(src_path, other_image_extensions)
+    process_other_image_files(other_image_files, src_path)
+    ignored_extensions = DEFAULT_CAMERA_IMAGE_EXTENSIONS + tuple(other_image_extensions) + tuple(video_extensions)
+    other_files = get_other_files(src_path, ignored_extensions)
     process_other_files(other_files, src_path)
-    get_videos(src_path)
+    get_videos(src_path, video_extensions)
     display_stats()
 
 

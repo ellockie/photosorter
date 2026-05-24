@@ -1,3 +1,8 @@
+# Deprecated for the pluggable pipeline runtime.
+#
+# Legacy CLI tasks still read and mutate these module-level values. New pipeline
+# stages must route counters, prompt state, and asset state through
+# src.core.PipelineContext instead.
 COUNTERS = {
     'FAILS': 0,
     'INFO_EXTRACTION_CRITICAL_FAILS': 0,

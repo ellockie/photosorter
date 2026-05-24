@@ -1,11 +1,17 @@
+import argparse
 import os
 import sys
 import time
 import ntpath
 import subprocess
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from common.common import \
     convert_CRW, \
+    create_date_folder, \
     create_missing_folders, \
     create_problematic_folders, \
     display_extra_messages, \
@@ -379,6 +385,42 @@ def _TASK_launch_sony_converter():
     )
 
 
+def _TASK_move_result_exif_sidecar(image_file_name, destination_folder):
+    image_path, image_name = image_file_name
+    source_folder = os.path.dirname(image_path)
+    image_stem, _ = os.path.splitext(image_name)
+    candidate_names = [
+        image_stem + EXIF_EXTENSION,
+        image_name + EXIF_EXTENSION,
+    ]
+    candidate_folders = [
+        os.path.join(source_folder, SUBFOLDER_NAMES["EXIF"]),
+        source_folder,
+    ]
+    destination_exif_folder = os.path.join(destination_folder, SUBFOLDER_NAMES["EXIF"])
+
+    for candidate_folder in candidate_folders:
+        for candidate_name in candidate_names:
+            source_exif_path = os.path.join(candidate_folder, candidate_name)
+            if not os.path.exists(source_exif_path):
+                continue
+            os.makedirs(destination_exif_folder, exist_ok=True)
+            destination_exif_path = os.path.join(destination_exif_folder, candidate_name)
+            try:
+                if os.path.exists(destination_exif_path):
+                    if file_sizes_the_same(source_exif_path, destination_exif_path):
+                        os.remove(source_exif_path)
+                        return
+                    destination_exif_path = os.path.join(
+                        destination_exif_folder,
+                        image_stem + "_DUPE_EXIF" + EXIF_EXTENSION,
+                    )
+                os.rename(source_exif_path, destination_exif_path)
+            except:
+                print((Colorise.red(INDENT_SMALL + "Problem when moving EXIF sidecar: ") + source_exif_path))
+            return
+
+
 @print_current_task_name
 @display_timing
 def _TASK_move_the_results():
@@ -389,10 +431,14 @@ def _TASK_move_the_results():
                 # ignore not recognised extensions
                 continue
             if file_extension in EXTENSIONS_RAW_IMAGES:
+                destination_folder = create_date_folder(image_file_name[1])
                 move_file_to_destination(
                     created_folders, image_file_name, "RAW", SUBFOLDER_NAMES["RAW"])
+                _TASK_move_result_exif_sidecar(image_file_name, destination_folder)
             else:
+                destination_folder = create_date_folder(image_file_name[1])
                 move_lossy_image_files(image_file_name)
+                _TASK_move_result_exif_sidecar(image_file_name, destination_folder)
 
 
 @print_current_task_name
@@ -420,7 +466,7 @@ def _TASK_show_stats():
     display_task_stats()
 
 
-def main():
+def legacy_main():
     print_header_footer()
 
     processing_start_time = time.time()
@@ -455,6 +501,43 @@ def main():
     tada()
 
     print_header_footer()
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="photosorter pipeline runner")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--ui",
+        action="store_true",
+        help="start the local dashboard-backed pipeline runner",
+    )
+    mode.add_argument(
+        "--cli",
+        action="store_true",
+        help="run the legacy command-line pipeline",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="dashboard port, defaults to config.json or 8000",
+    )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="path to config.json",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    if args.ui:
+        from src.server import run_server
+        run_server(config_path=args.config, port=args.port)
+        return
+
+    legacy_main()
 
 
 if __name__ == "__main__":

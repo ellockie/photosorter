@@ -1,25 +1,32 @@
 import os
 from os.path import join
 
-assert "PHOTO_BASE_FOLDER" in os.environ \
-    and os.environ["PHOTO_BASE_FOLDER"] \
-    and os.environ["PHOTO_BASE_FOLDER"] != "", \
-    "'PHOTO_BASE_FOLDER' environment variable is missing.\
+assert (
+    "PHOTO_BASE_FOLDER" in os.environ
+    and os.environ["PHOTO_BASE_FOLDER"]
+    and os.environ["PHOTO_BASE_FOLDER"] != ""
+), "'PHOTO_BASE_FOLDER' environment variable is missing.\
     Set it with SETX ('https://ss64.com/nt/setx.html')"
 
 
 # path_to_exiftool_script = "_exiftool.bat"
 EXIFTOOL_NAME = "exiftool"
 
-PATH_TO_IRFANVIEW = os.path.normpath(r"c:\_[SOFT] - Grafika\__Browsers, Viewers\IrfanView\i_view32.exe")
-PATH_TO_DPVIEWER = os.path.normpath(r"c:\Program Files (x86)\Canon\Digital Photo Professional\DPPViewer.exe")
-PATH_TO_SONY_CONVERTER = os.path.normpath(r"c:\Program Files\Sony\Imaging Edge Desktop\ied.exe")
+PATH_TO_IRFANVIEW = os.path.normpath(
+    r"c:\_[SOFT] - Grafika\__Browsers, Viewers\IrfanView\i_view32.exe"
+)
+PATH_TO_DPVIEWER = os.path.normpath(
+    r"c:\Program Files (x86)\Canon\Digital Photo Professional\DPPViewer.exe"
+)
+PATH_TO_SONY_CONVERTER = os.path.normpath(
+    r"c:\Program Files\Sony\Imaging Edge Desktop\ied.exe"
+)
 TESTING_MODE = False
 
 # folder names
-PHOTO_BASE_FOLDER = os.environ['PHOTO_BASE_FOLDER']
+PHOTO_BASE_FOLDER = os.environ["PHOTO_BASE_FOLDER"]
 
-CAMERA_UPLOADS_PATH = os.path.normpath('c:/Users/luxxa/Dropbox/Camera Uploads')
+CAMERA_UPLOADS_PATH = os.path.normpath("c:/Users/luxxa/Dropbox/Camera Uploads")
 FOLDER_TO_BE_SORTED = "____TO_SORT"
 FOLDER_TO_BE_SORTED_FULL_PATH = join(PHOTO_BASE_FOLDER, FOLDER_TO_BE_SORTED)
 PATHS = {
@@ -33,9 +40,11 @@ FOLDER_PROBLEMATIC = "__PROBLEMATIC"
 FOLDER_PROBLEMATIC_OLD_EXIF = join("__PROBLEMATIC", "old_EXIF")
 FOLDER_READY = "__READY"
 READY_PHOTOS_SOURCE_FOLDER_FULL_PATH = join(
-    PHOTO_BASE_FOLDER, FOLDER_TO_BE_SORTED, FOLDER_READY)
+    PHOTO_BASE_FOLDER, FOLDER_TO_BE_SORTED, FOLDER_READY
+)
 FOLDER_ORGANISER_WORKING_FOLDER = join(
-    READY_PHOTOS_SOURCE_FOLDER_FULL_PATH, "___WORKING_FOLDER")
+    READY_PHOTOS_SOURCE_FOLDER_FULL_PATH, "___WORKING_FOLDER"
+)
 
 # FOLDER_ORIG_RAW = "1. Original RAW"
 FOLDER_CR2_CONV = "1. Original RAW_CR2"
@@ -51,12 +60,26 @@ FOLDER_EXTRACTED_JPG = "2. Extracted JPG"
 FOLDER_TIMEZONE_CORR = "2. Ready for timezone correction"
 FOLDER_SORT_READY = "3. Ready to be sorted"
 
-FOLDERS_RAW = [FOLDER_CR2_CONV, FOLDER_CRW_CONV, FOLDER_MPO_CONV,
-               FOLDER_ARW_CONV, FOLDER_RW2_CONV, FOLDER_DNG_CONV]
-FOLDERS_RESULT = FOLDERS_RAW + \
-    [FOLDER_ORIG_JPG, FOLDER_SORT_READY, FOLDER_EXTRACTED_JPG]
+FOLDERS_RAW = [
+    FOLDER_CR2_CONV,
+    FOLDER_CRW_CONV,
+    FOLDER_MPO_CONV,
+    FOLDER_ARW_CONV,
+    FOLDER_RW2_CONV,
+    FOLDER_DNG_CONV,
+]
+FOLDERS_RESULT = FOLDERS_RAW + [
+    FOLDER_ORIG_JPG,
+    FOLDER_SORT_READY,
+    FOLDER_EXTRACTED_JPG,
+]
 FOLDERS_ALL = FOLDERS_RESULT + [
-    FOLDER_UNSORTED, FOLDER_PROBLEMATIC, FOLDER_READY, FOLDER_TIMEZONE_CORR, FOLDER_PROBLEMATIC_OLD_EXIF]
+    FOLDER_UNSORTED,
+    FOLDER_PROBLEMATIC,
+    FOLDER_READY,
+    FOLDER_TIMEZONE_CORR,
+    FOLDER_PROBLEMATIC_OLD_EXIF,
+]
 
 # Problematic subfolders
 SUBFOLDER_UNSUPPORTED_EXT = "##   UNSUPPORTED EXTENSIONS   ##"
@@ -67,9 +90,9 @@ SUBFOLDER_DUPLICATE_FILE_NAMES = "##   DUPLICATE_FILE_NAMES FILES   ##"
 SUBFOLDER_INCOMPL_EXIF = "##   INCOMPLETE EXIF   ##"
 
 SUBFOLDER_NAMES = {
-    "RAW":  "##   RAWs   ##",
+    "RAW": "##   RAWs   ##",
     "EXIF": "##   EXIFs   ##",
-    "META": "[==   meta   ==]"
+    "META": "[==   meta   ==]",
 }
 READY_FOLDER_DECORATION_STRING = ") - 1. ######"
 
@@ -80,29 +103,30 @@ RAW_MARKER_STR = "RAW__"
 KNOWN_CAMERAS_SYMBOLS = [
     ("", "NOID"),
     ("<KENOX S1050  / Samsung S1050>", "S1050"),
+    ("Canon EOS 1000D", "1000D"),
+    ("Canon EOS 100D", "100D"),
+    ("Canon EOS 1100D", "1100D"),
+    ("Canon EOS 350D DIGITAL", "350D"),
+    ("Canon EOS 400D DIGITAL", "400D"),
+    ("Canon EOS 40D", "40D"),
+    ("Canon EOS 450D", "450D"),
+    ("Canon EOS 500D", "500D"),
+    ("Canon EOS 50D", "50D"),
+    ("Canon EOS 550D", "550D"),
     ("Canon EOS 5D Mark II", "5D2"),
     ("Canon EOS 5D Mark III", "5D3"),
     ("Canon EOS 5D Mark IV", "5D4"),
     ("Canon EOS 5D", "5D"),
     ("Canon EOS 5DS R", "5DSR"),
     ("Canon EOS 5DS", "5DS"),
+    ("Canon EOS 600D", "600D"),
+    ("Canon EOS 60D", "60D"),
+    ("Canon EOS 650D", "650D"),
     ("Canon EOS 6D", "6D"),
+    ("Canon EOS 70D", "70D"),
     ("Canon EOS 7D Mark II", "7D2"),
     ("Canon EOS 7D", "7D"),
-    ("Canon EOS 40D", "40D"),
-    ("Canon EOS 50D", "50D"),
-    ("Canon EOS 60D", "60D"),
-    ("Canon EOS 70D", "70D"),
-    ("Canon EOS 100D", "100D"),
-    ("Canon EOS 350D DIGITAL", "350D"),
-    ("Canon EOS 400D DIGITAL", "400D"),
-    ("Canon EOS 450D", "450D"),
-    ("Canon EOS 500D", "500D"),
-    ("Canon EOS 550D", "550D"),
-    ("Canon EOS 600D", "600D"),
-    ("Canon EOS 650D", "650D"),
-    ("Canon EOS 1000D", "1000D"),
-    ("Canon EOS 1100D", "1100D"),("Canon EOS Kiss X7", "CKISX7"),
+    ("Canon EOS Kiss X7", "CKISX7"),
     ("Canon EOS M", "CM"),
     ("Canon EOS REBEL T1i", "REBT1i"),
     ("Canon EOS REBEL T2i", "REBT2i"),
@@ -132,6 +156,7 @@ KNOWN_CAMERAS_SYMBOLS = [
     ("FinePix REAL 3D W1", "3DW1"),
     ("FinePix REAL 3D W3", "3DW3"),
     ("FinePix XP30", "XP30"),
+    ("Galaxy S23 Ultra", "SG23U"),
     ("GoPro Max", "GoProMX"),
     ("GT-I5500", "SG5"),
     ("GT-I9505", "S4"),
@@ -140,13 +165,13 @@ KNOWN_CAMERAS_SYMBOLS = [
     ("Hipsteroku", "HPR"),
     ("iDV", "3DAP"),
     ("ILCA-77M2", "ILCA-77M2"),
+    ("ILCE-5000", "ILC5K"),
+    ("ILCE-6000", "ILC6K"),
     ("ILCE-7", "ILC7"),
     ("ILCE-7M2", "ILC7M2"),
     ("ILCE-7R", "ILC7R"),
     ("ILCE-7RM2", "ILC7R2"),
     ("ILCE-7RM5", "ILC7R5"),
-    ("ILCE-5000", "ILC5K"),
-    ("ILCE-6000", "ILC6K"),
     ("iPhone 4s", "iP4s"),
     ("iPhone 5", "iP5"),
     ("iPhone 5s", "iP5s"),
@@ -164,38 +189,38 @@ KNOWN_CAMERAS_SYMBOLS = [
     ("NIKON 1 S1", "N1S1"),
     ("Nikon COOLSCAN V ED", "NCSV"),
     ("NIKON D3", "ND3"),
-    ("NIKON D3S", "ND3S"),
-    ("NIKON D4", "ND4"),
-    ("NIKON D4S", "ND4S"),
-    ("NIKON D40X", "ND40X"),
-    ("NIKON D60", "ND60"),
-    ("NIKON D90", "ND90"),
     ("NIKON D300", "ND300"),
     ("NIKON D300S", "ND300S"),
-    ("NIKON D600", "ND600"),
-    ("NIKON D610", "ND610"),
-    ("NIKON D700", "ND700"),
-    ("NIKON D750", "ND750"),
-    ("NIKON D800", "ND800"),
-    ("NIKON D800E", "ND800E"),
-    ("NIKON D810", "ND810"),
     ("NIKON D3100", "ND3100"),
     ("NIKON D3200", "ND3200"),
     ("NIKON D3300", "ND3300"),
+    ("NIKON D3S", "ND3S"),
+    ("NIKON D4", "ND4"),
+    ("NIKON D40X", "ND40X"),
+    ("NIKON D4S", "ND4S"),
     ("NIKON D5100", "ND5100"),
     ("NIKON D5200", "ND5200"),
     ("NIKON D5300", "ND5300"),
     ("NIKON D5500", "ND5500"),
+    ("NIKON D60", "ND60"),
+    ("NIKON D600", "ND600"),
+    ("NIKON D610", "ND610"),
+    ("NIKON D700", "ND700"),
     ("NIKON D7000", "ND7K"),
     ("NIKON D7100", "ND7100"),
     ("NIKON D7200", "ND7200"),
+    ("NIKON D750", "ND750"),
+    ("NIKON D800", "ND800"),
+    ("NIKON D800E", "ND800E"),
+    ("NIKON D810", "ND810"),
+    ("NIKON D90", "ND90"),
     ("Nintendo 3DS", "N3DS"),
     ("NX30", "NX30"),
     ("PENTAX K-3 II", "PTK32"),
     ("PENTAX K-3", "PTK3"),
+    ("PENTAX K-30", "PTK30"),
     ("PENTAX K-5 II s", "PTK5IIs"),
     ("PENTAX K-5", "PTK5"),
-    ("PENTAX K-30", "PTK30"),
     ("Perfection V800/V850", "PRF8"),
     ("SIGMA dp1 Quattro", "Sdp14"),
     ("SLT-A58", "SLTA58"),
@@ -222,10 +247,11 @@ KNOWN_CAMERAS_SYMBOLS = [
 MY_CAMERA_SYMBOLS = [
     "Canon PowerShot G6",
     "FC7303",
+    "Galaxy S23 Ultra",
     "ILCE-7RM2",
     "ILCE-7RM5",
     "SM-G965F",
-    "SM-S9080"
+    "SM-S9080",
 ]
 
 EXTENSION_RAW_ARW = ".arw"
@@ -259,10 +285,7 @@ EXTENSIONS_LOSSY_IMAGES = [
 EXTENSIONS_SUPPORTED_IMAGES = EXTENSIONS_LOSSY_IMAGES + EXTENSIONS_RAW_IMAGES
 EXIF_EXTENSION = "._exif"
 # lowercase only
-EXTENSIONS_SUPPORTED_NON_IMAGES = [
-    EXIF_EXTENSION,
-    ".txt_supported"
-]
+EXTENSIONS_SUPPORTED_NON_IMAGES = [EXIF_EXTENSION, ".txt_supported"]
 RAW_EXTENSIONS__FOLDERS_MAP = {
     EXTENSION_RAW_ARW: FOLDER_ARW_CONV,
     EXTENSION_RAW_CRW: FOLDER_CRW_CONV,
@@ -274,7 +297,9 @@ RAW_EXTENSIONS__FOLDERS_MAP = {
 PHOTO_SELECTION_COPIER = {
     "DESTINATION_LOCATION": "z:\\__shared_photos",
     "PATTERNS_TO_INCLUDE": [r"*.jpg", r"*.JPG"],
-    "PATTERNS_TO_IGNORE": list(SUBFOLDER_NAMES.values()) + [r"*__RAW", r"*\.cr2", r"*\.CR2"] + EXTENSIONS_RAW_IMAGES,
+    "PATTERNS_TO_IGNORE": list(SUBFOLDER_NAMES.values())
+    + [r"*__RAW", r"*\.cr2", r"*\.CR2"]
+    + EXTENSIONS_RAW_IMAGES,
     "SHAREABLE_FOLDER_MARKER_FILE_NAME": "marker_ok_to_share",
     "SOURCE_PHOTO_FOLDER_PATHS": [
         PHOTO_BASE_FOLDER + r"\\2012\\",
@@ -284,7 +309,7 @@ PHOTO_SELECTION_COPIER = {
         PHOTO_BASE_FOLDER + r"\\2016\\",
         PHOTO_BASE_FOLDER + r"\\2017\\",
         PHOTO_BASE_FOLDER + r"\\2018\\",
-    ]
+    ],
 }
 
 MONTH_FOLDERS = {
@@ -299,7 +324,7 @@ MONTH_FOLDERS = {
     "09": "09. September",
     "10": "10. October",
     "11": "11. November",
-    "12": "12. December"
+    "12": "12. December",
 }
 
 INDENT_VERY_SMALL = "         "

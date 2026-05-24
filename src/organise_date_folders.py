@@ -53,4 +53,5 @@ def main():
         # else:
         #     print FOLDER_ORGANISER_WORKING_FOLDER
 
-main()
+if __name__ == "__main__":
+    main()

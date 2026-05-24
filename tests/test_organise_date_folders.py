@@ -4,10 +4,10 @@ import pytest
 
 
 def test_get_photo_monthly_folder_path_correct_date1():
-    assert odf.get_photo_monthly_folder_path("2018-10-01") == r"h:\\__ Photos\2018\10. October"
+    assert odf.get_photo_monthly_folder_path("2018-10-01") == odf.os.path.join(odf.PHOTO_BASE_FOLDER, "2018", "10. October")
 
 def test_get_photo_monthly_folder_path_correct_date2():
-    assert odf.get_photo_monthly_folder_path("2018-10-01") == r"h:\\__ Photos\2018\10. October"
+    assert odf.get_photo_monthly_folder_path("2018-10-01") == odf.os.path.join(odf.PHOTO_BASE_FOLDER, "2018", "10. October")
 
 def test_get_photo_monthly_folder_path_incorrect_date1():
     with pytest.raises(AssertionError):

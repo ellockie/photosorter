@@ -11,11 +11,21 @@ dependencies = [
     "colorama (==0.4.4)",
     "python-dateutil (==2.9.0.post0)",
     "pyexiftool @ git+https://github.com/smarnach/pyexiftool.git",
-    "pandas (>=2.2.3,<3.0.0)"
+    "pandas (>=2.2.3,<3.0.0)",
+    "fastapi (>=0.115.0,<1.0.0)",
+    "uvicorn (>=0.30.0,<1.0.0)",
+    "websockets (>=13.0,<16.0)"
 ]
+
+[tool.poetry]
+package-mode = false
 
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "src"]
 

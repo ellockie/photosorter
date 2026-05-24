@@ -1,0 +1,74 @@
+## 1. Core Pipeline Engine
+
+- [x] 1.1 Create `src/core.py` with `MediaAsset`, including primary path, sidecar dictionary, and synchronized `rename_all`, `move_all`, and `delete_all` operations.
+- [x] 1.2 Add Windows-safe file operation helpers with retry/backoff for rename, move, delete, and MD5 reads.
+- [x] 1.3 Implement `PipelineContext` with assets, loaded config, counters, stage states, prompt queues, and input safety snapshot storage.
+- [x] 1.4 Implement `PipelineStage` with metadata, dependency declarations, `execute`, and `cleanup` contracts.
+- [x] 1.5 Implement DAG orchestration with dependency ordering, active/paused/failed/completed stage states, and headless/UI execution modes.
+- [x] 1.6 Implement `StagedWorkspaceStage` for isolated temporary folders, extension filtering, external tool waits, sidecar sweeping, and cleanup.
+- [x] 1.7 Implement `SafetyValidationStage` with output count checks, MD5 identity verification, zero-byte detection, registered exceptions, and `CatastrophicSafetyError`.
+- [x] 1.8 Implement `NameCollisionResolver` with exact-MD5 suppression, older-and-larger original detection, significantly-smaller duplicate classification, and ambiguous prompt hooks.
+- [x] 1.9 Add `config.json` schema/default loading for paths, extensions, external tools, camera symbols, dashboard port, and collision thresholds.
+
+## 2. Pipeline Stages
+
+- [x] 2.1 Create `src/stages.py`.
+- [x] 2.2 Implement `InitializationStage` to validate directories, initialize context, and capture the startup safety snapshot.
+- [x] 2.3 Implement `UploadHarvestStage` to sweep configured camera upload folders for photos and videos.
+- [x] 2.4 Implement `ExiftoolBatchStage` to remove stale `_exif` sidecars and perform high-speed batch metadata generation.
+- [x] 2.5 Implement `MetadataExtractionStage` to parse EXIF metadata, bind camera symbols, and populate `MediaAsset` state.
+- [x] 2.6 Implement `RenameAndSortStage` to rename assets and route collisions through `NameCollisionResolver`.
+- [x] 2.7 Implement `RawStagedConversionStage` using `StagedWorkspaceStage` for `.CR2`, `.CRW`, and `.ARW` workflows.
+- [x] 2.8 Implement `FolderSortingStage` to move final assets into year/month/ready folder structures.
+- [x] 2.9 Wire the default DAG so `SafetyValidationStage` always runs before successful completion.
+- [x] 2.10 Split concrete stage implementations into separate modules with `src/stages.py` retained only as a compatibility re-export layer.
+- [x] 2.11 Add `StaleExifRelocationStage` as a separate module preserving legacy old-EXIF handling.
+- [x] 2.12 Add `EmptyFileQuarantineStage` as a separate module preserving legacy zero-byte handling.
+- [x] 2.13 Add `TimezoneAndTravelStage` as a separate module applying clock and trip corrections before naming.
+- [x] 2.14 Add legacy naming/foldering helper modules for filename grammar, day-boundary date folders, EXIF/RAW subfolders, duplicate suffixes, and problematic taxonomy.
+- [x] 2.15 Add migration input support from legacy `____TO_SORT\____UNSORTED` into the new `____INGEST_PIPELINE\INBOX`.
+
+## 3. FastAPI Backend
+
+- [x] 3.1 Create `src/server.py` with a FastAPI app and configurable localhost port, defaulting to 8888.
+- [x] 3.2 Run the orchestrator in a background thread so HTTP/WebSocket handling remains responsive.
+- [x] 3.3 Add REST routes for start, pause, resume, step, current state, graph structure, config read/write, and prompt answers.
+- [x] 3.4 Add WebSocket event broadcasting for stage state, progress counts, logs, prompts, prompt resolutions, and safety alerts.
+- [x] 3.5 Persist unknown camera mappings and config edits to `config.json`.
+- [x] 3.6 Support collision prompt payloads and resolution actions such as keep existing, keep candidate, rename candidate, or cancel run.
+
+## 4. Dashboard Frontend
+
+- [x] 4.1 Add FastAPI-served compiled Vite static bundle.
+- [x] 4.2 Build a dark-mode React/Vite dashboard using React Flow and Tailwind CSS.
+- [x] 4.3 Render the pipeline DAG as a React Flow graph with pending, active, paused, completed, and failed states.
+- [x] 4.4 Add a progress panel for processed count, remaining count, speed, elapsed time, active stage, and live logs.
+- [x] 4.5 Add unknown camera modal prompts that submit shorthand mappings and update config immediately.
+- [x] 4.6 Add collision resolution modals showing paths, timestamps, sizes, MD5 status, and available actions.
+- [x] 4.7 Add a critical alert HUD for `SafetyValidationStage` failures and catastrophic halt states.
+
+## 5. Entrypoint and Compatibility
+
+- [x] 5.1 Refactor `src/main.py` into the primary entrypoint with `--ui`, `--cli`, `--port`, and config path arguments.
+- [x] 5.2 Preserve `_photosorter.bat` as the launch path and keep it on the legacy CLI pipeline by default until the new stage pipeline has full parity.
+- [x] 5.3 Keep existing EXIF and sorting helper behavior available behind stage adapters during the transition.
+- [x] 5.4 Deprecate direct writes to `src/common/globals.py` and route counters/state through `PipelineContext`.
+
+## 6. Testing and Verification
+
+- [x] 6.1 Add contract tests ensuring every `PipelineStage` accepts and returns valid `PipelineContext` and declares required metadata.
+- [x] 6.2 Add unit tests for `MediaAsset` sidecar operations and Windows retry wrapper behavior.
+- [x] 6.3 Add sandbox tests proving temporary workspace isolation, sidecar sweeping, and cleanup.
+- [x] 6.4 Add collision tests covering identical MD5 suppression, older/larger original selection, significantly-smaller duplicates, and ambiguous prompt pauses.
+- [x] 6.5 Add safety tests proving missing files, MD5 mismatches, and zero-byte outputs raise `CatastrophicSafetyError`.
+- [x] 6.6 Add backend tests for REST controls and WebSocket event payload schemas.
+- [x] 6.7 Add end-to-end tests on isolated dummy photo folders verifying rename, sort, duplicate resolution, and zero-file-loss validation.
+- [x] 6.8 Run `poetry run pytest`.
+- [x] 6.9 Add legacy parity E2E fixtures for naming grammar, date folders, day-boundary shifts, EXIF/RAW subfolders, problematic taxonomy, and `_DUPE_<md5>_<n>` duplicates.
+
+## 7. Manual Verification
+
+- [ ] 7.1 Run `_photosorter.bat` and confirm legacy transfer, EXIF sidecar movement, and final year/month/date folder sorting behavior are preserved.
+- [ ] 7.2 Simulate an unknown camera model, map it through the dashboard, and verify `config.json` persistence.
+- [ ] 7.3 Place conflicting files in the unsorted directory and verify automatic and interactive collision paths.
+- [ ] 7.4 Complete a sample run and confirm the final safety verifier reports success.

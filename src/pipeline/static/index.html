@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>photosorter</title>
+    <script type="module" crossorigin src="/static/assets/app.js"></script>
+    <link rel="stylesheet" crossorigin href="/static/assets/app.css">
+  </head>
+  <body>
+    <div id="root">
+      <main class="app">
+        <header>
+          <div>
+            <h1>photosorter</h1>
+            <p id="status">Loading dashboard</p>
+          </div>
+          <nav>
+            <button data-action="start">Start</button>
+            <button data-action="pause">Pause</button>
+            <button data-action="resume">Resume</button>
+            <button data-action="restart">Restart</button>
+          </nav>
+        </header>
+        <section id="alert" class="alert hidden"></section>
+        <section class="layout">
+          <div id="graph" class="graph"></div>
+          <aside>
+            <dl>
+              <dt>Assets</dt><dd id="assets">0</dd>
+              <dt>Processed</dt><dd id="processed">0</dd>
+              <dt>Prompts</dt><dd id="prompts">0</dd>
+            </dl>
+            <h2>Logs</h2>
+            <ol id="logs"></ol>
+          </aside>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
