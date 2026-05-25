@@ -17,15 +17,19 @@ from src.core import \
     file_md5
 from src.core import normalize_config_paths
 from src.pipeline_stages.empty_file_quarantine import EmptyFileQuarantineStage
+from src.pipeline_stages.exiftool_batch import ExiftoolBatchStage
 from src.pipeline_stages.legacy import \
     duplicate_name, \
     final_event_folder, \
     legacy_date_folder_name, \
     legacy_filename, \
     old_exif_folder, \
+    parse_legacy_exif_sidecar, \
     problematic_folder
 from src.pipeline_stages.legacy_unsorted_migration import LegacyUnsortedMigrationStage
 from src.pipeline_stages.move_other_images import MoveOtherImagesStage
+from src.pipeline_stages.metadata_extraction import MetadataExtractionStage
+from src.pipeline_stages.rename_and_sort import RenameAndSortStage
 from src.pipeline_stages.stale_exif_relocation import StaleExifRelocationStage
 from src.stages import build_default_orchestrator, build_default_stages
 
@@ -132,7 +136,7 @@ def test_orchestrator_logs_stage_transitions():
     context = PipelineContext()
     PipelineOrchestrator([NoopStage("first")]).run(context)
 
-    assert "Stage: <b>first</b>" in context.logs
+    assert "Stage: first" in context.logs
     assert "Completed." in context.logs
 
 
@@ -269,6 +273,15 @@ def test_default_dag_ends_with_safety_validation():
     assert "stale-exif-relocation" in node_ids
     assert "empty-file-quarantine" in node_ids
     assert "timezone-and-travel" in node_ids
+    assert "convert-crws" in node_ids
+    assert "launch-dpviewer" in node_ids
+    assert "show-stats" in node_ids
+    assert "display-extra-messages" in node_ids
+    assert "move-results" in node_ids
+    assert node_ids.index("rename-and-sort") < node_ids.index("convert-crws")
+    assert node_ids.index("convert-crws") < node_ids.index("launch-dpviewer")
+    assert node_ids.index("move-results") < node_ids.index("folder-sorting")
+    assert node_ids.index("show-stats") < node_ids.index("display-extra-messages")
     assert [stage.stage_id for stage in build_default_stages()]
 
 
@@ -307,6 +320,40 @@ def test_legacy_filename_and_folder_grammar(tmp_path):
     assert duplicate_name("photo", "abcd", 2, ".jpg") == "photo_DUPE_abcd_2.jpg"
 
 
+def test_metadata_extraction_parses_legacy_exif_and_rename_matches_old_task(tmp_path):
+    context = make_context(tmp_path)
+    inbox = Path(context.config["paths"]["unsorted_folder"])
+    inbox.mkdir(parents=True)
+    photo = inbox / "IMG_0001.jpg"
+    exif = inbox / "IMG_0001.jpg._exif"
+    photo.write_text("photo", encoding="utf-8")
+    exif.write_text(
+        "\n".join([
+            "Camera Model Name               : Canon EOS 6D",
+            "Date/Time Original              : 2026:05:14 10:30:00",
+            "Aperture                        : 2.8",
+            "Exposure Time                   : 1/250",
+            "ISO                             : 100",
+            "Focal Length                    : 50.0 mm",
+        ]),
+        encoding="iso-8859-1",
+    )
+
+    metadata = parse_legacy_exif_sidecar(exif, context.config)
+    assert metadata["image_datetime"] == "2026-05-14_(Thu)_10.30.00"
+    assert metadata["camera_symbol"] == "6D"
+
+    MetadataExtractionStage().execute(context)
+    RenameAndSortStage().execute(context)
+
+    renamed_photo = inbox / "2026-05-14_(Thu)_10.30.00__f2.8__T1_250__L50.0__I100__6D.jpg"
+    renamed_exif = inbox / "2026-05-14_(Thu)_10.30.00__f2.8__T1_250__L50.0__I100__6D._exif"
+    assert renamed_photo.exists()
+    assert renamed_exif.exists()
+    assert context.assets[0].primary_path == renamed_photo
+    assert context.assets[0].sidecars["exif"] == renamed_exif
+
+
 def test_legacy_stages_move_old_exif_empty_and_legacy_unsorted(tmp_path):
     context = make_context(tmp_path)
     legacy_unsorted = Path(context.config["paths"]["legacy_unsorted_folder"])
@@ -327,6 +374,24 @@ def test_legacy_stages_move_old_exif_empty_and_legacy_unsorted(tmp_path):
     empty.write_bytes(b"")
     EmptyFileQuarantineStage().execute(context)
     assert (problematic_folder(context.config, "empty") / "empty.jpg").exists()
+
+
+def test_exiftool_batch_writes_sidecars_next_to_originals(monkeypatch, tmp_path):
+    context = make_context(tmp_path)
+    inbox = Path(context.config["paths"]["unsorted_folder"])
+    inbox.mkdir(parents=True)
+    calls = []
+
+    def fake_check_call(command):
+        calls.append(command)
+
+    monkeypatch.setattr("src.pipeline_stages.exiftool_batch.subprocess.check_call", fake_check_call)
+
+    ExiftoolBatchStage().execute(context)
+
+    assert calls
+    assert "%d%f.%e._exif" in calls[0]
+    assert "%f.%e._exif" not in calls[0]
 
 
 def test_move_other_images_stage_wraps_legacy_function(monkeypatch, tmp_path):

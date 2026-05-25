@@ -561,7 +561,7 @@ class PipelineOrchestrator:
     def run(self, context: PipelineContext) -> PipelineContext:
         context.mode = self.mode
         for stage in self.ordered_stages():
-            context.log(f"Stage: <b>{stage.stage_id}</b>")
+            context.log(f"Stage: {stage.stage_id}")
             context.set_stage_state(stage.stage_id, PipelineState.ACTIVE)
             try:
                 if self.mode == PipelineMode.CLI and not stage.headless:

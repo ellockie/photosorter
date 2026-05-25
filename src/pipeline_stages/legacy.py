@@ -1,6 +1,9 @@
 import datetime
 from pathlib import Path
 
+from src.constants.constants import \
+    KNOWN_CAMERAS_SYMBOLS
+
 
 MONTH_FOLDERS = {
     "01": "01. January",
@@ -79,6 +82,81 @@ def legacy_filename(metadata: dict, extension: str, config: dict) -> str:
         + metadata.get("camera_symbol", "NOID")
     )
     return stem + format_extension(extension, config)
+
+
+def reformat_exposure_time(value: str) -> str:
+    return value.replace("/", "_")
+
+
+def reformat_focal_length(value: str) -> str:
+    if "equivalent" in value:
+        parts = value.split("equivalent: ")
+        value = parts[-1].replace(")", ".eq")
+    return value.replace(" ", "").replace("mm", "")
+
+
+def parse_exif_datetime(value: str) -> datetime.datetime:
+    clean = value.split("+")[0].split("-")[0].strip()
+    return datetime.datetime(
+        int(clean[0:4]),
+        int(clean[5:7]),
+        int(clean[8:10]),
+        int(clean[11:13]),
+        int(clean[14:16]),
+        int(clean[17:19]),
+    )
+
+
+def legacy_image_datetime(value: str) -> str:
+    captured = parse_exif_datetime(value)
+    return captured.strftime("%Y-%m-%d_(%a)_%H.%M.%S")
+
+
+def camera_symbol_for_model(camera_name: str, config: dict) -> str:
+    configured = config.get("camera_symbols", {})
+    if camera_name in configured:
+        return configured[camera_name]
+    for known_name, symbol in KNOWN_CAMERAS_SYMBOLS:
+        if known_name == camera_name:
+            return symbol
+    return configured.get("", "NOID")
+
+
+def parse_legacy_exif_sidecar(path: Path, config: dict) -> dict:
+    metadata = {}
+    unformatted_datetime = None
+
+    with Path(path).open(encoding="iso-8859-1") as exif_file:
+        for line in exif_file:
+            if ": " not in line:
+                continue
+            key, value = line.split(": ", 1)
+            value = value.strip()
+            if key.startswith("Camera Model Name"):
+                metadata["camera_model"] = value
+                metadata["camera_symbol"] = camera_symbol_for_model(value, config)
+            elif key.startswith("File Modification Date/Time"):
+                unformatted_datetime = value
+            elif key.startswith("Date/Time Original"):
+                unformatted_datetime = value
+            elif key.startswith("Aperture"):
+                metadata["aperture"] = "f" + value
+            elif key.startswith("Exposure Time"):
+                metadata["exposure_time"] = "T" + reformat_exposure_time(value)
+            elif key.startswith("ISO  "):
+                metadata["iso"] = "I" + value
+            elif key.startswith("Focal Length"):
+                metadata["focal_length"] = "L" + reformat_focal_length(value)
+
+    if unformatted_datetime:
+        metadata["captured_at"] = parse_exif_datetime(unformatted_datetime)
+        metadata["image_datetime"] = legacy_image_datetime(unformatted_datetime)
+    metadata.setdefault("aperture", "fNA")
+    metadata.setdefault("exposure_time", "T---")
+    metadata.setdefault("focal_length", "LNA")
+    metadata.setdefault("iso", "I---s")
+    metadata.setdefault("camera_symbol", "NOID")
+    return metadata
 
 
 def date_folder_datetime(captured_at: datetime.datetime, config: dict) -> datetime.datetime:

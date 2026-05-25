@@ -15,7 +15,7 @@ class FolderSortingStage(PipelineStage):
         super().__init__(
             stage_id="folder-sorting",
             display_name="Folder Sorting",
-            dependencies=("raw-staged-conversion",),
+            dependencies=("move-results",),
         )
 
     def execute(self, context: PipelineContext) -> PipelineContext:

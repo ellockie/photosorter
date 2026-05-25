@@ -20,24 +20,6 @@ type PipelineState = {
   prompts?: unknown[];
 };
 
-function renderLogLine(line: string) {
-  const parts = line.split(/(<\/?b>)/g);
-  let bold = false;
-  return parts
-    .filter((part) => part !== "")
-    .map((part, index) => {
-      if (part === "<b>") {
-        bold = true;
-        return null;
-      }
-      if (part === "</b>") {
-        bold = false;
-        return null;
-      }
-      return bold ? <b key={index}>{part}</b> : <React.Fragment key={index}>{part}</React.Fragment>;
-    });
-}
-
 function App() {
   const [graph, setGraph] = useState<PipelineNode[]>([]);
   const [state, setState] = useState<PipelineState>({});
@@ -72,6 +54,7 @@ function App() {
       target: node.id,
     })),
   );
+  let logStageNumber = 0;
 
   return (
     <main className="app">
@@ -105,7 +88,23 @@ function App() {
             <dd>{state.prompts?.length || 0}</dd>
           </dl>
           <h2>Logs</h2>
-          <ol>{(state.logs || []).slice(-80).map((line, index) => <li key={`${index}-${line}`}>{renderLogLine(line)}</li>)}</ol>
+          <div className="logs">
+            {(state.logs || []).slice(-80).map((line, index) => {
+              const stage = line.startsWith("Stage: ") ? line.slice("Stage: ".length) : null;
+              if (stage) logStageNumber += 1;
+              return (
+                <div className={stage ? "log-line stage-log" : "log-line"} key={`${index}-${line}`}>
+                  {stage ? (
+                    <>
+                      <span className="stage-number">{String(logStageNumber).padStart(2, "0")}</span>
+                      <span>Stage: </span>
+                      <strong>{stage}</strong>
+                    </>
+                  ) : line}
+                </div>
+              );
+            })}
+          </div>
         </aside>
       </section>
     </main>

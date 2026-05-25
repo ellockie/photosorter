@@ -77,8 +77,10 @@ aside {
   background: #1a1e16;
 }
 
-aside ol {
-  padding-left: 20px;
+.logs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 dt {
@@ -90,10 +92,23 @@ dd {
   font-size: 24px;
 }
 
-li {
+.log-line {
   color: #aaa690;
   font-size: 13px;
   line-height: 1.45;
+}
+
+.stage-log {
+  color: #f8f8f2;
+  font-weight: 700;
+  margin-top: 8px;
+}
+
+.stage-number {
+  display: inline-block;
+  width: 28px;
+  color: #74c7bd;
+  font-variant-numeric: tabular-nums;
 }
 
 .react-flow__node {

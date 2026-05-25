@@ -33,7 +33,7 @@ class ExiftoolBatchStage(PipelineStage):
             "-u",
             "-g1",
             "-w!",
-            "%f.%e._exif",
+            "%d%f.%e._exif",
             str(unsorted),
         ]
         context.log(f"Removed {removed} stale EXIF sidecars")

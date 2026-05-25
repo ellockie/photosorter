@@ -11,7 +11,7 @@ class RawStagedConversionStage(StagedWorkspaceStage):
         super().__init__(
             stage_id="raw-staged-conversion",
             display_name="RAW Staged Conversion",
-            dependencies=("rename-and-sort",),
+            dependencies=("launch-dpviewer",),
             target_extensions=(".cr2", ".crw", ".arw"),
             sidecar_extension_map={"converted_jpg": ".jpg"},
             headless=True,

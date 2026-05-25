@@ -5,6 +5,8 @@ from src.core import \
     PipelineContext, \
     PipelineStage, \
     file_md5
+from src.pipeline_stages.legacy import \
+    parse_legacy_exif_sidecar
 
 
 class MetadataExtractionStage(PipelineStage):
@@ -31,6 +33,7 @@ class MetadataExtractionStage(PipelineStage):
             exif_sidecar = path.with_name(path.name + "._exif")
             if exif_sidecar.exists():
                 asset.register_sidecar("exif", exif_sidecar)
+                asset.metadata.update(parse_legacy_exif_sidecar(exif_sidecar, context.config))
             asset.metadata["md5"] = file_md5(path)
             asset.metadata["size"] = path.stat().st_size
             asset.metadata["modified_at"] = path.stat().st_mtime
