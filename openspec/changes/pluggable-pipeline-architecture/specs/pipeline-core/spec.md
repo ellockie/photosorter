@@ -124,16 +124,78 @@ The system SHALL preserve legacy date folder grouping and folder naming.
 - **WHEN** a file timestamp is earlier than or equal to the configured day boundary `04.44.44`
 - **THEN** the date folder is shifted to the previous calendar day.
 
-### Requirement: Legacy Sidecar and RAW Subfolders
-The system SHALL preserve legacy final subfolder placement for sidecar and RAW files.
+### Requirement: Standardized Event Folder Subdirectories
+The system SHALL use a standardized `__` prefix subdirectory taxonomy inside every final event/date folder. The taxonomy MUST be the only final event-folder artifact taxonomy used by the stage-based pipeline unless a compatibility import stage is reading old folders.
 
-#### Scenario: Move EXIF sidecar to legacy subfolder
-- **WHEN** a final event/date folder is created
-- **THEN** related `._exif` sidecars are moved under `##   EXIFs   ##`.
-
-#### Scenario: Move RAW original to legacy subfolder
+#### Scenario: Place RAW originals
 - **WHEN** a RAW original is sorted into a final event/date folder
-- **THEN** it is moved under `##   RAWs   ##`.
+- **THEN** it is moved under `__RAW`
+- **AND** it remains untouched and unmodified.
+
+#### Scenario: Place edited master artifacts
+- **WHEN** a non-destructive edit or master working file such as `.xmp`, `.psd`, or high-bit `.tif` is associated with a shot
+- **THEN** it is moved under `__EDITED`.
+
+#### Scenario: Place extracted alternates
+- **WHEN** a RAW extraction produces alternate or batch-extracted JPEGs that do not become the root representative image
+- **THEN** those files are moved under `__EXTRACTED`.
+
+#### Scenario: Place final exports
+- **WHEN** a full-resolution JPEG export is produced for print/archive/export use
+- **THEN** it is moved under `__EXPORTED`.
+
+#### Scenario: Place resized derivatives
+- **WHEN** a downscaled or compressed derivative is produced for web, social media, email, or temporary sharing
+- **THEN** it is moved under `__RESIZED`.
+
+#### Scenario: Place duplicate and discard artifacts
+- **WHEN** a file is classified as a burst discard, unused bracket, accidental duplicate, low-resolution duplicate, or collision duplicate
+- **THEN** it is moved under `__DUPLICATES`.
+
+#### Scenario: Place metadata sidecars
+- **WHEN** a final event/date folder is created
+- **THEN** related `._exif` sidecars are moved under `__EXIF`
+- **AND** GPX track files and JSON camera logs associated with the event or shot are also stored under `__EXIF`.
+
+### Requirement: Event Folder Representative Images
+The system SHALL keep only shot-level representative images directly inside the final event/date folder. Supporting assets MUST be moved to the standardized `__` subfolders.
+
+#### Scenario: Keep straight-from-camera representative at root
+- **WHEN** a camera-produced representative image exists for a shot
+- **THEN** that image MAY live directly in the event/date folder
+- **AND** related RAW, metadata, edited, extracted, exported, resized, and duplicate artifacts SHALL live in standardized `__` subfolders.
+
+#### Scenario: Use extracted representative for RAW-only shot
+- **WHEN** a shot has RAW input but no straight-from-camera representative image
+- **THEN** one selected RAW extraction MAY live directly in the event/date folder as the representative
+- **AND** non-representative extracted alternatives SHALL live under `__EXTRACTED`.
+
+#### Scenario: Avoid multiple root representatives
+- **WHEN** multiple files represent the same shot
+- **THEN** at most one representative image SHALL live directly in the event/date folder
+- **AND** all other versions SHALL be routed to the correct standardized subfolder.
+
+### Requirement: Representative Filename Suffix Semantics
+The system SHALL append semantic suffixes to root-level representative image filenames so users can see whether RAW, extracted, or edited/master assets exist without opening subfolders.
+
+#### Scenario: Mark representative with RAW original
+- **WHEN** a representative image has a related RAW original under `__RAW`
+- **THEN** the representative filename SHALL include `_RAW`
+- **AND** `_RAW` SHALL be the first semantic suffix immediately after the base legacy filename stem.
+
+#### Scenario: Mark representative extracted from RAW
+- **WHEN** a root-level representative image was extracted or derived from RAW rather than captured straight from the camera
+- **THEN** the representative filename SHALL include `_EXT`.
+
+#### Scenario: Mark representative with better edited version
+- **WHEN** a better edited/master version exists under `__EDITED`
+- **THEN** the representative filename SHALL include `_EDT`
+- **AND** `_EDT` SHALL be the final semantic suffix before the file extension.
+
+#### Scenario: Apply deterministic suffix ordering
+- **WHEN** more than one representative suffix applies
+- **THEN** suffixes SHALL be ordered as `_RAW`, then `_EXT`, then `_EDT`
+- **AND** the original file extension SHALL remain after all semantic suffixes.
 
 ### Requirement: Legacy Problematic Folder Taxonomy
 The system SHALL preserve legacy problematic subfolders for unsupported files, zero-byte files, insufficient metadata, duplicate names, and stale EXIF files.

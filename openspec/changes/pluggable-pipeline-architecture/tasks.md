@@ -27,6 +27,10 @@
 - [x] 2.13 Add `TimezoneAndTravelStage` as a separate module applying clock and trip corrections before naming.
 - [x] 2.14 Add legacy naming/foldering helper modules for filename grammar, day-boundary date folders, EXIF/RAW subfolders, duplicate suffixes, and problematic taxonomy.
 - [x] 2.15 Add migration input support from legacy `____TO_SORT\____UNSORTED` into the new `____INGEST_PIPELINE\INBOX`.
+- [ ] 2.16 Add standardized event-folder taxonomy helpers/config for `__RAW`, `__EDITED`, `__EXTRACTED`, `__EXPORTED`, `__RESIZED`, `__DUPLICATES`, and `__EXIF`.
+- [ ] 2.17 Update final sorting/routing stages so RAW, edited masters, extracted alternates, exported JPEGs, resized derivatives, duplicates, and metadata artifacts land in the standardized `__` subfolders.
+- [ ] 2.18 Add representative-image selection logic so only one shot-level representative image lives directly in each event/date folder.
+- [ ] 2.19 Add representative suffix generation for `_RAW`, `_EXT`, and `_EDT`, with deterministic ordering `_RAW`, `_EXT`, `_EDT`.
 
 ## 3. FastAPI Backend
 
@@ -65,6 +69,9 @@
 - [x] 6.7 Add end-to-end tests on isolated dummy photo folders verifying rename, sort, duplicate resolution, and zero-file-loss validation.
 - [x] 6.8 Run `poetry run pytest`.
 - [x] 6.9 Add legacy parity E2E fixtures for naming grammar, date folders, day-boundary shifts, EXIF/RAW subfolders, problematic taxonomy, and `_DUPE_<md5>_<n>` duplicates.
+- [ ] 6.10 Add tests for standardized event-folder taxonomy, including `__RAW`, `__EDITED`, `__EXTRACTED`, `__EXPORTED`, `__RESIZED`, `__DUPLICATES`, and `__EXIF`.
+- [ ] 6.11 Add tests proving root event/date folders contain only one representative image per shot.
+- [ ] 6.12 Add tests for representative suffix ordering and semantics: `_RAW`, `_EXT`, `_EDT`.
 
 ## 7. Manual Verification
 
@@ -72,3 +79,4 @@
 - [ ] 7.2 Simulate an unknown camera model, map it through the dashboard, and verify `config.json` persistence.
 - [ ] 7.3 Place conflicting files in the unsorted directory and verify automatic and interactive collision paths.
 - [ ] 7.4 Complete a sample run and confirm the final safety verifier reports success.
+- [ ] 7.5 Manually inspect a real event/date folder and confirm standardized subfolders and representative suffixes are understandable without opening subfolders.

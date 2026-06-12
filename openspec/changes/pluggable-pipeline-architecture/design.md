@@ -214,7 +214,8 @@ root_folder/
 - Month folders: `{NN}. {MonthName}` — e.g. `01. January`, `02. February`, `12. December`
 - Event/date folders preserve the legacy default grammar: `YYYY-MM-DD_(Thu) - 1. ######`
 - Each event folder contains a `##   EXIFs   ##/` subfolder holding sidecar `._exif` files
-- RAW originals are placed under `##   RAWs   ##/`
+- Event folders use the standardized `__` prefix subdirectory taxonomy described in Decision 10.
+- RAW originals are placed under `__RAW/`.
 
 ### 6. Legacy Naming, Grouping, and Problem Handling
 
@@ -234,9 +235,9 @@ The staged pipeline must preserve these old-version behaviors as explicit compat
   - `##   NOT_ENOUGH_INFO FILES   ##`
   - `##   DUPLICATE_FILE_NAMES FILES   ##`
 - Duplicate suffix style is preserved: `_DUPE_<md5>_<n>`, including existing target rename to `_DUPE_<existing_md5>_0`.
-- RAW and EXIF subfolder names are preserved:
-  - `##   RAWs   ##`
-  - `##   EXIFs   ##`
+- RAW and EXIF subfolder behavior is preserved semantically but standardized to the new canonical names:
+  - RAW originals: `__RAW`
+  - Metadata sidecars: `__EXIF`
 
 ### 7. Treat Safety as a Pipeline Contract
 
@@ -291,6 +292,49 @@ Camera clocks drift, get left unshifted across timezones, or are manually adjust
 **Event folder naming with travel:**
 - With trip: `2026-04-12_(Sun) - Japan/`
 - Without trip: `2026-05-01_(Fri)/`
+
+### 10. Standardized Event Folder Taxonomy and Representatives
+
+Each final event/date folder is both a browsable contact sheet and a complete asset container. Files directly in the event/date folder are the shot-level representative images only. A representative is either:
+
+- An original, straight-from-camera image such as a JPEG/HEIC produced by the camera.
+- An extracted image derived from RAW when the camera produced only RAW and no straight-from-camera representative exists.
+
+All supporting or alternate artifacts live in canonical `__` prefix subfolders:
+
+| Folder | Contents |
+|--------|----------|
+| `__RAW` | Original, untouched camera RAW files such as `.dng`, `.cr2`, `.crw`, `.arw`, `.nef`, `.rw2`, `.mpo`. |
+| `__EDITED` | Non-destructive master edits and high-quality working masters such as Lightroom `.xmp`, Photoshop `.psd`, or high-bit `.tif` files. |
+| `__EXTRACTED` | Alternative or batch-extracted JPEGs from RAW that did not become the root-level representative image. |
+| `__EXPORTED` | Final, full-resolution JPEG exports with color profiles applied, ready for printing or long-term archive export. |
+| `__RESIZED` | Downscaled, compressed derivatives optimized for web, social media, email, or temporary sharing. |
+| `__DUPLICATES` | Burst-mode discards, unused bracket exposures, accidental duplicates, low-resolution duplicates, and collision-renamed duplicates. |
+| `__EXIF` | Metadata artifacts such as `._exif` sidecars, GPX track files, JSON camera logs, and related capture logs. |
+
+Representative filenames include semantic suffixes to disclose related assets without forcing the user to inspect subfolders:
+
+- `_RAW` means a RAW original exists in `__RAW`; edit the RAW rather than treating the representative as the best source.
+- `_EXT` means the representative itself was extracted or derived from RAW rather than captured directly as an in-camera image.
+- `_EDT` means a better edited/master version exists in `__EDITED`; this suffix is always last.
+
+Suffix ordering is deterministic:
+
+1. Base legacy filename stem.
+2. `_RAW` when a RAW original exists, always first immediately after the base filename.
+3. `_EXT` when the representative image was derived/extracted from RAW.
+4. `_EDT` when an edited/master version exists, always at the end of the suffix list.
+5. Extension.
+
+Examples:
+
+```
+2026-05-14_(Thu)_10.30.00__f2.8__T1_250__L50__I100__6D_RAW.jpg
+2026-05-14_(Thu)_10.30.00__f2.8__T1_250__L50__I100__6D_RAW_EXT.jpg
+2026-05-14_(Thu)_10.30.00__f2.8__T1_250__L50__I100__6D_RAW_EXT_EDT.jpg
+```
+
+The stage implementation should centralize this taxonomy in configuration and helper functions so folder names do not reappear as ad hoc string literals throughout stage modules.
 
 ## Risks / Trade-offs
 

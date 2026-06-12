@@ -64,8 +64,24 @@ The system SHALL provide E2E fixtures that prove the new staged pipeline preserv
 
 #### Scenario: Preserve legacy sidecar and RAW placement
 - **WHEN** mock media has associated `._exif` sidecars and RAW originals
-- **THEN** sidecars land under `##   EXIFs   ##`
-- **AND** RAW originals land under `##   RAWs   ##`.
+- **THEN** sidecars land under `__EXIF`
+- **AND** RAW originals land under `__RAW`.
+
+#### Scenario: Verify standardized event subfolder taxonomy
+- **WHEN** a mock event contains RAW originals, edited masters, extracted alternates, final exports, resized derivatives, duplicates, EXIF sidecars, GPX tracks, and JSON logs
+- **THEN** each artifact lands in its required folder: `__RAW`, `__EDITED`, `__EXTRACTED`, `__EXPORTED`, `__RESIZED`, `__DUPLICATES`, or `__EXIF`
+- **AND** no non-standard final event subfolder is created for those artifact classes.
+
+#### Scenario: Verify root representative image rule
+- **WHEN** a mock shot has multiple versions of the same capture
+- **THEN** at most one representative image lands directly in the final event/date folder
+- **AND** all supporting versions land in standardized `__` subfolders.
+
+#### Scenario: Verify representative suffix ordering
+- **WHEN** a root representative has a RAW original, was extracted from RAW, and has an edited/master version
+- **THEN** the representative filename includes `_RAW_EXT_EDT` before the file extension
+- **AND** `_RAW` appears first
+- **AND** `_EDT` appears last.
 
 #### Scenario: Preserve legacy duplicate naming
 - **WHEN** mock files collide by target name

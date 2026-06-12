@@ -16,6 +16,12 @@ This change upgrades the application into a pluggable DAG-based pipeline with ex
 - Add dynamic `config.json` persistence for paths, supported extensions, camera symbols, dashboard port, collision thresholds, and external tool locations.
 - Add a robust safety verifier that snapshots input files and validates final output counts, MD5 identities, and zero-byte files.
 - Preserve all legacy observable photo-processing behavior as hard parity requirements, including filename grammar, date grouping, EXIF/RAW subfolders, duplicate suffixes, problematic folder taxonomy, stale EXIF handling, and camera-upload ingestion semantics.
+- Standardize final event/date-folder subdirectories to the canonical `__RAW`, `__EDITED`, `__EXTRACTED`, `__EXPORTED`, `__RESIZED`, `__DUPLICATES`, and `__EXIF` taxonomy to avoid folder sprawl and ambiguous asset placement.
+- Treat files directly in the event/date folder as the shot-level representative images only: either an original straight-from-camera image, or an extracted representative when RAW-only capture produced no camera JPEG.
+- Add representative filename suffix semantics so root-level images visibly disclose related assets:
+  - `_RAW` means a RAW original exists and should be edited instead of the representative image.
+  - `_EXT` means the representative image was extracted or derived from RAW rather than straight from the camera.
+  - `_EDT` means a better edited/master version exists; it is always the final suffix.
 - Keep the new single-root `____INGEST_PIPELINE` working structure as the internal pipeline layout, with legacy concepts mapped into the new structure rather than reverting the architecture.
 - Add an advanced name collision resolver:
   - Identical MD5 files are treated as redundant duplicates.
@@ -40,6 +46,7 @@ This is a major architectural refactor. It changes the execution model, runtime 
 - `pipeline-core`: Pluggable DAG execution engine with `PipelineContext`, `MediaAsset`, transaction-like Windows-safe file operations, staged workspaces for external tools, safety snapshots, post-run validation, and collision resolution.
 - `web-ui-dashboard`: Local FastAPI dashboard with WebSocket progress updates, REST controls, stage graph visualization, live logs, unknown camera prompts, collision prompts, and critical safety alerts.
 - `legacy-behavior-parity`: Guarantees that the new staged pipeline preserves legacy naming, grouping, sidecar movement, RAW/EXIF subfolders, duplicate handling, problematic folder taxonomy, and camera-upload semantics while using the new working folder layout.
+- `event-folder-taxonomy`: Standard final event/date-folder subdirectory taxonomy and representative-image suffix rules for RAW, extracted, edited, exported, resized, duplicate, and metadata artifacts.
 - `testing-framework`: Contract, unit, and end-to-end pytest coverage for stages, sandboxing, collision resolution, safety validation, and dashboard control surfaces.
 
 ### Modified Capabilities
