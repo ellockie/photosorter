@@ -1,3 +1,4 @@
+/_Backup_exe/
 /.idea/
 /.omo/
 /exiftool_files/
@@ -5,4 +6,5 @@
 
 *.pyc
 desktop.ini
+exiftool.exe
 setx_PHOTO_BASE_FOLDER_env_variable.bat
