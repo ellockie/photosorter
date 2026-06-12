@@ -248,6 +248,7 @@ MY_CAMERA_SYMBOLS = [
     "Canon PowerShot G6",
     "FC7303",
     "Galaxy S23 Ultra",
+    "ILCE-5000",
     "ILCE-7RM2",
     "ILCE-7RM5",
     "SM-G965F",
