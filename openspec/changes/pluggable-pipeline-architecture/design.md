@@ -84,46 +84,27 @@ The local backend runs on `localhost:8888` by default and uses a configurable po
 
 The WebSocket channel broadcasts stage starts, stage completions, per-asset progress, log lines, prompt requests, prompt resolutions, and critical safety alerts. Prompt responses flow back through REST or WebSocket messages and unblock the orchestrator.
 
-### Dashboard Frontend (`src/pipeline/frontend/`)
+### Dashboard Frontend (`src/pipeline/static/`)
 
-A Vite + React application using React Flow for an interactive draggable/zoomable stage graph and Tailwind CSS for glassmorphic dark styling.
-
-**Development structure:**
+A hand-written vanilla HTML/CSS/JavaScript dashboard with zero build step and zero Node.js dependency:
 
 ```
-src/pipeline/frontend/        ← Vite React project (dev-time only)
-├── src/
-│   ├── App.tsx               ← main layout, WebSocket connection, state
-│   ├── components/
-│   │   ├── StageGraph.tsx    ← React Flow DAG visualisation
-│   │   ├── ProgressPanel.tsx ← counters, speed, elapsed, live logs
-│   │   ├── PromptModal.tsx   ← interactive decisions (camera, collision)
-│   │   └── AlertHUD.tsx      ← critical safety alerts
-│   └── ...
-├── tailwind.config.js
-├── vite.config.ts
-└── package.json
-```
-
-**Compiled & static serving:**
-
-```
-src/pipeline/static/          ← Vite build output (committed, no Node.js at runtime)
-├── index.html
+src/pipeline/static/
+├── index.html                ← layout, controls, progress panel, prompt containers
 ├── assets/
-│   ├── app-[hash].js
-│   └── app-[hash].css
+│   ├── app.js                ← fetch/WebSocket wiring, DAG rendering, prompts, alerts
+│   └── app.css               ← dark styling
 ```
 
-FastAPI statically mounts `src/pipeline/static/` and serves the pre-compiled bundle. During everyday execution (`_photosorter.bat`), there are zero Node.js dependencies — everything runs directly from Python.
+FastAPI statically mounts `src/pipeline/static/`. During everyday execution (`_photosorter.bat`), everything runs directly from Python.
 
 **Auto-open behaviour:** The server automatically opens the dashboard in the default browser on launch (configurable via `dashboard.open_browser` in config).
 
 ## Decisions
 
-### 1. Use Vite React Frontend with Static Serving
+### 1. Use a Vanilla HTML/CSS/JS Frontend (Decided 2026-06-12)
 
-The dashboard uses Vite, React, React Flow (interactive stage graph), and Tailwind CSS (glassmorphic dark theme). The compiled bundle is committed to `src/pipeline/static/` and served by FastAPI as static files. Node.js is a dev-time dependency only — runtime execution requires only Python.
+The dashboard is plain HTML, CSS, and JavaScript served as static files — no React, no Vite, no build step. This was decided after review: the tool is local and single-user, and runtime fragility matters more than UI sophistication. The abandoned React/Vite skeleton under `src/pipeline/frontend/` should be deleted.
 
 ### 2. Keep Existing Helpers Behind Stage Boundaries
 
@@ -165,6 +146,8 @@ root_folder/                                ← single absolute path (the photo 
     "inbox_folder": "____INGEST_PIPELINE\\INBOX",
     "ready_folder": "____INGEST_PIPELINE\\READY",
     "temp_folder": "____INGEST_PIPELINE\\.TMP",
+    "legacy_unsorted_folder": "____TO_SORT\\____UNSORTED",
+    "legacy_ready_folder": "____TO_SORT\\__READY",
     "ingest": {
         "camera_uploads": "c:/Users/luxxa/Dropbox/Camera Uploads"
     }
@@ -172,10 +155,11 @@ root_folder/                                ← single absolute path (the photo 
 ```
 
 **Resolution rules:**
-- `root_folder` is the only absolute path for the archive. It is the single source of truth.
-- All other working paths are relative to `root_folder` unless they are absolute.
+- `root_folder` (the base folder) is the only absolute path for the archive, defaulting to `c:\__PHOTOS`. It is the single source of truth.
+- `root_folder` can be overridden by a CLI parameter (e.g. `--base-folder`), which takes precedence over the config value.
+- All other working paths MUST be stored relative to `root_folder` in `config.json` (absolute values are tolerated for backward compatibility but normalized to relative on save).
 - Ingest paths (under `paths.ingest`) are external sources and may be absolute.
-- The legacy `PHOTO_BASE_FOLDER` environment variable maps to `root_folder` as a fallback when the config file does not specify it.
+- The legacy `PHOTO_BASE_FOLDER` environment variable maps to `root_folder` as a fallback when neither the CLI parameter nor the config file specifies it.
 - `photo_base_folder` is removed from the config schema entirely.
 
 **Legacy concept mapping:**
@@ -199,22 +183,22 @@ root_folder/                                ← single absolute path (the photo 
 root_folder/
 ├── 2024/
 │   ├── 01. January/
-│   │   ├── 2024-01-15_Birthday/
+│   │   ├── 2024-01-15_(Mon) - Birthday/
 │   │   │   ├── photo_001.jpg
-│   │   │   └── ##   EXIFs   ##/
-│   │   │       └── photo_001._exif
-│   │   └── 2024-01-22_Walk/
+│   │   │   └── __EXIF/
+│   │   │       └── photo_001.jpg._exif
+│   │   └── 2024-01-22_(Mon) - 1. ######/
 │   │       ├── photo_002.jpg
-│   │       └── ##   EXIFs   ##/
+│   │       └── __EXIF/
 │   ├── 02. February/
 │   ├── 03. March/
 │   └── ...
 ```
 
 - Month folders: `{NN}. {MonthName}` — e.g. `01. January`, `02. February`, `12. December`
-- Event/date folders preserve the legacy default grammar: `YYYY-MM-DD_(Thu) - 1. ######`
-- Each event folder contains a `##   EXIFs   ##/` subfolder holding sidecar `._exif` files
-- Event folders use the standardized `__` prefix subdirectory taxonomy described in Decision 10.
+- Event/date folders preserve the legacy default grammar `YYYY-MM-DD_(Thu) - 1. ######` when no origin label is known; with an origin label (Decision 11) the suffix becomes ` - {label}`.
+- Event folders use exclusively the standardized `__` prefix subdirectory taxonomy described in Decision 10. The legacy `##   EXIFs   ##` / `##   RAWs   ##` names exist only in folders produced by the legacy CLI; the new pipeline writes `__EXIF/` and `__RAW/`.
+- Sidecar filenames keep the full original filename embedded: `photo_001.jpg._exif` (not `photo_001._exif`).
 - RAW originals are placed under `__RAW/`.
 
 ### 6. Legacy Naming, Grouping, and Problem Handling
@@ -302,15 +286,27 @@ Each final event/date folder is both a browsable contact sheet and a complete as
 
 All supporting or alternate artifacts live in canonical `__` prefix subfolders:
 
-| Folder | Contents |
-|--------|----------|
-| `__RAW` | Original, untouched camera RAW files such as `.dng`, `.cr2`, `.crw`, `.arw`, `.nef`, `.rw2`, `.mpo`. |
-| `__EDITED` | Non-destructive master edits and high-quality working masters such as Lightroom `.xmp`, Photoshop `.psd`, or high-bit `.tif` files. |
-| `__EXTRACTED` | Alternative or batch-extracted JPEGs from RAW that did not become the root-level representative image. |
-| `__EXPORTED` | Final, full-resolution JPEG exports with color profiles applied, ready for printing or long-term archive export. |
-| `__RESIZED` | Downscaled, compressed derivatives optimized for web, social media, email, or temporary sharing. |
-| `__DUPLICATES` | Burst-mode discards, unused bracket exposures, accidental duplicates, low-resolution duplicates, and collision-renamed duplicates. |
-| `__EXIF` | Metadata artifacts such as `._exif` sidecars, GPX track files, JSON camera logs, and related capture logs. |
+| Folder | Managed by | Contents |
+|--------|-----------|----------|
+| `__RAW` | pipeline | Original, untouched camera RAW files such as `.dng`, `.cr2`, `.crw`, `.arw`, `.nef`, `.rw2`, `.mpo`. |
+| `__EDITED` | pipeline | Non-destructive master edits and high-quality working masters such as Lightroom `.xmp`, Photoshop `.psd`, or high-bit `.tif` files. |
+| `__EXTRACTED` | pipeline | Alternative or batch-extracted JPEGs from RAW that did not become the root-level representative image. |
+| `__EXTRACTED_VIDEOS` | pipeline (future) | Motion-photo videos (e.g. Samsung Ultra embedded videos) extracted as separate video files; the original image file stays intact in place. Defined now, extraction not implemented yet. |
+| `__EXPORTED` | pipeline | Final, full-resolution JPEG exports with color profiles applied, ready for printing or long-term archive export. |
+| `__RESIZED` | pipeline | Downscaled, compressed derivatives optimized for web, social media, email, or temporary sharing. |
+| `__DUPLICATES` | pipeline | Burst-mode discards, unused bracket exposures, accidental duplicates, low-resolution duplicates, and collision-renamed duplicates. |
+| `__EXIF` | pipeline | Metadata artifacts such as `._exif` sidecars, JSON camera logs, and related capture logs. |
+| `__GEOLOCATIONS` | pipeline | Geodata artifacts such as GPX track files covering the event, moved here from the intake folder. |
+| `__HASHES` | pipeline (future) | Per-file MD5 / SHA-256 hash manifests for the event folder. Defined now, generation not implemented yet. |
+| `__VIDEOS` | pipeline | Video files captured during the event. |
+| `__2_SHARE` | manual | Sharing queue — files selected and prepared to be shared. |
+| `__SHARED` | manual | Files that have already been shared. |
+| `__PEOPLE` | manual | Manually curated portraits/people selections. |
+| `__PANORAMAS` | manual | Manually curated panorama sources/results. |
+| `__3D` | manual | Manually curated stereo/3D material. |
+| `___OTHER` | manual | Anything that does not fit the other folders. |
+
+The folder set is a draft pending a final taxonomy review by the user; the pipeline MUST treat the list (names and routing rules) as configuration, never as string literals in stage modules. Folders marked "manual" are created or recognized by the pipeline but never populated automatically.
 
 Representative filenames include semantic suffixes to disclose related assets without forcing the user to inspect subfolders:
 
@@ -335,6 +331,27 @@ Examples:
 ```
 
 The stage implementation should centralize this taxonomy in configuration and helper functions so folder names do not reappear as ad hoc string literals throughout stage modules.
+
+### 11. Ingest Provenance: Folders in the Intake, Origin Labels, and Sidecar Travel
+
+The intake folders (`INBOX` and, during migration, legacy `____TO_SORT\____UNSORTED`) accept not only loose media files but also folders containing media. Processing rules:
+
+- A top-level folder named `__DONT_MOVE` is excluded entirely — the pipeline never reads, moves, or modifies anything inside it. The exclusion applies at the top level of the intake folder only.
+- All other subfolders are walked recursively. Each ingested file records an **origin label**: the name of its containing folder with any leading date or date-time part stripped (e.g. `2024-01-15 Birthday` → `Birthday`, `2024-01-15_18.30 Party` → `Party`). Files lying directly in the intake folder have no origin label.
+- The origin label and origin path are stored in `MediaAsset.metadata` and persisted to a run journal (e.g. `____INGEST_PIPELINE\.JOURNAL\<run-id>.jsonl`, one JSON record per file: origin path, origin label, MD5) so provenance survives crashes and restarts and is never held only in memory.
+- During final sorting, a file with an origin label lands in an event folder named `YYYY-MM-DD_(Ddd) - {label}` instead of the generic `YYYY-MM-DD_(Ddd) - 1. ######`. Labeled and unlabeled files sharing the same capture date go to **separate** event folders; groups are never merged, since same-date folders may represent different events.
+- Pre-existing metadata files found next to an ingested image — most importantly `._exif` sidecars, matched by full filename stem (`IMG_001.jpg` ↔ `IMG_001.jpg._exif`) — are registered as `MediaAsset` sidecars at ingest time and travel with the image through every rename, move, and sort.
+- Folder-level geodata files (e.g. a GPX track covering the whole folder) travel to the `__GEOLOCATIONS` subfolder of the event folder(s) derived from that origin folder.
+
+```
+____UNSORTED\ (or INBOX\)
+├── IMG_001.jpg                        → 2024-03-02_(Sat) - 1. ######\           (no label)
+├── 2024-01-15 Birthday\
+│   ├── IMG_002.jpg                    → 2024-01-15_(Mon) - Birthday\
+│   ├── IMG_002.jpg._exif              → 2024-01-15_(Mon) - Birthday\__EXIF\
+│   └── track.gpx                      → 2024-01-15_(Mon) - Birthday\__GEOLOCATIONS\
+└── __DONT_MOVE\                       → untouched
+```
 
 ## Risks / Trade-offs
 

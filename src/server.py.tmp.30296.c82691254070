@@ -148,9 +148,9 @@ def require_fastapi():
         )
 
 
-def create_app(config_path=None, base_folder=None):
+def create_app(config_path=None):
     require_fastapi()
-    runtime = PipelineRuntime(config_path, base_folder)
+    runtime = PipelineRuntime(config_path)
     events = EventHub()
     app = FastAPI(title="photosorter dashboard")
     static_dir = Path(__file__).resolve().parent / "pipeline" / "static"
@@ -249,16 +249,15 @@ def create_app(config_path=None, base_folder=None):
     return app
 
 
-def run_server(config_path=None, host=None, port=None, base_folder=None):
+def run_server(config_path=None, host=None, port=None):
     require_fastapi()
     import uvicorn
 
-    config = load_config(config_path, base_folder)
+    config = load_config(config_path)
     dashboard = config.get("dashboard", {})
-    # Pass the app object directly: the "module:factory" string form cannot
-    # forward config_path/base_folder to create_app.
     uvicorn.run(
-        create_app(config_path, base_folder),
+        "src.server:create_app",
+        factory=True,
         host=host or dashboard.get("host", "127.0.0.1"),
         port=port or dashboard.get("port", 8888),
     )

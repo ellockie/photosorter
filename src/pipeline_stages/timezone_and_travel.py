@@ -29,6 +29,9 @@ class TimezoneAndTravelStage(PipelineStage):
             adjusted = apply_camera_clock_corrections(captured_at, camera_symbol, context.config)
             adjusted, location_suffix = apply_trip_timezone(adjusted, context.config)
             asset.metadata["captured_at_corrected"] = adjusted
+            if "image_datetime" in asset.metadata:
+                # The corrected time must drive the final filename and folder.
+                asset.metadata["image_datetime"] = adjusted.strftime("%Y-%m-%d_(%a)_%H.%M.%S")
             if location_suffix:
                 asset.metadata["location_suffix"] = location_suffix
             corrected += 1

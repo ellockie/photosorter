@@ -108,7 +108,6 @@ src/core.py
 src/stages.py
 src/pipeline_stages/
 src/server.py
-src/pipeline/frontend/
 src/pipeline/static/
 ```
 
@@ -120,11 +119,21 @@ c:\__PHOTOS\____INGEST_PIPELINE\READY
 c:\__PHOTOS\____INGEST_PIPELINE\.TMP
 ```
 
-It also keeps legacy paths in configuration so existing folders can be migrated safely.
+`INBOX` is the primary intake going forward; the legacy `____TO_SORT\____UNSORTED` folder is preserved as a migration source until the new pipeline is verified flawless.
+
+All configured paths are relative to a single base folder (default `c:\__PHOTOS`), which will be overridable via a CLI parameter.
+
+### Planned: Folder Intake With Origin Labels
+
+The intake folders will accept not only loose files but also folders containing images (a top-level `__DONT_MOVE` folder is never touched). The containing folder's name — minus any leading date/date-time part — is carried with each file as an origin label, persisted in a run journal, and used to name the final event folder, e.g. `2024-01-15_(Mon) - Birthday`. Labeled and unlabeled files for the same date are kept in separate event folders. Pre-existing metadata files (most importantly `._exif` sidecars) travel with their images; folder-level GPX files go to `__GEOLOCATIONS`.
+
+### Planned: Event Folder Taxonomy
+
+Final event folders use a standardized `__` prefix subfolder set (draft, under review): `__2_SHARE`, `__3D`, `___OTHER`, `__DUPLICATES`, `__EDITED`, `__EXIF`, `__EXPORTED`, `__EXTRACTED`, `__EXTRACTED_VIDEOS`, `__GEOLOCATIONS`, `__HASHES`, `__PANORAMAS`, `__PEOPLE`, `__RAW`, `__RESIZED`, `__SHARED`, `__VIDEOS`. The new pipeline writes `__EXIF`/`__RAW`; the `##   EXIFs   ##` / `##   RAWs   ##` names remain only in legacy CLI output.
 
 ## Dashboard Runner
 
-The local dashboard is served by FastAPI on port `8888`.
+The local dashboard is plain HTML/CSS/JavaScript (no build step, no Node.js) served by FastAPI on port `8888`.
 
 Run it manually with:
 

@@ -17,7 +17,7 @@
 - [x] 2.3 Implement `UploadHarvestStage` to sweep configured camera upload folders for photos and videos.
 - [x] 2.4 Implement `ExiftoolBatchStage` to remove stale `_exif` sidecars and perform high-speed batch metadata generation.
 - [x] 2.5 Implement `MetadataExtractionStage` to parse EXIF metadata, bind camera symbols, and populate `MediaAsset` state.
-- [x] 2.6 Implement `RenameAndSortStage` to rename assets and route collisions through `NameCollisionResolver`.
+- [x] 2.6 Implement `RenameAndSortStage` to rename assets and route collisions through `NameCollisionResolver`. (Fixed 2026-06-13: collisions now go through the resolver with legacy `_DUPE_<md5>_<n>` / `_LOWRES_<md5>_<n>` naming.)
 - [x] 2.7 Implement `RawStagedConversionStage` using `StagedWorkspaceStage` for `.CR2`, `.CRW`, and `.ARW` workflows.
 - [x] 2.8 Implement `FolderSortingStage` to move final assets into year/month/ready folder structures.
 - [x] 2.9 Wire the default DAG so `SafetyValidationStage` always runs before successful completion.
@@ -27,10 +27,18 @@
 - [x] 2.13 Add `TimezoneAndTravelStage` as a separate module applying clock and trip corrections before naming.
 - [x] 2.14 Add legacy naming/foldering helper modules for filename grammar, day-boundary date folders, EXIF/RAW subfolders, duplicate suffixes, and problematic taxonomy.
 - [x] 2.15 Add migration input support from legacy `____TO_SORT\____UNSORTED` into the new `____INGEST_PIPELINE\INBOX`.
-- [ ] 2.16 Add standardized event-folder taxonomy helpers/config for `__RAW`, `__EDITED`, `__EXTRACTED`, `__EXPORTED`, `__RESIZED`, `__DUPLICATES`, and `__EXIF`.
-- [ ] 2.17 Update final sorting/routing stages so RAW, edited masters, extracted alternates, exported JPEGs, resized derivatives, duplicates, and metadata artifacts land in the standardized `__` subfolders.
-- [ ] 2.18 Add representative-image selection logic so only one shot-level representative image lives directly in each event/date folder.
-- [ ] 2.19 Add representative suffix generation for `_RAW`, `_EXT`, and `_EDT`, with deterministic ordering `_RAW`, `_EXT`, `_EDT`.
+- [x] 2.16 Add standardized event-folder taxonomy helpers/config for all 17 `__` folders (`src/pipeline_stages/taxonomy.py` + `taxonomy` config section).
+- [x] 2.17 Update final sorting/routing stages so RAW, extracted alternates, videos, geodata, and metadata artifacts land in the standardized `__` subfolders. (Edited/exported/resized/duplicate routing helpers exist; no stage produces those artifacts yet.)
+- [x] 2.18 Add representative-image selection logic so only one shot-level representative image lives directly in each event/date folder (RAW-pair detection plus extracted-JPEG promotion for RAW-only shots).
+- [x] 2.19 Add representative suffix generation for `_RAW`, `_EXT`, and `_EDT`, with deterministic ordering `_RAW`, `_EXT`, `_EDT`.
+- [x] 2.20 Extend intake handling (INBOX and legacy `____UNSORTED`) to walk subfolders recursively, excluding a top-level `__DONT_MOVE` folder entirely (`FolderIntakeStage`, recursive `LegacyUnsortedMigrationStage`).
+- [x] 2.21 Add origin-label extraction (containing folder name minus leading date/date-time part) and persist origin path, label, and MD5 to a run journal (`.JOURNAL\<run-id>.jsonl`) before files are moved.
+- [x] 2.22 Make `FolderSortingStage` name labeled event folders `YYYY-MM-DD_(Ddd) - {label}` and keep labeled/unlabeled same-date groups in separate folders (never merge).
+- [x] 2.23 Discover pre-existing metadata files at ingest (`._exif` matched by full filename, stem-matched sidecars like `.xmp`) and register them as `MediaAsset` sidecars so they travel through every stage.
+- [x] 2.24 Route folder-level geodata files (e.g. GPX) to the event folder's `__GEOLOCATIONS` subfolder; GPX moved out of the `__EXIF` definition.
+- [x] 2.25 Fix sidecar rename parity: keep the full original filename embedded (`photo.jpg._exif`), aligning `RenameAndSortStage` with legacy convention and metadata lookup.
+- [x] 2.26 Make all config paths relative to `root_folder` (default `c:\__PHOTOS`), add the `--base-folder` CLI override, and normalize absolute legacy values to relative on save.
+- [x] 2.27 Switch the new pipeline's event-folder subfolders from legacy `##   EXIFs   ##`/`##   RAWs   ##` names to the standardized `__EXIF`/`__RAW` (legacy names remain only in the legacy CLI path and problematic folders).
 
 ## 3. FastAPI Backend
 
@@ -43,13 +51,14 @@
 
 ## 4. Dashboard Frontend
 
-- [x] 4.1 Add FastAPI-served compiled Vite static bundle.
-- [x] 4.2 Build a dark-mode React/Vite dashboard using React Flow and Tailwind CSS.
-- [x] 4.3 Render the pipeline DAG as a React Flow graph with pending, active, paused, completed, and failed states.
+- [x] 4.1 Serve a static vanilla HTML/CSS/JS dashboard from `src/pipeline/static/` via FastAPI. (Decided 2026-06-12: vanilla JS, not React/Vite.)
+- [x] 4.2 Build the dark-mode vanilla dashboard layout (`index.html`, `app.css`, `app.js`).
+- [x] 4.3 Render the pipeline DAG with pending, active, paused, completed, and failed states.
 - [x] 4.4 Add a progress panel for processed count, remaining count, speed, elapsed time, active stage, and live logs.
-- [x] 4.5 Add unknown camera modal prompts that submit shorthand mappings and update config immediately.
-- [x] 4.6 Add collision resolution modals showing paths, timestamps, sizes, MD5 status, and available actions.
-- [x] 4.7 Add a critical alert HUD for `SafetyValidationStage` failures and catastrophic halt states.
+- [x] 4.5 Add unknown camera prompts that submit shorthand mappings and update config immediately. (Vanilla prompt panel with a camera-symbol form; persistence via `/api/prompts/{id}/answer`. End-to-end check remains in manual task 7.2.)
+- [x] 4.6 Add collision resolution prompts showing paths, timestamps, sizes, MD5 status, and available actions. (Vanilla prompt cards with keep-existing/keep-new/rename/cancel actions. End-to-end check remains in manual task 7.3.)
+- [x] 4.7 Add a critical alert area for `SafetyValidationStage` failures and catastrophic halt states.
+- [x] 4.8 Delete the abandoned React/Vite skeleton under `src/pipeline/frontend/`.
 
 ## 5. Entrypoint and Compatibility
 
@@ -57,6 +66,7 @@
 - [x] 5.2 Preserve `_photosorter.bat` as the launch path and keep it on the legacy CLI pipeline by default until the new stage pipeline has full parity.
 - [x] 5.3 Keep existing EXIF and sorting helper behavior available behind stage adapters during the transition.
 - [x] 5.4 Deprecate direct writes to `src/common/globals.py` and route counters/state through `PipelineContext`.
+- [ ] 5.5 Define parity exit criteria (6.13 E2E matrix green plus a verified real-archive dry run, task 7.x) and switch `_photosorter.bat` from `--cli` to the new DAG pipeline once met.
 
 ## 6. Testing and Verification
 
@@ -65,13 +75,16 @@
 - [x] 6.3 Add sandbox tests proving temporary workspace isolation, sidecar sweeping, and cleanup.
 - [x] 6.4 Add collision tests covering identical MD5 suppression, older/larger original selection, significantly-smaller duplicates, and ambiguous prompt pauses.
 - [x] 6.5 Add safety tests proving missing files, MD5 mismatches, and zero-byte outputs raise `CatastrophicSafetyError`.
-- [x] 6.6 Add backend tests for REST controls and WebSocket event payload schemas.
-- [x] 6.7 Add end-to-end tests on isolated dummy photo folders verifying rename, sort, duplicate resolution, and zero-file-loss validation.
-- [x] 6.8 Run `poetry run pytest`.
-- [x] 6.9 Add legacy parity E2E fixtures for naming grammar, date folders, day-boundary shifts, EXIF/RAW subfolders, problematic taxonomy, and `_DUPE_<md5>_<n>` duplicates.
-- [ ] 6.10 Add tests for standardized event-folder taxonomy, including `__RAW`, `__EDITED`, `__EXTRACTED`, `__EXPORTED`, `__RESIZED`, `__DUPLICATES`, and `__EXIF`.
-- [ ] 6.11 Add tests proving root event/date folders contain only one representative image per shot.
-- [ ] 6.12 Add tests for representative suffix ordering and semantics: `_RAW`, `_EXT`, `_EDT`.
+- [x] 6.6 Add backend tests for REST controls and WebSocket event payload schemas. (Root cause of the skip: pytest was not installed in the Poetry venv, so `poetry run pytest` fell through to a system-wide pytest without fastapi. Fixed by installing pytest/httpx into the venv and pointing `run_tests.bat` at `poetry run python -m pytest`; seven real TestClient tests now cover REST + WebSocket.)
+- [x] 6.7 Add end-to-end tests on isolated dummy photo folders verifying rename, sort, duplicate resolution, and zero-file-loss validation (`tests/test_e2e_pipeline.py` runs the full default DAG with a mocked ExifTool).
+- [x] 6.8 Run `poetry run pytest`. (Now `poetry run python -m pytest`; 45 tests pass.)
+- [x] 6.9 Add legacy parity E2E fixtures for naming grammar, date folders, day-boundary shifts, EXIF/RAW subfolders, and `_DUPE_<md5>_<n>` duplicates. (Problematic taxonomy fixtures remain at unit level in `test_pipeline_core.py`.)
+- [x] 6.10 Add tests for standardized event-folder taxonomy: `__RAW`, `__EXIF`, `__VIDEOS`, `__EXTRACTED`, and `__GEOLOCATIONS`. (`__EDITED`/`__EXPORTED`/`__RESIZED`/`__DUPLICATES` have no producing stages yet.)
+- [x] 6.11 Add tests proving root event/date folders contain only one representative image per shot.
+- [x] 6.12 Add tests for representative suffix ordering and semantics: `_RAW`, `_EXT`, `_EDT`.
+- [x] 6.13 Implement the E2E mock fixture matrix from design.md (trip offset, clock correction, exact-duplicate merge, `_DUPE` collision, lowres classification) as an automated test.
+- [x] 6.14 Add ingest-provenance tests: subfolder intake, `__DONT_MOVE` exclusion, origin-label extraction with date-prefix stripping, journal persistence, labeled event folders, no-merge of same-date groups, and pre-existing `._exif` travel.
+- [x] 6.15 Add tests for base-folder override and relative config path resolution (no photo outputs inside the repo).
 
 ## 7. Manual Verification
 
@@ -80,3 +93,4 @@
 - [ ] 7.3 Place conflicting files in the unsorted directory and verify automatic and interactive collision paths.
 - [ ] 7.4 Complete a sample run and confirm the final safety verifier reports success.
 - [ ] 7.5 Manually inspect a real event/date folder and confirm standardized subfolders and representative suffixes are understandable without opening subfolders.
+- [ ] 7.6 Place a labeled subfolder (with images and `._exif` sidecars), loose files for the same date, and a `__DONT_MOVE` folder in the intake; verify labeled/unlabeled folders stay separate, sidecars travel, and `__DONT_MOVE` is untouched.

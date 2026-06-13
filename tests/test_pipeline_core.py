@@ -347,7 +347,9 @@ def test_metadata_extraction_parses_legacy_exif_and_rename_matches_old_task(tmp_
     RenameAndSortStage().execute(context)
 
     renamed_photo = inbox / "2026-05-14_(Thu)_10.30.00__f2.8__T1_250__L50.0__I100__6D.jpg"
-    renamed_exif = inbox / "2026-05-14_(Thu)_10.30.00__f2.8__T1_250__L50.0__I100__6D._exif"
+    # Sidecars keep the full primary filename embedded, including the photo's
+    # extension, before their own extension.
+    renamed_exif = inbox / "2026-05-14_(Thu)_10.30.00__f2.8__T1_250__L50.0__I100__6D.jpg._exif"
     assert renamed_photo.exists()
     assert renamed_exif.exists()
     assert context.assets[0].primary_path == renamed_photo
@@ -380,6 +382,7 @@ def test_exiftool_batch_writes_sidecars_next_to_originals(monkeypatch, tmp_path)
     context = make_context(tmp_path)
     inbox = Path(context.config["paths"]["unsorted_folder"])
     inbox.mkdir(parents=True)
+    (inbox / "photo.jpg").write_bytes(b"jpeg-bytes")
     calls = []
 
     def fake_check_call(command):
@@ -392,6 +395,26 @@ def test_exiftool_batch_writes_sidecars_next_to_originals(monkeypatch, tmp_path)
     assert calls
     assert "%d%f.%e._exif" in calls[0]
     assert "%f.%e._exif" not in calls[0]
+    # Only the explicit media file is passed; non-media files are never targets.
+    assert str(inbox / "photo.jpg") in calls[0]
+
+
+def test_exiftool_batch_skips_non_media_files(monkeypatch, tmp_path):
+    context = make_context(tmp_path)
+    inbox = Path(context.config["paths"]["unsorted_folder"])
+    inbox.mkdir(parents=True)
+    (inbox / "page.html").write_text("<html></html>", encoding="utf-8")
+    (inbox / "notes.txt").write_text("notes", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        "src.pipeline_stages.exiftool_batch.subprocess.check_call",
+        lambda command: calls.append(command),
+    )
+
+    ExiftoolBatchStage().execute(context)
+
+    # No media files present: ExifTool must not run, so no .html._exif appears.
+    assert not calls
 
 
 def test_move_other_images_stage_wraps_legacy_function(monkeypatch, tmp_path):

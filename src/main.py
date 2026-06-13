@@ -527,14 +527,23 @@ def parse_args(argv=None):
         default=None,
         help="path to config.json",
     )
+    parser.add_argument(
+        "--base-folder",
+        default=None,
+        help="photo archive base folder; overrides root_folder from config.json",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
+    if args.base_folder:
+        # The legacy CLI reads PHOTO_BASE_FOLDER; the new pipeline reads it as
+        # a config fallback, so the override works for both modes.
+        os.environ["PHOTO_BASE_FOLDER"] = args.base_folder
     if args.ui:
         from src.server import run_server
-        run_server(config_path=args.config, port=args.port)
+        run_server(config_path=args.config, port=args.port, base_folder=args.base_folder)
         return
 
     legacy_main()

@@ -4,6 +4,7 @@ from src.core import \
     SafetyValidationStage
 from src.pipeline_stages.exiftool_batch import ExiftoolBatchStage
 from src.pipeline_stages.convert_crws import ConvertCrwsStage
+from src.pipeline_stages.folder_intake import FolderIntakeStage
 from src.pipeline_stages.display_extra_messages import DisplayExtraMessagesStage
 from src.pipeline_stages.empty_file_quarantine import EmptyFileQuarantineStage
 from src.pipeline_stages.folder_sorting import FolderSortingStage
@@ -29,6 +30,7 @@ def build_default_stages() -> list[PipelineStage]:
         LegacyUnsortedMigrationStage(),
         MoveOtherImagesStage(),
         UploadHarvestStage(),
+        FolderIntakeStage(),
         StaleExifRelocationStage(),
         EmptyFileQuarantineStage(),
         ExiftoolBatchStage(),

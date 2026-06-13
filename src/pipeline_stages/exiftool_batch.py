@@ -26,6 +26,16 @@ class ExiftoolBatchStage(PipelineStage):
         for sidecar in unsorted.glob("*._exif"):
             safe_delete(sidecar)
             removed += 1
+        context.log(f"Removed {removed} stale EXIF sidecars")
+
+        media_exts = context.media_extensions()
+        targets = [
+            p for p in unsorted.iterdir()
+            if p.is_file() and p.suffix.lower() in media_exts
+        ]
+        if not targets:
+            context.log("ExifTool batch skipped: no media files found")
+            return context
 
         command = [
             exiftool,
@@ -34,9 +44,8 @@ class ExiftoolBatchStage(PipelineStage):
             "-g1",
             "-w!",
             "%d%f.%e._exif",
-            str(unsorted),
+            *[str(p) for p in targets],
         ]
-        context.log(f"Removed {removed} stale EXIF sidecars")
         try:
             subprocess.check_call(command)
         except FileNotFoundError:

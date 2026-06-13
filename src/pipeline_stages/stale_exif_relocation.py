@@ -12,7 +12,7 @@ class StaleExifRelocationStage(PipelineStage):
         super().__init__(
             stage_id="stale-exif-relocation",
             display_name="Stale EXIF Relocation",
-            dependencies=("upload-harvest",),
+            dependencies=("folder-intake",),
         )
 
     def execute(self, context: PipelineContext) -> PipelineContext:

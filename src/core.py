@@ -151,6 +151,30 @@ def default_config() -> dict:
                 "old_exif": "old_EXIF"
             }
         },
+        "taxonomy": {
+            "to_share": "__2_SHARE",
+            "stereo_3d": "__3D",
+            "other": "___OTHER",
+            "duplicates": "__DUPLICATES",
+            "edited": "__EDITED",
+            "exif": "__EXIF",
+            "exported": "__EXPORTED",
+            "extracted": "__EXTRACTED",
+            "extracted_videos": "__EXTRACTED_VIDEOS",
+            "geolocations": "__GEOLOCATIONS",
+            "hashes": "__HASHES",
+            "panoramas": "__PANORAMAS",
+            "people": "__PEOPLE",
+            "raw": "__RAW",
+            "resized": "__RESIZED",
+            "shared": "__SHARED",
+            "videos": "__VIDEOS",
+        },
+        "provenance": {
+            "dont_move_folder": "__DONT_MOVE",
+            "journal_folder": ".JOURNAL",
+            "geodata_extensions": [".gpx"],
+        },
         "camera_clock_corrections": [],
         "trips": [],
         "safety": {
@@ -174,9 +198,9 @@ def merge_dicts(defaults: dict, overrides: dict) -> dict:
     return merged
 
 
-def normalize_config_paths(config: dict) -> dict:
+def normalize_config_paths(config: dict, base_folder: str | Path | None = None) -> dict:
     paths = config.setdefault("paths", {})
-    root_folder = paths.get("root_folder") or paths.get("photo_base_folder") or os.environ.get("PHOTO_BASE_FOLDER") or r"c:\__PHOTOS"
+    root_folder = base_folder or paths.get("root_folder") or paths.get("photo_base_folder") or os.environ.get("PHOTO_BASE_FOLDER") or r"c:\__PHOTOS"
     root_path = Path(root_folder)
     if root_path.name == "____TO_SORT":
         root_path = root_path.parent
@@ -203,8 +227,12 @@ def normalize_config_paths(config: dict) -> dict:
     if not temp_path.is_absolute():
         temp_path = working_path / temp_path
 
-    legacy_unsorted = paths.get("legacy_unsorted_folder") or str(root_path / "____TO_SORT" / "____UNSORTED")
-    legacy_ready = paths.get("legacy_ready_folder") or str(root_path / "____TO_SORT" / "__READY")
+    legacy_unsorted = Path(paths.get("legacy_unsorted_folder") or (root_path / "____TO_SORT" / "____UNSORTED"))
+    if not legacy_unsorted.is_absolute():
+        legacy_unsorted = root_path / legacy_unsorted
+    legacy_ready = Path(paths.get("legacy_ready_folder") or (root_path / "____TO_SORT" / "__READY"))
+    if not legacy_ready.is_absolute():
+        legacy_ready = root_path / legacy_ready
 
     paths["root_folder"] = str(root_path)
     paths["working_folder"] = str(working_path)
@@ -219,24 +247,43 @@ def normalize_config_paths(config: dict) -> dict:
     return config
 
 
-def load_config(config_path: str | Path | None = None) -> dict:
+def load_config(config_path: str | Path | None = None, base_folder: str | Path | None = None) -> dict:
     path = Path(config_path) if config_path else project_root() / CONFIG_FILE_NAME
     defaults = default_config()
     if not path.exists():
-        return normalize_config_paths(defaults)
+        return normalize_config_paths(defaults, base_folder)
 
     with path.open("r", encoding="utf-8") as handler:
         loaded = json.load(handler)
     if not isinstance(loaded, dict):
         raise PipelineConfigError(f"Config file must contain an object: {path}")
-    return normalize_config_paths(merge_dicts(defaults, loaded))
+    return normalize_config_paths(merge_dicts(defaults, loaded), base_folder)
+
+
+def relativize_config_paths(config: dict) -> dict:
+    # Stored configs keep only root_folder absolute; every working path under
+    # it is persisted relative so the base folder can be swapped via CLI.
+    relativized = json.loads(json.dumps(config))
+    paths = relativized.get("paths", {})
+    root = paths.get("root_folder")
+    if not root:
+        return relativized
+    root_path = Path(root)
+    for key, value in paths.items():
+        if key in ("root_folder", "ingest") or not isinstance(value, str):
+            continue
+        try:
+            paths[key] = str(Path(value).relative_to(root_path))
+        except ValueError:
+            continue
+    return relativized
 
 
 def save_config(config: dict, config_path: str | Path | None = None) -> None:
     path = Path(config_path) if config_path else project_root() / CONFIG_FILE_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handler:
-        json.dump(config, handler, indent=2, sort_keys=True)
+        json.dump(relativize_config_paths(config), handler, indent=2, sort_keys=True)
         handler.write("\n")
 
 
@@ -411,6 +458,9 @@ class PipelineContext:
     prompt_answers: dict[str, dict] = field(default_factory=dict)
     logs: list[str] = field(default_factory=list)
     mode: PipelineMode = PipelineMode.CLI
+    run_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    provenance: dict[str, dict] = field(default_factory=dict)
+    geodata: list[dict] = field(default_factory=list)
     lock: threading.RLock = field(default_factory=threading.RLock)
 
     @classmethod

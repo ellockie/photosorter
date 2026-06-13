@@ -7,6 +7,8 @@ from src.core import \
     file_md5
 from src.pipeline_stages.legacy import \
     parse_legacy_exif_sidecar
+from src.pipeline_stages.provenance import \
+    sidecar_candidates
 
 
 class MetadataExtractionStage(PipelineStage):
@@ -34,9 +36,15 @@ class MetadataExtractionStage(PipelineStage):
             if exif_sidecar.exists():
                 asset.register_sidecar("exif", exif_sidecar)
                 asset.metadata.update(parse_legacy_exif_sidecar(exif_sidecar, context.config))
+            for sidecar in sidecar_candidates(path, context.config):
+                if sidecar.exists() and sidecar != exif_sidecar:
+                    asset.register_sidecar(sidecar.name, sidecar)
             asset.metadata["md5"] = file_md5(path)
             asset.metadata["size"] = path.stat().st_size
             asset.metadata["modified_at"] = path.stat().st_mtime
+            provenance = context.provenance.get(asset.metadata["md5"])
+            if provenance and provenance.get("origin_label"):
+                asset.metadata["origin_label"] = provenance["origin_label"]
             assets.append(asset)
 
         context.assets = assets

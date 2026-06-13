@@ -67,9 +67,12 @@ def format_extension(extension: str, config: dict) -> str:
 def legacy_filename(metadata: dict, extension: str, config: dict) -> str:
     is_raw = is_raw_extension(extension, config)
     marker = raw_marker(config) if is_raw else ""
+    location = metadata.get("location_suffix")
+    location_part = f"{location}__" if location else ""
     stem = (
         metadata["image_datetime"]
         + "__"
+        + location_part
         + marker
         + metadata.get("aperture", "fNA")
         + "__"
@@ -165,9 +168,11 @@ def date_folder_datetime(captured_at: datetime.datetime, config: dict) -> dateti
     return captured_at
 
 
-def legacy_date_folder_name(captured_at: datetime.datetime, config: dict) -> str:
+def legacy_date_folder_name(captured_at: datetime.datetime, config: dict,
+                            label: str | None = None) -> str:
     folder_date = date_folder_datetime(captured_at, config)
-    return folder_date.strftime("%Y-%m-%d_(%a)") + date_folder_suffix(config)
+    suffix = f" - {label}" if label else date_folder_suffix(config)
+    return folder_date.strftime("%Y-%m-%d_(%a)") + suffix
 
 
 def month_folder_name(captured_at: datetime.datetime, config: dict) -> str:
@@ -175,10 +180,11 @@ def month_folder_name(captured_at: datetime.datetime, config: dict) -> str:
     return MONTH_FOLDERS[folder_date.strftime("%m")]
 
 
-def final_event_folder(captured_at: datetime.datetime, config: dict) -> Path:
+def final_event_folder(captured_at: datetime.datetime, config: dict,
+                       label: str | None = None) -> Path:
     root = Path(config["paths"]["root_folder"])
     folder_date = date_folder_datetime(captured_at, config)
-    return root / folder_date.strftime("%Y") / month_folder_name(captured_at, config) / legacy_date_folder_name(captured_at, config)
+    return root / folder_date.strftime("%Y") / month_folder_name(captured_at, config) / legacy_date_folder_name(captured_at, config, label)
 
 
 def duplicate_name(stem: str, md5: str, index: int, extension: str) -> str:

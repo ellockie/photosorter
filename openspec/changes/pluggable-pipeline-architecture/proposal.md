@@ -12,7 +12,7 @@ This change upgrades the application into a pluggable DAG-based pipeline with ex
 - Add `src/stages.py` containing stage wrappers for the existing pipeline behavior: initialization, upload harvesting, batch ExifTool generation, metadata extraction, rename/sort, raw staged conversion, and folder sorting.
 - Require each pipeline stage to live in its own module, with reusable shared modules allowed for common logic, so individual stages can be developed and reviewed independently with minimal context/token usage.
 - Add `src/server.py` containing a local FastAPI application with REST control routes and WebSocket progress/prompt channels.
-- Add a static local dashboard (`index.html`, `style.css`, `app.js`) using vanilla HTML, CSS, and JavaScript by default to avoid frontend build steps and minimize local runtime fragility.
+- Add a static local dashboard (`index.html`, `style.css`, `app.js`) using vanilla HTML, CSS, and JavaScript to avoid frontend build steps and minimize local runtime fragility. (Decided: the React/Vite skeleton under `src/pipeline/frontend/` is abandoned and should be removed.)
 - Add dynamic `config.json` persistence for paths, supported extensions, camera symbols, dashboard port, collision thresholds, and external tool locations.
 - Add a robust safety verifier that snapshots input files and validates final output counts, MD5 identities, and zero-byte files.
 - Preserve all legacy observable photo-processing behavior as hard parity requirements, including filename grammar, date grouping, EXIF/RAW subfolders, duplicate suffixes, problematic folder taxonomy, stale EXIF handling, and camera-upload ingestion semantics.
@@ -29,15 +29,22 @@ This change upgrades the application into a pluggable DAG-based pipeline with ex
   - If one file is significantly smaller than the other (default threshold: under 50%), it is automatically classified as a low-resolution duplicate and renamed.
   - Ambiguous collisions pause execution and prompt the user through the dashboard.
 - Replace terminal beeps/blocking prompts for unknown cameras and ambiguous collisions with WebSocket-driven dashboard prompts.
+- Accept subfolders (not only loose files) in the intake folders (`INBOX` and legacy `____UNSORTED`), excluding a top-level `__DONT_MOVE` folder which is never touched.
+- Carry the containing folder name with each ingested file as an `origin_label` (the folder name with any leading date/date-time part stripped), persisted in a run journal so it survives restarts, and apply it to the final event folder name. Labeled and unlabeled files for the same date go to separate event folders — they are never merged.
+- Discover pre-existing metadata files (most importantly `._exif` sidecars) next to ingested images and move them together with the image through every stage; folder-level geodata files (e.g. GPX) travel to the event folder's `__GEOLOCATIONS` subfolder.
+- Extend the event-folder taxonomy beyond the initial seven folders with a configurable, centrally defined set (draft, final list pending user review): `__2_SHARE`, `__3D`, `___OTHER`, `__DUPLICATES`, `__EDITED`, `__EXIF`, `__EXPORTED`, `__EXTRACTED`, `__EXTRACTED_VIDEOS`, `__GEOLOCATIONS`, `__HASHES`, `__PANORAMAS`, `__PEOPLE`, `__RAW`, `__RESIZED`, `__SHARED`, `__VIDEOS`. `__PEOPLE`, `__PANORAMAS`, and `__3D` are manually curated; `__HASHES` (per-file MD5/SHA-256 manifests) and `__EXTRACTED_VIDEOS` (motion-photo videos extracted from e.g. Samsung Ultra images, originals left intact) are defined now but not implemented yet.
+- Make `config.json` paths relative to a single `base_folder` (default `c:\__PHOTOS`) overridable via CLI parameter; only external ingest sources may stay absolute.
+- Define explicit parity exit criteria (E2E fixture matrix green plus a verified real-archive dry run) after which `_photosorter.bat` switches from the legacy CLI to the new DAG pipeline.
 
 ## User Review Required
 
-This is a major architectural refactor. It changes the execution model, runtime entrypoint, configuration ownership, user interaction model, and file-operation safety boundaries. Before implementation, the following assumptions should be reviewed:
+This is a major architectural refactor. It changes the execution model, runtime entrypoint, configuration ownership, user interaction model, and file-operation safety boundaries. The following assumptions were reviewed and decided (2026-06-12):
 
-- The dashboard frontend will be implemented with vanilla HTML, CSS, and JavaScript unless a heavier framework is explicitly requested.
-- The dashboard frontend will be implemented with React/Vite, committed as a built static bundle for runtime use.
+- **Decided**: The dashboard frontend is vanilla HTML, CSS, and JavaScript. The unfinished React/Vite variant is dropped.
 - The dashboard will bind to `localhost:8888` by default, with an override in `config.json` and CLI args.
 - The pipeline will remain a local, single-user Windows utility; no cloud, database, or multi-user support is included.
+- **Decided**: `____INGEST_PIPELINE\INBOX` is the primary intake going forward; legacy `____TO_SORT\____UNSORTED` is preserved as a migration source until the new pipeline works flawlessly.
+- **Decided**: `config.json` paths are defined relative to a single `base_folder` (default `c:\__PHOTOS`), which can be overridden by a CLI parameter.
 
 ## Capabilities
 
@@ -47,6 +54,7 @@ This is a major architectural refactor. It changes the execution model, runtime 
 - `web-ui-dashboard`: Local FastAPI dashboard with WebSocket progress updates, REST controls, stage graph visualization, live logs, unknown camera prompts, collision prompts, and critical safety alerts.
 - `legacy-behavior-parity`: Guarantees that the new staged pipeline preserves legacy naming, grouping, sidecar movement, RAW/EXIF subfolders, duplicate handling, problematic folder taxonomy, and camera-upload semantics while using the new working folder layout.
 - `event-folder-taxonomy`: Standard final event/date-folder subdirectory taxonomy and representative-image suffix rules for RAW, extracted, edited, exported, resized, duplicate, and metadata artifacts.
+- `ingest-provenance`: Recursive intake of subfolders (with top-level `__DONT_MOVE` exclusion), origin-label extraction and persistence, labeled event-folder naming, and discovery/travel of pre-existing metadata files alongside their images.
 - `testing-framework`: Contract, unit, and end-to-end pytest coverage for stages, sandboxing, collision resolution, safety validation, and dashboard control surfaces.
 
 ### Modified Capabilities

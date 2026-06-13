@@ -5,6 +5,8 @@ from src.core import \
     PipelineContext, \
     PipelineStage, \
     safe_move
+from src.pipeline_stages.provenance import \
+    dont_move_folder
 
 
 class LegacyUnsortedMigrationStage(PipelineStage):
@@ -23,9 +25,21 @@ class LegacyUnsortedMigrationStage(PipelineStage):
             return context
 
         inbox.mkdir(parents=True, exist_ok=True)
+        excluded = dont_move_folder(context.config)
         moved = 0
         for path in legacy.iterdir():
-            if not path.is_file():
+            if path.is_dir():
+                # Whole folders migrate as-is (except __DONT_MOVE); the
+                # folder-intake stage flattens them and records origin labels.
+                if path.name == excluded:
+                    continue
+                folder_target = inbox / path.name
+                index = 1
+                while folder_target.exists():
+                    folder_target = inbox / f"{path.name}_{index}"
+                    index += 1
+                safe_move(path, folder_target)
+                moved += 1
                 continue
             target = inbox / path.name
             if target.exists():

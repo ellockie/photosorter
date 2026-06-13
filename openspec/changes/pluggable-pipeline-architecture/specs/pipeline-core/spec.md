@@ -53,6 +53,12 @@ The system SHALL load runtime settings from `config.json`, including paths, supp
 - **THEN** it loads `config.json` or creates defaults
 - **AND** binds those values inside `PipelineContext`.
 
+#### Scenario: Resolve paths relative to the base folder
+- **WHEN** configuration paths are loaded
+- **THEN** all working paths are resolved relative to the single base folder `root_folder` (default `c:\__PHOTOS`)
+- **AND** a CLI parameter overriding the base folder takes precedence over the config value
+- **AND** only external ingest sources may remain absolute.
+
 ### Requirement: File Safety Snapshot and Verification
 The system SHALL guarantee zero file loss or silent corruption for input media files. At startup, it MUST record original path, size, timestamp, and MD5 for every input media file. At completion, `SafetyValidationStage` MUST verify output counts, MD5 identity, and non-zero file size for every original input unless the file is explicitly registered as a safe duplicate or exclusion.
 
@@ -154,8 +160,13 @@ The system SHALL use a standardized `__` prefix subdirectory taxonomy inside eve
 
 #### Scenario: Place metadata sidecars
 - **WHEN** a final event/date folder is created
-- **THEN** related `._exif` sidecars are moved under `__EXIF`
-- **AND** GPX track files and JSON camera logs associated with the event or shot are also stored under `__EXIF`.
+- **THEN** related `._exif` sidecars and JSON camera logs are moved under `__EXIF`
+- **AND** GPX track files and other geodata associated with the event are stored under `__GEOLOCATIONS`.
+
+#### Scenario: Treat taxonomy as configuration
+- **WHEN** a stage routes an artifact into an event-folder subdirectory
+- **THEN** the subdirectory name comes from the central taxonomy configuration
+- **AND** no stage module hardcodes taxonomy folder names as string literals.
 
 ### Requirement: Event Folder Representative Images
 The system SHALL keep only shot-level representative images directly inside the final event/date folder. Supporting assets MUST be moved to the standardized `__` subfolders.
