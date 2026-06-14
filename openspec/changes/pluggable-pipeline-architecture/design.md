@@ -233,49 +233,129 @@ Unknown camera models, manual RAW development waits, and ambiguous collisions sh
 
 ### 9. Travel & Timezone Clock Correction Engine
 
-Camera clocks drift, get left unshifted across timezones, or are manually adjusted late. A central date-bounded compensation module inside `PipelineContext` corrects EXIF timestamps before renaming/sorting. Loaded from `config.json`:
+Camera clocks are zone-unaware wall clocks. They go wrong in two independent ways: the world's local time changes (you cross a border, or DST flips) and the camera is not adjusted until later — or never. The earlier "interval + offset" model (`camera_clock_corrections` + `trips`, each carrying a hand-computed `offset_seconds`/`timezone_offset_hours`) conflated two genuinely separate concerns and made you compute every offset by hand. This is replaced by a **two-timeline model** driven by named IANA zones, where offsets are *derived*, never typed.
 
-**Camera clock corrections** — fixes per-camera drift or DST errors within a date range:
+#### Two independent timelines
 
-```json
-"camera_clock_corrections": [
-  {
-    "camera_symbol": "NE71",
-    "from_date": "2026-04-10T00:00:00",
-    "to_date": "2026-04-20T23:59:59",
-    "offset_seconds": -3600,
-    "description": "Forgot daylight saving adjustment"
-  }
+```
+ LOCATION timeline   — where I physically was   → DISPLAY zone + folder suffix + geolocation
+ CAMERA-CLOCK timeline (per camera) — what it was set to → reading → TRUE INSTANT (truth recovery)
+```
+
+They are independent because the two events are independent: you cross a zone at one moment (possibly mid-flight), and you adjust a given camera at another moment, or not at all. They meet at exactly one computed value — the **true instant** — which is the spine of the engine:
+
+```
+  EXIF reading R  +  camera C
+        │  CAMERA-CLOCK timeline: which zone was C set to at R?  → that zone's offset
+        ▼
+  TRUE INSTANT  (absolute, zone-free)
+        │  LOCATION timeline: where was I at that instant?  → display zone + suffix
+        ▼
+  DISPLAY time  →  filename  →  day-boundary(04:44:44)  →  event folder
+```
+
+There is deliberately **no privileged "home" zone constant**. Home was a different place in different eras and must not be hardcoded as a string. Home is simply the long, label-less stretches of the location timeline.
+
+#### Named zones, derived offsets
+
+All zones are IANA names (`Europe/London`, `Asia/Tokyo`), resolved through the stdlib `zoneinfo` database (598 zones, no third-party dependency). Because the zones carry their own DST rules, **DST stops being a special case**: `Europe/London` already knows BST↔GMT. A DST change therefore needs *nothing* on the location side — it is only ever a camera-clock breakpoint ("I set the camera back to London wall-time on this date"). Travel and DST collapse into one primitive: `set_to` a zone at a moment.
+
+A small user-curated alias map keeps zone entry typo-free; the full 598-name list is regenerated on demand from `zoneinfo.available_timezones()` for copy-paste when visiting somewhere new.
+
+```jsonc
+"zones": { "PL": "Europe/Warsaw", "UK": "Europe/London", "JP": "Asia/Tokyo" },
+
+"locations": [
+  { "since": "2015-01-01_(Thu)_00.00.00", "zone": "UK" },                         // home era (no label)
+  { "since": "2026-04-11_(Sat)_07.00.00", "zone": "JP",
+    "label": "Japan", "coords": [35.68, 139.69],
+    "until":  "2026-04-20_(Mon)_22.00.00" }                                        // 'until' = sugar: auto-resume prior era
+],
+
+"camera_clock_sets": [
+  { "camera": "NE71", "at_reading": "2026-04-11_(Sat)_18.00.00", "set_to": "JP" },
+  { "camera": "NE71", "at_reading": "2026-03-29_(Sun)_03.00.00", "set_to": "UK" }   // a DST fix, same location
 ]
 ```
 
-**Trip location mapping** — when corrected date falls inside a travel window, applies timezone normalisation and location suffix to output naming:
+- `locations` replaces both the old `home_zone` and `trips`. A trip is just an entry with a `label`; an era is an entry without one. `until` is optional sugar that auto-inserts the "resume previous era" breakpoint.
+- `camera_clock_sets` is **per camera**. A camera never adjusted during a trip simply has no entry in that window — it stays on its prior zone, so the whole trip is one lag gap for that body. No special case.
 
-```json
-"trips": [
-  {
-    "name": "Japan Trip",
-    "start": "2026-04-10T00:00:00",
-    "end": "2026-04-20T23:59:59",
-    "timezone_offset_hours": 9,
-    "location_suffix": "Japan"
-  }
-]
+#### The `at_reading` frame convention (ENFORCED)
+
+`at_reading` is the dividing line the engine compares each photo's reading against to choose the clock interval. A bare timestamp is **ambiguous about which clock it is measured in**, and around an adjustment there are two clocks in play:
+
+```
+ Fixing NE71 from London(+0) to Tokyo(+9):
+
+ camera SHOWS:  …08:58  08:59  09:00 ──[press SET]── 18:00  18:01…
+                └──── London frame ────┘             └─ Tokyo frame ─┘
 ```
 
-**Processing order:**
-1. Raw EXIF timestamp extracted
-2. Camera clock correction applied (if matching camera + date range)
-3. Trip timezone offset applied (if corrected date falls within a trip window)
-4. Corrected local time used for filename and folder placement
+The last London reading `09:00` and the first Tokyo reading `18:00` are **the same physical instant**, 9 hours apart on paper. If the recorded `at_reading` does not commit to one frame, a future reader (human or loader) cannot tell which was meant, and a wrong guess silently classifies every photo near the seam on the wrong side of the boundary.
+
+**Hard rule: `at_reading` is ALWAYS the first reading the camera showed *after* it was corrected** — i.e. the timestamp of the first correctly-stamped photo (the Tokyo `18:00`). With that frame fixed, the interval test is unambiguous:
+
+```
+ reading <  at_reading  → pre-adjustment interval  (camera still on the old zone → correct it)
+ reading ≥  at_reading  → post-adjustment interval (camera already on the new zone → leave it)
+```
+
+When you travel **east** (or spring forward), the clock jumps *forward* at the adjustment, leaving an empty gap (here: nothing can read between 09:00 and 18:00). No photo can land in that gap, so the seam is clean and exact.
+
+**Why this is enforced and not merely documented:** this is the one field where a plausible, innocent entry produces a *silent* wrong answer. The human instinct is to record "when I noticed the clock was wrong" (an old-frame value) rather than "the first right photo" (the new-frame value). Every other schema field fails *loudly* on bad input; this one fails *invisibly* — no crash, no validation error, just photos quietly filed into the wrong day. So the loader enforces the convention with a consistency check: each `set_to` zone's offset and the previous interval's offset imply an expected jump magnitude; the loader verifies the recorded boundary is consistent with that jump and **warns** when an entry looks recorded in the old (pre-adjustment) frame — e.g. *"camera-clock set for NE71 at 2026-04-11_09.00.00 appears to be in the OLD clock frame; at_reading must be the first corrected reading (expected ~18.00.00)."* The `set_to` zone is therefore required precisely so this check is possible.
+
+**Westward / fall-back caveat (documented, not silently wrong):** when the clock jumps *backward* (flying west, or autumn fall-back) the readings *overlap* — the same wall-clock value exists on both sides of the adjustment (the genuine "repeated hour," identical to a phone showing 01:30 twice on DST night). No recorded boundary can fully disambiguate a repeated reading. The engine defaults such ambiguous readings to the **post-adjustment (already-corrected)** interval and surfaces the small straggler set for optional hand-nudging, rather than guessing silently.
+
+#### Processing order (per asset)
+
+1. Extract raw EXIF reading `R` and camera symbol `C` (from EXIF make/model, not the filename — see Decision 12).
+2. CAMERA-CLOCK timeline: locate the `at_reading` interval containing `R` for camera `C`; interpret `R` in that interval's `set_to` zone → **true instant**.
+3. LOCATION timeline: locate the location active at the true instant → display zone + optional `label` suffix + `coords`.
+4. Convert the true instant into the display zone → corrected local time.
+5. Corrected local time drives filename and folder; the `04:44:44` day-boundary rule is applied to the corrected time, not the raw reading.
 
 **Output naming with travel:**
-- With trip: `2026-04-12_(Sun)_18.00.00__Japan__f4.0__T1_250__I100__NE71.jpg`
-- Without trip: `2026-05-01_(Fri)_14.30.00__f2.8__T1_500__I200__C6D.cr2`
+- With label: `2026-04-12_(Sun)_18.00.00__Japan__f4.0__T1_250__I100__NE71.jpg`
+- Without: `2026-05-01_(Fri)_14.30.00__f2.8__T1_500__I200__C6D.cr2`
 
 **Event folder naming with travel:**
-- With trip: `2026-04-12_(Sun) - Japan/`
-- Without trip: `2026-05-01_(Fri)/`
+- With label: `2026-04-12_(Sun) - Japan/`
+- Without: `2026-05-01_(Fri)/`
+
+#### Geolocation is derived, never stored per-folder
+
+The trip definition lives only in the central `locations` timeline — it cannot live in any one event folder's `__GEOLOCATIONS`, because a trip spans many folders. Each event folder instead receives a *projection* of the timeline:
+
+```
+  locations[]  (central source of truth: zone + label + coords)
+        │  projected per event folder
+        ▼
+  <event folder>/__GEOLOCATIONS/
+        ├── _location.json   ← derived stamp: zone, label, approx coords for this folder's dates
+        └── track.gpx        ← real GPS tracks whose timestamps fall in this folder (if any)
+```
+
+This yields **basic geolocation for free** — every photo gets a country/zone from the timeline even with no GPS hardware — and real GPX tracks enrich it where present.
+
+#### Stand-alone retro-correction tool
+
+The same correction engine must run **outside the pipeline** against an already-named, already-sorted archive, given a date range and a target folder containing many event folders. It is delivered as its **own stand-alone script** (not a `main.py` subcommand), so it can be run independently of the pipeline entrypoint, takes `--from` / `--to` (date range) and a `--folder` (a parent holding many event folders) as arguments, and imports the shared correction engine + `core.py` asset/file-safety helpers so renames and moves go through the same Windows-safe, sidecar-aware operations as the pipeline. It is purely mechanical and re-runnable:
+
+```
+  read EXIF time + make/model  (idempotent: NEVER reads the already-corrected filename)
+        │  apply both timelines → corrected display time
+        ▼
+  rename file + EVERY sidecar (._exif, .xmp, RAW, extracted…)
+        │  did day-boundary(04:44:44) move the day?
+        ▼
+  move into  <new-date> - <SAME description carried verbatim>
+```
+
+- **EXIF is the source, not the filename** — the filename already holds a corrected time, so re-reading it would double-correct; EXIF holds the untouched original reading, making the tool safely idempotent. Derivatives/sidecars without their own EXIF follow their representative image rather than being timed independently.
+- **Descriptions are opaque** — the tool does **not** distinguish a trip suffix (`- Japan`) from a manual label (`- Birthday`); it carries the existing description string verbatim onto the corrected date. Suffixes are only ever *derived* in the pipeline's first naming pass; the retro tool never second-guesses an existing name.
+- **Re-foldering across event folders is in scope** — a correction that crosses the day boundary moves the file (and sidecars) to the corrected day's folder, created if missing.
+- **Residual ambiguity prompts, never guesses** — a shifted file landing on a day that already holds multiple unnamed placeholder events (`1. ######`, `2. ######`) is surfaced for user choice.
 
 ### 10. Standardized Event Folder Taxonomy and Representatives
 

@@ -24,7 +24,7 @@
 - [x] 2.10 Split concrete stage implementations into separate modules with `src/stages.py` retained only as a compatibility re-export layer.
 - [x] 2.11 Add `StaleExifRelocationStage` as a separate module preserving legacy old-EXIF handling.
 - [x] 2.12 Add `EmptyFileQuarantineStage` as a separate module preserving legacy zero-byte handling.
-- [x] 2.13 Add `TimezoneAndTravelStage` as a separate module applying clock and trip corrections before naming.
+- [x] 2.13 Add `TimezoneAndTravelStage` as a separate module applying clock and trip corrections before naming. (Superseded by the Decision 9 two-timeline redesign — see Section 8; the offset/trip model below is replaced.)
 - [x] 2.14 Add legacy naming/foldering helper modules for filename grammar, day-boundary date folders, EXIF/RAW subfolders, duplicate suffixes, and problematic taxonomy.
 - [x] 2.15 Add migration input support from legacy `____TO_SORT\____UNSORTED` into the new `____INGEST_PIPELINE\INBOX`.
 - [x] 2.16 Add standardized event-folder taxonomy helpers/config for all 17 `__` folders (`src/pipeline_stages/taxonomy.py` + `taxonomy` config section).
@@ -94,3 +94,18 @@
 - [ ] 7.4 Complete a sample run and confirm the final safety verifier reports success.
 - [ ] 7.5 Manually inspect a real event/date folder and confirm standardized subfolders and representative suffixes are understandable without opening subfolders.
 - [ ] 7.6 Place a labeled subfolder (with images and `._exif` sidecars), loose files for the same date, and a `__DONT_MOVE` folder in the intake; verify labeled/unlabeled folders stay separate, sidecars travel, and `__DONT_MOVE` is untouched.
+
+## 8. Timezone & Travel Two-Timeline Redesign (Decision 9)
+
+Supersedes the offset/trip model behind task 2.13. Goal: derive offsets from named zones via two independent timelines, with the standalone retro tool sharing the same engine.
+
+- [ ] 8.1 Add `zones` alias map + `zoneinfo`-backed zone resolver to config loading; provide an on-demand `list_zones.py` (regenerates the full 598-name reference from `zoneinfo.available_timezones()` for copy-paste).
+- [ ] 8.2 Replace the `camera_clock_corrections` + `trips` config shapes with `locations` (with optional `label`, `coords`, `until` sugar) and per-camera `camera_clock_sets` (`at_reading`, `set_to`).
+- [ ] 8.3 Implement the LOCATION timeline lookup: given a true instant, return display zone, optional label suffix, and coords; `until` auto-inserts the resume-previous-era breakpoint.
+- [ ] 8.4 Implement the per-camera CAMERA-CLOCK timeline lookup: locate the `at_reading` interval for a reading, interpret the reading in that interval's `set_to` zone to produce the true instant.
+- [ ] 8.5 Enforce the `at_reading` "first corrected reading" convention in the loader: compute the expected jump from adjacent `set_to` offsets and warn when an entry looks recorded in the old (pre-adjustment) clock frame.
+- [ ] 8.6 Default ambiguous westward/fall-back (overlapping-reading) cases to the post-adjustment interval and collect the straggler set for optional hand-nudging.
+- [ ] 8.7 Rewrite `TimezoneAndTravelStage` to drive the new engine: reading → true instant → display time, feeding corrected local time (with day-boundary applied to corrected time) into naming/foldering.
+- [ ] 8.8 Add the `__GEOLOCATIONS` projection: write a derived `_location.json` per event folder from the active `locations` entry, and route real GPX tracks by timestamp into the matching folder.
+- [ ] 8.9 Build the stand-alone retro-correction script (`--from` / `--to` / `--folder`): EXIF-sourced (idempotent), carries descriptions verbatim, re-folds across the `04:44:44` day boundary, prompts on multi-placeholder ambiguity, and reuses `core.py` safe asset/sidecar operations.
+- [ ] 8.10 Tests: location/camera timeline lookups; derived-offset correctness (east clean-seam, DST fix); enforced `at_reading` frame-check warning; westward ambiguity default; geolocation projection; and an idempotency test proving the standalone script is safe to re-run (second run is a no-op).
