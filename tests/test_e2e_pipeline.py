@@ -10,21 +10,20 @@ from src.pipeline_stages.legacy import final_event_folder
 from src.core import MediaAsset
 
 
-JAPAN_TRIP = {
-    "name": "Japan Trip",
-    "start": "2026-04-10T00:00:00",
-    "end": "2026-04-20T23:59:59",
-    "timezone_offset_hours": 9,
-    "location_suffix": "Japan",
-}
+# Two-timeline model: camera NE71 is on home (London, BST=+1h on 2026-04-12) and
+# was never re-set for the trip; the location timeline places the photographer in
+# Tokyo. So reading 10:00 London -> 09:00 UTC -> Tokyo 18:00, suffix "Japan".
+ZONES = {"UK": "Europe/London", "JP": "Asia/Tokyo"}
 
-NE71_CLOCK_FIX = {
-    "camera_symbol": "NE71",
-    "from_date": "2026-04-10T00:00:00",
-    "to_date": "2026-04-20T23:59:59",
-    "offset_seconds": -3600,
-    "description": "Forgot daylight saving adjustment",
-}
+LOCATIONS = [
+    {"since": "2000-01-01_(Sat)_00.00.00", "zone": "UK"},
+    {
+        "since": "2026-04-10_(Fri)_00.00.00",
+        "zone": "JP",
+        "label": "Japan",
+        "until": "2026-04-20_(Mon)_23.59.59",
+    },
+]
 
 
 def build_config(tmp_path):
@@ -67,8 +66,9 @@ def build_config(tmp_path):
             "raw_marker": "RAW__",
         },
         "safety": {"enabled": True, "hash_chunk_size": 1024},
-        "camera_clock_corrections": [NE71_CLOCK_FIX],
-        "trips": [JAPAN_TRIP],
+        "zones": ZONES,
+        "locations": LOCATIONS,
+        "camera_clock_sets": [],
     }
 
 
@@ -145,6 +145,8 @@ def test_e2e_fixture_matrix_full_default_dag(tmp_path, monkeypatch, no_legacy_up
     representative = japan_folder / f"{expected_stem}.jpg"
     assert representative.exists(), sorted(p.name for p in japan_folder.iterdir()) if japan_folder.exists() else "missing folder"
     assert (japan_folder / "__EXIF" / f"{expected_stem}.jpg._exif").exists()
+    # Derived geolocation projection from the location timeline.
+    assert (japan_folder / "__GEOLOCATIONS" / "_location.json").exists()
 
     may_folder = root / "2026" / "05. May" / "2026-05-01_(Fri) - 1. ######"
     raw_name = "2026-05-01_(Fri)_14.30.00__RAW__f2.8__T1_500__L50.0__I200__C6D.CR2"
@@ -177,8 +179,8 @@ def test_e2e_fixture_matrix_full_default_dag(tmp_path, monkeypatch, no_legacy_up
 
 def test_e2e_labeled_folder_stays_separate_from_loose_files(tmp_path, monkeypatch, no_legacy_uploads):
     config = build_config(tmp_path)
-    config["trips"] = []
-    config["camera_clock_corrections"] = []
+    config["locations"] = []
+    config["camera_clock_sets"] = []
     inbox = Path(config["paths"]["inbox_folder"])
     root = Path(config["paths"]["root_folder"])
     origin = inbox / "2026-04-12 Birthday"

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -14,6 +15,11 @@ from pathlib import Path
 
 
 CONFIG_FILE_NAME = "config.json"
+# The travel/clock data is hand-edited and conceptually separate from the app
+# config, so it lives in its own sibling file (Decision 9). The loader overlays
+# it onto the config dict so the rest of the code keeps reading config["..."].
+TIMEZONE_FILE_NAME = "timezone.json"
+TIMEZONE_KEYS = ("zones", "locations", "camera_clock_sets")
 DEFAULT_COLLISION_THRESHOLD = 0.5
 DEFAULT_DASHBOARD_PORT = 8888
 DEFAULT_RETRY_ATTEMPTS = 5
@@ -175,8 +181,11 @@ def default_config() -> dict:
             "journal_folder": ".JOURNAL",
             "geodata_extensions": [".gpx"],
         },
-        "camera_clock_corrections": [],
-        "trips": [],
+        # Two-timeline timezone & travel model (design.md Decision 9). Zones are
+        # a small alias map over IANA names; offsets are derived, never typed.
+        "zones": {},
+        "locations": [],
+        "camera_clock_sets": [],
         "safety": {
             "enabled": True,
             "hash_chunk_size": 1024 * 1024,
@@ -247,17 +256,56 @@ def normalize_config_paths(config: dict, base_folder: str | Path | None = None) 
     return config
 
 
+def timezone_file_path(config_path: str | Path | None = None, config: dict | None = None) -> Path:
+    base = Path(config_path).parent if config_path else project_root()
+    override = (config or {}).get("timezone_file")
+    if override:
+        candidate = Path(override)
+        return candidate if candidate.is_absolute() else base / candidate
+    return base / TIMEZONE_FILE_NAME
+
+
+def _load_timezone_file(config: dict, config_path: str | Path | None) -> None:
+    # Overlay the dedicated timezone file over whatever is (or isn't) inline in
+    # config.json. The file wins, so it is the source of truth once present.
+    tz_path = timezone_file_path(config_path, config)
+    if not tz_path.exists():
+        return
+    try:
+        with tz_path.open("r", encoding="utf-8") as handler:
+            data = json.load(handler)
+    except (json.JSONDecodeError, OSError):
+        logging.getLogger(__name__).warning("Could not read timezone file %s", tz_path)
+        return
+    if isinstance(data, dict):
+        for key in TIMEZONE_KEYS:
+            if key in data:
+                config[key] = data[key]
+
+
 def load_config(config_path: str | Path | None = None, base_folder: str | Path | None = None) -> dict:
     path = Path(config_path) if config_path else project_root() / CONFIG_FILE_NAME
     defaults = default_config()
     if not path.exists():
-        return normalize_config_paths(defaults, base_folder)
+        config = normalize_config_paths(defaults, base_folder)
+    else:
+        with path.open("r", encoding="utf-8") as handler:
+            loaded = json.load(handler)
+        if not isinstance(loaded, dict):
+            raise PipelineConfigError(f"Config file must contain an object: {path}")
+        config = normalize_config_paths(merge_dicts(defaults, loaded), base_folder)
+    _load_timezone_file(config, config_path)
+    _warn_timezone_config(config)
+    return config
 
-    with path.open("r", encoding="utf-8") as handler:
-        loaded = json.load(handler)
-    if not isinstance(loaded, dict):
-        raise PipelineConfigError(f"Config file must contain an object: {path}")
-    return normalize_config_paths(merge_dicts(defaults, loaded), base_folder)
+
+def _warn_timezone_config(config: dict) -> None:
+    # Enforce the at_reading "first corrected reading" convention at load time;
+    # this is the one timezone field that otherwise fails silently (Decision 9).
+    from src.pipeline_stages.timezone_engine import validate_timezone_config
+
+    for message in validate_timezone_config(config):
+        logging.getLogger(__name__).warning("timezone config: %s", message)
 
 
 def relativize_config_paths(config: dict) -> dict:
@@ -282,9 +330,20 @@ def relativize_config_paths(config: dict) -> dict:
 def save_config(config: dict, config_path: str | Path | None = None) -> None:
     path = Path(config_path) if config_path else project_root() / CONFIG_FILE_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
+    serializable = relativize_config_paths(config)
+
+    # Split the timezone/travel data into its own file; keep it out of config.json.
+    tz_data = {key: serializable.pop(key) for key in TIMEZONE_KEYS if key in serializable}
     with path.open("w", encoding="utf-8") as handler:
-        json.dump(relativize_config_paths(config), handler, indent=2, sort_keys=True)
+        json.dump(serializable, handler, indent=2, sort_keys=True)
         handler.write("\n")
+
+    if tz_data:
+        tz_path = timezone_file_path(config_path, config)
+        tz_path.parent.mkdir(parents=True, exist_ok=True)
+        with tz_path.open("w", encoding="utf-8") as handler:
+            json.dump(tz_data, handler, indent=2, sort_keys=True)
+            handler.write("\n")
 
 
 def normalize_suffix(suffix: str) -> str:
@@ -714,9 +773,17 @@ class SafetyValidationStage(PipelineStage):
                 missing.append(entry.original_path)
 
         if zero_byte_files or missing:
+            # Log the specific offenders so the dashboard shows what actually
+            # failed, not just a count. Cap the lists to avoid flooding the UI.
+            for path in missing[:50]:
+                context.log(f"  ! missing from output: {path}")
+            for path in zero_byte_files[:50]:
+                context.log(f"  ! zero-byte output: {path}")
+            truncated = " (list truncated, see logs)" if len(missing) > 50 or len(zero_byte_files) > 50 else ""
             raise CatastrophicSafetyError(
-                "Safety validation failed. "
-                f"Missing files: {len(missing)}; zero-byte files: {len(zero_byte_files)}"
+                "Safety validation failed: "
+                f"{len(missing)} input file(s) not found in output by MD5, "
+                f"{len(zero_byte_files)} zero-byte output file(s).{truncated}"
             )
 
         return context

@@ -1,3 +1,4 @@
+import asyncio
 import threading
 from pathlib import Path
 
@@ -121,6 +122,18 @@ class PipelineRuntime:
     def step(self):
         self.start()
 
+    def run_fresh(self):
+        # One-click "Run": re-running a completed pipeline previously needed two
+        # clicks (Restart then Start). This resets to a clean context and starts
+        # in a single action. A run already in progress is left untouched.
+        with self._lock:
+            if self.thread is not None and self.thread.is_alive():
+                return
+            already_ran = bool(self.context.stage_states)
+        if already_ran:
+            self.restart()
+        self.start()
+
     def restart(self):
         with self._lock:
             if self.thread is not None and self.thread.is_alive():
@@ -204,12 +217,28 @@ def create_app(config_path=None, base_folder=None):
         await events.broadcast(payload)
         return payload
 
+    @app.post("/api/pipeline/run")
+    async def pipeline_run():
+        runtime.run_fresh()
+        payload = {"event": "pipeline_running", "state": runtime.state()}
+        await events.broadcast(payload)
+        return payload
+
     @app.post("/api/pipeline/step")
     async def pipeline_step():
         runtime.step()
         payload = {"event": "pipeline_stepped", "state": runtime.state()}
         await events.broadcast(payload)
         return payload
+
+    @app.post("/api/server/shutdown")
+    async def server_shutdown():
+        # The dashboard "Stop server" button calls this; it signals uvicorn to
+        # exit its serve loop, after which the launcher process returns/ends.
+        handler = getattr(app.state, "request_shutdown", None)
+        if handler is not None:
+            handler()
+        return {"event": "server_shutdown"}
 
     @app.get("/api/config")
     def get_config():
@@ -238,15 +267,53 @@ def create_app(config_path=None, base_folder=None):
     async def websocket_events(websocket: WebSocket):
         await events.connect(websocket)
         try:
-            await websocket.send_json({"event": "state", "state": runtime.state()})
+            # The pipeline runs in a background thread that does not broadcast,
+            # so stream the runtime state on a short interval and push whenever
+            # it changes (new logs, stage transitions, counters, prompts). This
+            # is what keeps the dashboard live while a run is in progress.
+            previous = None
             while True:
-                message = await websocket.receive_json()
-                if message.get("type") == "ping":
-                    await websocket.send_json({"event": "pong"})
-        except WebSocketDisconnect:
+                state = runtime.state()
+                signature = (
+                    state["running"],
+                    state["paused"],
+                    state["error"],
+                    len(state["logs"]),
+                    tuple(sorted(state["stage_states"].items())),
+                    tuple(sorted(state["counters"].items())),
+                    len([p for p in state["prompts"] if not p["answered"]]),
+                )
+                if signature != previous:
+                    previous = signature
+                    await websocket.send_json({"event": "state", "state": state})
+                await asyncio.sleep(0.4)
+        except (WebSocketDisconnect, RuntimeError, ConnectionError):
+            events.disconnect(websocket)
+        finally:
             events.disconnect(websocket)
 
     return app
+
+
+def _server_already_running(url: str) -> bool:
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url + "api/pipeline/state", timeout=0.5) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+
+def _open_browser(url: str) -> None:
+    # new=0 asks the browser to reuse an existing window where possible, so a
+    # second launch surfaces the dashboard instead of piling up tabs.
+    import webbrowser
+
+    try:
+        webbrowser.open(url, new=0, autoraise=True)
+    except Exception:
+        pass
 
 
 def run_server(config_path=None, host=None, port=None, base_folder=None):
@@ -255,10 +322,29 @@ def run_server(config_path=None, host=None, port=None, base_folder=None):
 
     config = load_config(config_path, base_folder)
     dashboard = config.get("dashboard", {})
+    resolved_host = host or dashboard.get("host", "127.0.0.1")
+    resolved_port = port or dashboard.get("port", 8888)
+    url = f"http://{resolved_host}:{resolved_port}/"
+    open_browser = dashboard.get("open_browser", True)
+
+    # If a dashboard is already serving this port, reuse it rather than failing
+    # to bind a second server: the launcher can be re-run safely.
+    if _server_already_running(url):
+        print(f"Dashboard already running at {url} - reusing it.")
+        if open_browser:
+            _open_browser(url)
+        return
+
     # Pass the app object directly: the "module:factory" string form cannot
     # forward config_path/base_folder to create_app.
-    uvicorn.run(
-        create_app(config_path, base_folder),
-        host=host or dashboard.get("host", "127.0.0.1"),
-        port=port or dashboard.get("port", 8888),
-    )
+    app = create_app(config_path, base_folder)
+    server = uvicorn.Server(uvicorn.Config(app, host=resolved_host, port=resolved_port))
+    # The "Stop server" button reaches this to end the serve loop.
+    app.state.request_shutdown = lambda: setattr(server, "should_exit", True)
+
+    if open_browser:
+        # Open once the server is accepting connections.
+        threading.Timer(1.0, _open_browser, args=(url,)).start()
+
+    print(f"Dashboard at {url} (Ctrl+C or the Stop server button to quit).")
+    server.run()

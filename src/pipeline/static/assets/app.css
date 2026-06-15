@@ -7,3 +7,16 @@ body{margin:0;background:#10130f;color:#f4f1e8;font-family:Segoe UI,system-ui,sa
 .prompt-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .prompt-card form{display:flex;gap:8px;margin-top:10px}
 .prompt-card input{flex:1;min-height:34px;border:1px solid #484b3b;background:#1a1e16;color:#f4f1e8;padding:0 10px}
+button.primary{border-color:#68d66f;background:#1f3a22;font-weight:700}
+button.primary:hover{border-color:#8bf08f;background:#27492b}
+button.danger{border-color:#ff6969;background:#3a1f1f;margin-left:auto}
+button.danger:hover{border-color:#ff8a8a;background:#4a2727}
+.node{display:flex;align-items:center;gap:12px}
+.node-icon{flex:0 0 auto;width:24px;text-align:center;font-size:20px;line-height:1;color:#6f7363}
+.node-text{white-space:pre-line}
+.node.active .node-icon{color:#4fd5d5}
+.node.complete .node-icon{color:#68d66f}
+.node.failed .node-icon{color:#ff6969}
+.node.paused .node-icon{color:#e9c789}
+.node.active{animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{border-color:#4fd5d5}50%{border-color:#2c7c7c}}

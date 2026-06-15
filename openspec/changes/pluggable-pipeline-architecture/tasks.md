@@ -99,13 +99,24 @@
 
 Supersedes the offset/trip model behind task 2.13. Goal: derive offsets from named zones via two independent timelines, with the standalone retro tool sharing the same engine.
 
-- [ ] 8.1 Add `zones` alias map + `zoneinfo`-backed zone resolver to config loading; provide an on-demand `list_zones.py` (regenerates the full 598-name reference from `zoneinfo.available_timezones()` for copy-paste).
-- [ ] 8.2 Replace the `camera_clock_corrections` + `trips` config shapes with `locations` (with optional `label`, `coords`, `until` sugar) and per-camera `camera_clock_sets` (`at_reading`, `set_to`).
-- [ ] 8.3 Implement the LOCATION timeline lookup: given a true instant, return display zone, optional label suffix, and coords; `until` auto-inserts the resume-previous-era breakpoint.
-- [ ] 8.4 Implement the per-camera CAMERA-CLOCK timeline lookup: locate the `at_reading` interval for a reading, interpret the reading in that interval's `set_to` zone to produce the true instant.
-- [ ] 8.5 Enforce the `at_reading` "first corrected reading" convention in the loader: compute the expected jump from adjacent `set_to` offsets and warn when an entry looks recorded in the old (pre-adjustment) clock frame.
-- [ ] 8.6 Default ambiguous westward/fall-back (overlapping-reading) cases to the post-adjustment interval and collect the straggler set for optional hand-nudging.
-- [ ] 8.7 Rewrite `TimezoneAndTravelStage` to drive the new engine: reading → true instant → display time, feeding corrected local time (with day-boundary applied to corrected time) into naming/foldering.
-- [ ] 8.8 Add the `__GEOLOCATIONS` projection: write a derived `_location.json` per event folder from the active `locations` entry, and route real GPX tracks by timestamp into the matching folder.
-- [ ] 8.9 Build the stand-alone retro-correction script (`--from` / `--to` / `--folder`): EXIF-sourced (idempotent), carries descriptions verbatim, re-folds across the `04:44:44` day boundary, prompts on multi-placeholder ambiguity, and reuses `core.py` safe asset/sidecar operations.
-- [ ] 8.10 Tests: location/camera timeline lookups; derived-offset correctness (east clean-seam, DST fix); enforced `at_reading` frame-check warning; westward ambiguity default; geolocation projection; and an idempotency test proving the standalone script is safe to re-run (second run is a no-op).
+- [x] 8.1 Add `zones` alias map + `zoneinfo`-backed zone resolver to config loading; provide an on-demand `list_zones.py` (regenerates the full 598-name reference from `zoneinfo.available_timezones()` for copy-paste).
+- [x] 8.2 Replace the `camera_clock_corrections` + `trips` config shapes with `locations` (with optional `label`, `coords`, `until` sugar) and per-camera `camera_clock_sets` (`at_reading`, `set_to`).
+- [x] 8.3 Implement the LOCATION timeline lookup: given a true instant, return display zone, optional label suffix, and coords; `until` auto-inserts the resume-previous-era breakpoint.
+- [x] 8.4 Implement the per-camera CAMERA-CLOCK timeline lookup: locate the `at_reading` interval for a reading, interpret the reading in that interval's `set_to` zone to produce the true instant.
+- [x] 8.5 Enforce the `at_reading` "first corrected reading" convention in the loader: compute the expected jump from adjacent `set_to` offsets and warn when an entry looks recorded in the old (pre-adjustment) clock frame.
+- [x] 8.6 Default ambiguous westward/fall-back (overlapping-reading) cases to the post-adjustment interval and collect the straggler set for optional hand-nudging.
+- [x] 8.7 Rewrite `TimezoneAndTravelStage` to drive the new engine: reading → true instant → display time, feeding corrected local time (with day-boundary applied to corrected time) into naming/foldering.
+- [x] 8.8 Add the `__GEOLOCATIONS` projection: write a derived `_location.json` per event folder from the active `locations` entry, and route real GPX tracks by timestamp into the matching folder.
+- [x] 8.9 Build the stand-alone retro-correction script (`--from` / `--to` / `--folder`): EXIF-sourced (idempotent), carries descriptions verbatim, re-folds across the `04:44:44` day boundary, prompts on multi-placeholder ambiguity, and reuses `core.py` safe asset/sidecar operations.
+- [x] 8.10 Tests: location/camera timeline lookups; derived-offset correctness (east clean-seam, DST fix); enforced `at_reading` frame-check warning; westward ambiguity default; geolocation projection; and an idempotency test proving the standalone script is safe to re-run (second run is a no-op).
+
+## 9. Single-Call UI Launcher
+
+Goal: launch the dashboard-backed pipeline with one call, run it in a single click, and stop the server (and the launcher process) from the UI — while keeping the server re-runnable if not stopped.
+
+- [x] 9.1 Add browser auto-open (config `dashboard.open_browser`, `webbrowser.open(new=0)` to reuse the window) and "already running" detection so re-invoking the launcher reuses the live server instead of failing to bind a second one.
+- [x] 9.2 Add a graceful-shutdown path: `/api/server/shutdown` signals uvicorn `should_exit` (wired via `app.state.request_shutdown` in `run_server`), so the launcher process returns/ends on demand.
+- [x] 9.3 Add one-click `run_fresh()` + `/api/pipeline/run` (reset-then-start in a single action), replacing the prior two-click Restart→Start re-run.
+- [x] 9.4 Add dashboard **Run** (primary) and **Stop server** (danger) buttons; stop the WebSocket reconnect loop cleanly after shutdown.
+- [x] 9.5 Add `_photosorter_ui.bat` single-call entry (Poetry dep self-heal, then `main.py --ui`).
+- [x] 9.6 Tests for `/api/pipeline/run` and `/api/server/shutdown` (route contract + shutdown handler invocation); live smoke test of launch → one-click run → shutdown and the re-invocation reuse path.

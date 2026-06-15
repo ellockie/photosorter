@@ -25,13 +25,28 @@ async function load() {
   connect();
 }
 
+const STATE_ICON = {
+  pending: "○",   // ○  not started
+  active: "▶",    // ▶  in progress
+  paused: "⏸",    // ⏸  paused
+  complete: "✔",  // ✔  succeeded
+  failed: "✖",    // ✖  failed
+  skipped: "–",   // –  skipped
+};
+
 function renderGraph(states) {
   graphEl.innerHTML = "";
   graph.forEach((node, index) => {
-    const el = document.createElement("div");
     const state = states[node.id] || "pending";
+    const el = document.createElement("div");
     el.className = `node ${state}`;
-    el.textContent = `${String(index + 1).padStart(2, "0")}  ${node.label}\n${state}`;
+    const icon = document.createElement("span");
+    icon.className = "node-icon";
+    icon.textContent = STATE_ICON[state] || STATE_ICON.pending;
+    const text = document.createElement("span");
+    text.className = "node-text";
+    text.textContent = `${String(index + 1).padStart(2, "0")}  ${node.label}`;
+    el.append(icon, text);
     graphEl.appendChild(el);
   });
 }
@@ -175,7 +190,9 @@ function renderState(state) {
   renderGraph(state.stage_states || {});
   logsEl.innerHTML = "";
   let stageNumber = 0;
-  (state.logs || []).slice(-160).forEach(line => {
+  // Stage outcome is shown by the node icons, so drop the bare status lines.
+  const STATUS_LINES = new Set(["Completed.", "Failed.", "Paused."]);
+  (state.logs || []).slice(-160).filter(line => !STATUS_LINES.has(String(line).trim())).forEach(line => {
     const row = document.createElement("div");
     if (String(line).startsWith("Stage: ")) {
       stageNumber += 1;
@@ -189,6 +206,8 @@ function renderState(state) {
   logsEl.parentElement.scrollTop = logsEl.parentElement.scrollHeight;
 }
 
+let serverStopped = false;
+
 function connect() {
   const protocol = location.protocol === "https:" ? "wss" : "ws";
   const socket = new WebSocket(`${protocol}://${location.host}/ws/events`);
@@ -196,7 +215,7 @@ function connect() {
     const payload = JSON.parse(e.data);
     if (payload.state) renderState(payload.state);
   };
-  socket.onclose = () => setTimeout(connect, 1200);
+  socket.onclose = () => { if (!serverStopped) setTimeout(connect, 1200); };
 }
 
 document.querySelectorAll("button[data-action]").forEach(button =>
@@ -204,5 +223,14 @@ document.querySelectorAll("button[data-action]").forEach(button =>
     api(`/api/pipeline/${button.dataset.action}`, { method: "POST" })
       .then(payload => { if (payload.state) renderState(payload.state); })
       .catch(showError)));
+
+const stopServerEl = document.querySelector("#stop-server");
+if (stopServerEl) {
+  stopServerEl.addEventListener("click", async () => {
+    serverStopped = true;
+    try { await api("/api/server/shutdown", { method: "POST" }); } catch {}
+    statusEl.textContent = "Server stopped - you can close this tab.";
+  });
+}
 
 load().catch(showError);

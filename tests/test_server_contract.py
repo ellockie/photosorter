@@ -35,6 +35,8 @@ def test_create_app_exposes_fastapi_contract(tmp_path):
     assert "/api/pipeline/state" in routes
     assert "/api/pipeline/graph" in routes
     assert "/api/pipeline/restart" in routes
+    assert "/api/pipeline/run" in routes
+    assert "/api/server/shutdown" in routes
     assert "/api/config" in routes
 
 
@@ -68,6 +70,22 @@ def test_pause_resume_and_restart_controls(client):
     assert response.json()["event"] == "pipeline_restarted"
 
 
+def test_run_endpoint_starts_pipeline_in_one_call(client):
+    response = client.post("/api/pipeline/run")
+    assert response.status_code == 200
+    assert response.json()["event"] == "pipeline_running"
+
+
+def test_server_shutdown_endpoint_invokes_handler():
+    app = create_app()
+    triggered = {"called": False}
+    app.state.request_shutdown = lambda: triggered.__setitem__("called", True)
+    response = TestClient(app).post("/api/server/shutdown")
+    assert response.status_code == 200
+    assert response.json()["event"] == "server_shutdown"
+    assert triggered["called"] is True
+
+
 def test_config_roundtrip_persists_to_file(client, tmp_path):
     config = client.get("/api/config").json()
     assert config["paths"]["root_folder"].startswith(str(tmp_path))
@@ -94,10 +112,9 @@ def test_prompt_answer_route_and_camera_mapping_persistence(client, tmp_path):
     assert saved["camera_symbols"]["Canon EOS Test"] == "CTST"
 
 
-def test_websocket_sends_initial_state_event(client):
+def test_websocket_streams_state_events(client):
+    # The socket streams runtime state; the first frame is the current state.
     with client.websocket_connect("/ws/events") as websocket:
         message = websocket.receive_json()
         assert message["event"] == "state"
         assert "stage_states" in message["state"]
-        websocket.send_json({"type": "ping"})
-        assert websocket.receive_json()["event"] == "pong"

@@ -197,25 +197,3 @@ def problematic_folder(config: dict, key: str) -> Path:
 
 def old_exif_folder(config: dict) -> Path:
     return Path(config["paths"]["working_folder"]) / "__PROBLEMATIC" / subfolder_name(config, "old_exif")
-
-
-def apply_camera_clock_corrections(captured_at: datetime.datetime, camera_symbol: str, config: dict) -> datetime.datetime:
-    corrected = captured_at
-    for correction in config.get("camera_clock_corrections", []):
-        if correction.get("camera_symbol") != camera_symbol:
-            continue
-        start = datetime.datetime.fromisoformat(correction["from_date"])
-        end = datetime.datetime.fromisoformat(correction["to_date"])
-        if start <= corrected <= end:
-            corrected += datetime.timedelta(seconds=int(correction.get("offset_seconds", 0)))
-    return corrected
-
-
-def apply_trip_timezone(captured_at: datetime.datetime, config: dict) -> tuple[datetime.datetime, str | None]:
-    for trip in config.get("trips", []):
-        start = datetime.datetime.fromisoformat(trip["start"])
-        end = datetime.datetime.fromisoformat(trip["end"])
-        if start <= captured_at <= end:
-            offset = datetime.timedelta(hours=float(trip.get("timezone_offset_hours", 0)))
-            return captured_at + offset, trip.get("location_suffix")
-    return captured_at, None

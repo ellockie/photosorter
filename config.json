@@ -87,7 +87,5 @@
       "raw": "##   RAWs   ##",
       "unsupported": "##   UNSUPPORTED EXTENSIONS   ##"
     }
-  },
-  "camera_clock_corrections": [],
-  "trips": []
+  }
 }

@@ -10,6 +10,9 @@ from src.core import \
 from src.pipeline_stages.legacy import \
     final_event_folder, \
     is_raw_extension
+from src.pipeline_stages.geolocation import \
+    location_info, \
+    write_location_stamp
 from src.pipeline_stages.provenance import \
     renamed_sidecar_path, \
     resolve_sidecar_target, \
@@ -76,6 +79,7 @@ class FolderSortingStage(PipelineStage):
 
         moved = 0
         sorted_by_label: dict[str, list] = {}
+        located_folders: dict[Path, dict] = {}
 
         for asset in context.assets:
             if not asset.primary_path.exists():
@@ -151,7 +155,13 @@ class FolderSortingStage(PipelineStage):
 
             if label:
                 sorted_by_label.setdefault(label, []).append((captured_at, event_folder))
+            info = location_info(asset.metadata)
+            if info and captured_at is not None:
+                located_folders[event_folder] = info
             moved += 1
+
+        for event_folder, info in located_folders.items():
+            write_location_stamp(event_folder, config, info)
 
         self._route_geodata(context, sorted_by_label)
 
