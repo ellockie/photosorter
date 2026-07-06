@@ -209,37 +209,52 @@ def merge_dicts(defaults: dict, overrides: dict) -> dict:
 
 def normalize_config_paths(config: dict, base_folder: str | Path | None = None) -> dict:
     paths = config.setdefault("paths", {})
-    root_folder = base_folder or paths.get("root_folder") or paths.get("photo_base_folder") or os.environ.get("PHOTO_BASE_FOLDER") or r"c:\__PHOTOS"
+    persisted_root = paths.get("root_folder") or paths.get("photo_base_folder")
+    root_folder = base_folder or persisted_root or os.environ.get("PHOTO_BASE_FOLDER") or r"c:\__PHOTOS"
     root_path = Path(root_folder)
     if root_path.name == "____TO_SORT":
         root_path = root_path.parent
     if not root_path.is_absolute():
         root_path = Path(os.environ.get("PHOTO_BASE_FOLDER", r"c:\__PHOTOS")) / root_path
 
+    # Absolute working paths persisted under the old root must follow a root
+    # override; otherwise a --base-folder run reads from the real tree while
+    # writing into the override tree. Paths outside the old root are deliberate
+    # external locations and stay untouched.
+    old_root = Path(persisted_root) if persisted_root else None
+
+    def _reroot(path: Path) -> Path:
+        if old_root is None or not path.is_absolute():
+            return path
+        try:
+            return root_path / path.relative_to(old_root)
+        except ValueError:
+            return path
+
     working_folder = paths.get("working_folder") or "____INGEST_PIPELINE"
-    working_path = Path(working_folder)
+    working_path = _reroot(Path(working_folder))
     if not working_path.is_absolute():
         working_path = root_path / working_path
 
     inbox_folder = paths.get("inbox_folder") or paths.get("unsorted_folder") or "INBOX"
-    inbox_path = Path(inbox_folder)
+    inbox_path = _reroot(Path(inbox_folder))
     if not inbox_path.is_absolute():
         inbox_path = working_path / inbox_path.name
 
     ready_folder = paths.get("ready_folder") or "READY"
-    ready_path = Path(ready_folder)
+    ready_path = _reroot(Path(ready_folder))
     if not ready_path.is_absolute() or ready_path.name == "__READY":
         ready_path = working_path / "READY"
 
     temp_folder = paths.get("temp_folder") or paths.get("temp_root") or ".TMP"
-    temp_path = Path(temp_folder)
+    temp_path = _reroot(Path(temp_folder))
     if not temp_path.is_absolute():
         temp_path = working_path / temp_path
 
-    legacy_unsorted = Path(paths.get("legacy_unsorted_folder") or (root_path / "____TO_SORT" / "____UNSORTED"))
+    legacy_unsorted = _reroot(Path(paths.get("legacy_unsorted_folder") or (root_path / "____TO_SORT" / "____UNSORTED")))
     if not legacy_unsorted.is_absolute():
         legacy_unsorted = root_path / legacy_unsorted
-    legacy_ready = Path(paths.get("legacy_ready_folder") or (root_path / "____TO_SORT" / "__READY"))
+    legacy_ready = _reroot(Path(paths.get("legacy_ready_folder") or (root_path / "____TO_SORT" / "__READY")))
     if not legacy_ready.is_absolute():
         legacy_ready = root_path / legacy_ready
 
@@ -511,6 +526,7 @@ class PipelineContext:
     config: dict = field(default_factory=default_config)
     counters: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     stage_states: dict[str, PipelineState] = field(default_factory=dict)
+    stage_stats: dict[str, dict[str, int]] = field(default_factory=dict)
     input_snapshot: dict[str, SafetySnapshotEntry] = field(default_factory=dict)
     safety_exceptions: dict[str, str] = field(default_factory=dict)
     prompt_queue: deque[PromptRequest] = field(default_factory=deque)
@@ -538,6 +554,17 @@ class PipelineContext:
     def set_stage_state(self, stage_id: str, state: PipelineState) -> None:
         with self.lock:
             self.stage_states[stage_id] = state
+
+    def set_stage_stats(self, stage_id: str, inputs: int | None = None,
+                        outputs: int | None = None, errors: int | None = None) -> None:
+        with self.lock:
+            stats = self.stage_stats.setdefault(stage_id, {})
+            if inputs is not None:
+                stats["inputs"] = inputs
+            if outputs is not None:
+                stats["outputs"] = outputs
+            if errors is not None:
+                stats["errors"] = errors
 
     def media_extensions(self) -> set[str]:
         extensions = self.config.get("extensions", {})

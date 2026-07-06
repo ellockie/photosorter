@@ -36,6 +36,7 @@ class RenameAndSortStage(PipelineStage):
         resolver = NameCollisionResolver.from_context(context)
         renamed = 0
         skipped = 0
+        exif_missing = 0
 
         for asset in context.assets:
             source_path = asset.primary_path
@@ -44,6 +45,7 @@ class RenameAndSortStage(PipelineStage):
                 continue
             if "image_datetime" not in asset.metadata:
                 context.log(f"Rename skipped, EXIF metadata missing: {source_path.name}")
+                exif_missing += 1
                 skipped += 1
                 continue
             new_name = legacy_filename(asset.metadata, source_path.suffix, context.config)
@@ -72,12 +74,11 @@ class RenameAndSortStage(PipelineStage):
                     # The incoming file wins the base name; the existing target
                     # is renamed away using the legacy _DUPE_<md5>_<n> grammar.
                     existing_md5 = file_md5(target_path)
-                    safe_rename(
-                        target_path,
-                        target_path.with_name(
-                            f"{target_path.stem}{duplicate_suffix}_{existing_md5}_0{target_path.suffix}"
-                        ),
+                    demoted_path = target_path.with_name(
+                        f"{target_path.stem}{duplicate_suffix}_{existing_md5}_0{target_path.suffix}"
                     )
+                    safe_rename(target_path, demoted_path)
+                    self._retarget_collision_loser(context, target_path, demoted_path)
                 else:
                     source_md5 = file_md5(source_path)
                     target_path = unique_duplicate_path(target_path, duplicate_suffix, source_md5)
@@ -87,21 +88,45 @@ class RenameAndSortStage(PipelineStage):
                 safe_rename(source_path, target_path)
                 asset.primary_path = target_path
 
-            for name, sidecar_path in list(asset.sidecars.items()):
-                if not sidecar_path.exists():
-                    continue
-                desired = renamed_sidecar_path(sidecar_path, old_primary_name, target_path.name)
-                sidecar_target = resolve_sidecar_target(sidecar_path, desired)
-                if sidecar_target is None:
-                    safe_delete(sidecar_path)
-                    del asset.sidecars[name]
-                    continue
-                if sidecar_target != sidecar_path:
-                    safe_rename(sidecar_path, sidecar_target)
-                    asset.sidecars[name] = sidecar_target
+            self._rename_sidecars(asset, old_primary_name, target_path.name)
             renamed += 1
 
         context.counters["renamed_assets"] = renamed
         context.counters["rename_skipped_assets"] = skipped
+        context.set_stage_stats(
+            self.stage_id,
+            inputs=len(context.assets),
+            outputs=renamed,
+            errors=exif_missing,
+        )
         context.log(f"Renamed {renamed} media assets and EXIF sidecars")
         return context
+
+    def _retarget_collision_loser(self, context: PipelineContext,
+                                  old_path: Path, demoted_path: Path) -> None:
+        # The demoted file may itself be a tracked asset (e.g. renamed earlier
+        # in this run, or intaken already bearing the contested name). Its
+        # primary_path must follow the _DUPE rename, or folder sorting skips
+        # the asset and the file is stranded in the inbox.
+        for asset in context.assets:
+            if asset.primary_path == old_path:
+                asset.primary_path = demoted_path
+                self._rename_sidecars(asset, old_path.name, demoted_path.name)
+                context.log(
+                    f"Collision loser demoted: {old_path.name} -> {demoted_path.name}"
+                )
+                break
+
+    def _rename_sidecars(self, asset, old_primary_name: str, new_primary_name: str) -> None:
+        for name, sidecar_path in list(asset.sidecars.items()):
+            if not sidecar_path.exists():
+                continue
+            desired = renamed_sidecar_path(sidecar_path, old_primary_name, new_primary_name)
+            sidecar_target = resolve_sidecar_target(sidecar_path, desired)
+            if sidecar_target is None:
+                safe_delete(sidecar_path)
+                del asset.sidecars[name]
+                continue
+            if sidecar_target != sidecar_path:
+                safe_rename(sidecar_path, sidecar_target)
+                asset.sidecars[name] = sidecar_target

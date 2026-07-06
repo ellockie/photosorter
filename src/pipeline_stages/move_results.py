@@ -30,6 +30,7 @@ class MoveResultsStage(PipelineStage):
             if asset.primary_path.exists()
         ]
         context.counters["result_assets_ready"] = len(ready)
+        context.set_stage_stats(self.stage_id, inputs=len(context.assets), outputs=len(ready))
         context.log(f"Prepared {len(ready)} result assets for final sorting")
 
         # Preview the destination event folders. This uses the same captured-at

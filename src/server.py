@@ -80,7 +80,14 @@ class PipelineRuntime:
                     key: value.value
                     for key, value in self.context.stage_states.items()
                 },
-                "logs": self.context.logs[-200:],
+                "stage_stats": {
+                    key: dict(value)
+                    for key, value in self.context.stage_stats.items()
+                },
+                # A single large run can log ~700 per-file lines; keep enough
+                # history that earlier stages stay visible in the dashboard.
+                "logs": self.context.logs[-2000:],
+                "logs_total": len(self.context.logs),
                 "prompts": [
                     {
                         "prompt_id": prompt.prompt_id,
@@ -278,8 +285,11 @@ def create_app(config_path=None, base_folder=None):
                     state["running"],
                     state["paused"],
                     state["error"],
-                    len(state["logs"]),
+                    # Total count, not window length: once the log window is
+                    # full its length stops changing while lines keep arriving.
+                    state["logs_total"],
                     tuple(sorted(state["stage_states"].items())),
+                    tuple(sorted((k, tuple(sorted(v.items()))) for k, v in state["stage_stats"].items())),
                     tuple(sorted(state["counters"].items())),
                     len([p for p in state["prompts"] if not p["answered"]]),
                 )

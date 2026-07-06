@@ -356,6 +356,61 @@ def test_metadata_extraction_parses_legacy_exif_and_rename_matches_old_task(tmp_
     assert context.assets[0].sidecars["exif"] == renamed_exif
 
 
+def test_rename_collision_keeps_demoted_loser_asset_tracked(tmp_path):
+    # KEEP_CANDIDATE demotes the existing target to _DUPE_<md5>_0. When that
+    # file belongs to a tracked asset, the asset (and its sidecars) must follow
+    # the rename, or folder sorting later skips it and the _DUPE file is
+    # stranded in the inbox.
+    context = make_context(tmp_path)
+    inbox = Path(context.config["paths"]["unsorted_folder"])
+    inbox.mkdir(parents=True)
+
+    metadata = {
+        "image_datetime": "2026-05-14_(Thu)_10.30.00",
+        "aperture": "f2.8",
+        "exposure_time": "T1_250",
+        "focal_length": "L50.0",
+        "iso": "I100",
+        "camera_symbol": "6D",
+    }
+    target_name = legacy_filename(metadata, ".jpg", context.config)
+
+    # Sizes stay within the significantly_smaller_ratio (0.5) so the resolver
+    # compares age/size instead of ruling the loser a low-res variant.
+    loser = inbox / "IMG_0001.jpg"
+    loser.write_text("loser content...", encoding="utf-8")
+    loser_sidecar = inbox / "IMG_0001.jpg._exif"
+    loser_sidecar.write_text("loser exif", encoding="utf-8")
+    winner = inbox / "IMG_0002.jpg"
+    winner.write_text("winner is bigger", encoding="utf-8")
+    winner_sidecar = inbox / "IMG_0002.jpg._exif"
+    winner_sidecar.write_text("winner exif", encoding="utf-8")
+
+    # The resolver rules KEEP_CANDIDATE ("candidate-older-larger"): the winner
+    # must be at least as old and as large as the already-renamed loser.
+    os.utime(winner, (1_000_000_000, 1_000_000_000))
+    os.utime(loser, (1_000_000_100, 1_000_000_100))
+    loser_md5 = file_md5(loser)
+
+    loser_asset = MediaAsset(loser, {"exif": loser_sidecar}, dict(metadata))
+    winner_asset = MediaAsset(winner, {"exif": winner_sidecar}, dict(metadata))
+    context.assets.extend([loser_asset, winner_asset])
+
+    RenameAndSortStage().execute(context)
+
+    target_path = inbox / target_name
+    assert winner_asset.primary_path == target_path
+    assert target_path.read_text(encoding="utf-8") == "winner is bigger"
+    assert winner_asset.sidecars["exif"] == inbox / (target_name + "._exif")
+    assert winner_asset.sidecars["exif"].read_text(encoding="utf-8") == "winner exif"
+
+    demoted_path = inbox / f"{target_path.stem}_DUPE_{loser_md5}_0.jpg"
+    assert loser_asset.primary_path == demoted_path
+    assert demoted_path.read_text(encoding="utf-8") == "loser content..."
+    assert loser_asset.sidecars["exif"] == inbox / (demoted_path.name + "._exif")
+    assert loser_asset.sidecars["exif"].read_text(encoding="utf-8") == "loser exif"
+
+
 def test_legacy_stages_move_old_exif_empty_and_legacy_unsorted(tmp_path):
     context = make_context(tmp_path)
     legacy_unsorted = Path(context.config["paths"]["legacy_unsorted_folder"])
@@ -397,6 +452,50 @@ def test_exiftool_batch_writes_sidecars_next_to_originals(monkeypatch, tmp_path)
     assert "%f.%e._exif" not in calls[0]
     # Only the explicit media file is passed; non-media files are never targets.
     assert str(inbox / "photo.jpg") in calls[0]
+
+
+def test_exiftool_batch_chunks_large_batches_under_windows_command_limit(monkeypatch, tmp_path):
+    # 637 Camera Uploads files once exceeded the ~32k CreateProcess limit;
+    # Python raised that as FileNotFoundError and the stage silently skipped
+    # sidecar generation, sending every photo to READY.
+    context = make_context(tmp_path)
+    inbox = Path(context.config["paths"]["unsorted_folder"])
+    inbox.mkdir(parents=True)
+    for index in range(700):
+        (inbox / f"2026-07-05 17.{index // 60:02d}.{index % 60:02d}_{index}.jpg").write_bytes(b"jpeg")
+    calls = []
+    monkeypatch.setattr(
+        "src.pipeline_stages.exiftool_batch.subprocess.check_call",
+        lambda command: calls.append(command),
+    )
+
+    ExiftoolBatchStage().execute(context)
+
+    assert len(calls) > 1
+    for command in calls:
+        assert sum(len(part) + 3 for part in command) < 32000
+    passed = {part for command in calls for part in command if part.endswith(".jpg")}
+    assert len(passed) == 700
+
+
+def test_exiftool_batch_reports_too_long_command_line(monkeypatch, tmp_path):
+    context = make_context(tmp_path)
+    inbox = Path(context.config["paths"]["unsorted_folder"])
+    inbox.mkdir(parents=True)
+    (inbox / "photo.jpg").write_bytes(b"jpeg")
+
+    def raise_too_long(command):
+        error = FileNotFoundError("The filename or extension is too long")
+        error.winerror = 206
+        raise error
+
+    monkeypatch.setattr("src.pipeline_stages.exiftool_batch.subprocess.check_call", raise_too_long)
+
+    ExiftoolBatchStage().execute(context)
+
+    assert any("command line too long" in line for line in context.logs)
+    assert not any("executable not found" in line for line in context.logs)
+    assert context.stage_stats["exiftool-batch"]["errors"] == 1
 
 
 def test_exiftool_batch_skips_non_media_files(monkeypatch, tmp_path):

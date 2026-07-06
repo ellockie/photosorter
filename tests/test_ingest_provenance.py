@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from src.core import PipelineContext, normalize_config_paths, relativize_config_paths
+from src.core import PipelineContext, load_config, normalize_config_paths, relativize_config_paths
 from src.pipeline_stages.folder_intake import FolderIntakeStage
 from src.pipeline_stages.legacy_unsorted_migration import LegacyUnsortedMigrationStage
 from src.pipeline_stages.provenance import \
@@ -204,3 +204,84 @@ def test_normalize_and_relativize_config_roundtrip(tmp_path):
     assert relativized["paths"]["root_folder"] == str(base)
     assert relativized["paths"]["working_folder"] == "____INGEST_PIPELINE"
     assert relativized["paths"]["inbox_folder"] == str(Path("____INGEST_PIPELINE") / "INBOX")
+
+
+def test_base_folder_override_reroots_absolute_working_paths(tmp_path):
+    # Regression: a config.json persisted with absolute c:\__PHOTOS paths must
+    # not keep pointing at the real tree when --base-folder redirects the run.
+    base = tmp_path / "SCRATCH"
+    config = {
+        "paths": {
+            "root_folder": r"c:\__PHOTOS",
+            "working_folder": r"c:\__PHOTOS\____INGEST_PIPELINE",
+            "inbox_folder": r"c:\__PHOTOS\____INGEST_PIPELINE\INBOX",
+            "ready_folder": r"c:\__PHOTOS\____INGEST_PIPELINE\READY",
+            "temp_folder": r"c:\__PHOTOS\____INGEST_PIPELINE\.TMP",
+            "legacy_unsorted_folder": r"c:\__PHOTOS\____TO_SORT\____UNSORTED",
+            "legacy_ready_folder": r"c:\__PHOTOS\____TO_SORT\__READY",
+        }
+    }
+
+    paths = normalize_config_paths(config, base_folder=str(base))["paths"]
+
+    assert paths["root_folder"] == str(base)
+    assert paths["working_folder"] == str(base / "____INGEST_PIPELINE")
+    assert paths["inbox_folder"] == str(base / "____INGEST_PIPELINE" / "INBOX")
+    assert paths["ready_folder"] == str(base / "____INGEST_PIPELINE" / "READY")
+    assert paths["temp_folder"] == str(base / "____INGEST_PIPELINE" / ".TMP")
+    assert paths["legacy_unsorted_folder"] == str(base / "____TO_SORT" / "____UNSORTED")
+    assert paths["legacy_ready_folder"] == str(base / "____TO_SORT" / "__READY")
+    assert paths["unsorted_folder"] == paths["inbox_folder"]
+
+
+def test_base_folder_override_keeps_external_absolute_paths(tmp_path):
+    # An absolute path deliberately outside the persisted root is an external
+    # location and must survive a base-folder override untouched.
+    base = tmp_path / "SCRATCH"
+    external_inbox = tmp_path / "ELSEWHERE" / "INBOX"
+    config = {
+        "paths": {
+            "root_folder": r"c:\__PHOTOS",
+            "inbox_folder": str(external_inbox),
+        }
+    }
+
+    paths = normalize_config_paths(config, base_folder=str(base))["paths"]
+
+    assert paths["inbox_folder"] == str(external_inbox)
+    assert paths["root_folder"] == str(base)
+
+
+def test_load_config_with_base_folder_reroots_absolute_config(tmp_path):
+    # End-to-end through load_config: an absolute-path config.json plus the
+    # --base-folder CLI override must produce a fully scratch-rooted config.
+    base = tmp_path / "SCRATCH"
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "paths": {
+                    "root_folder": r"c:\__PHOTOS",
+                    "inbox_folder": r"c:\__PHOTOS\____INGEST_PIPELINE\INBOX",
+                    "legacy_unsorted_folder": r"c:\__PHOTOS\____TO_SORT\____UNSORTED",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    paths = load_config(str(cfg_path), base_folder=str(base))["paths"]
+
+    base_str = str(base).lower()
+    for key in (
+        "root_folder",
+        "working_folder",
+        "inbox_folder",
+        "ready_folder",
+        "temp_folder",
+        "legacy_unsorted_folder",
+        "legacy_ready_folder",
+        "unsorted_folder",
+        "temp_root",
+    ):
+        assert paths[key].lower().startswith(base_str), f"{key} not rerooted: {paths[key]}"

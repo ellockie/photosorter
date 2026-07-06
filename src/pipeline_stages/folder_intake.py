@@ -67,6 +67,8 @@ class FolderIntakeStage(PipelineStage):
             self._remove_empty_tree(top_level)
 
         context.counters["folder_intake_files"] += ingested
+        if ingested:
+            context.set_stage_stats(self.stage_id, inputs=ingested, outputs=ingested)
         context.log(f"Ingested {ingested} files from inbox subfolders")
         return context
 

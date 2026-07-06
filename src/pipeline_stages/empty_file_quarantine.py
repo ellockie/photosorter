@@ -29,5 +29,7 @@ class EmptyFileQuarantineStage(PipelineStage):
                 moved += 1
 
         context.counters["empty_files_quarantined"] += moved
+        if moved:
+            context.set_stage_stats(self.stage_id, inputs=moved, outputs=0, errors=moved)
         context.log(f"Quarantined {moved} zero-byte files")
         return context

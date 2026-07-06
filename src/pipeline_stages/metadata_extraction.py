@@ -49,5 +49,14 @@ class MetadataExtractionStage(PipelineStage):
 
         context.assets = assets
         context.counters["assets"] = len(assets)
+        missing_exif = sum(1 for asset in assets if "image_datetime" not in asset.metadata)
+        context.set_stage_stats(
+            self.stage_id,
+            inputs=len(assets),
+            outputs=len(assets) - missing_exif,
+            errors=missing_exif,
+        )
         context.log(f"Discovered {len(assets)} media assets")
+        if missing_exif:
+            context.log(f"{missing_exif} assets have no EXIF sidecar datetime")
         return context

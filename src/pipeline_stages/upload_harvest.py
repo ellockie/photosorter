@@ -25,10 +25,12 @@ class UploadHarvestStage(PipelineStage):
             context.log("Upload harvest skipped: source or destination does not exist")
             return context
 
+        candidates = [
+            path for path in source.iterdir()
+            if path.is_file() and path.suffix.lower() in extensions
+        ]
         moved = 0
-        for path in source.iterdir():
-            if not path.is_file() or path.suffix.lower() not in extensions:
-                continue
+        for path in candidates:
             target = destination / path.name
             if target.exists():
                 result = NameCollisionResolver.from_context(context).resolve(
@@ -46,5 +48,6 @@ class UploadHarvestStage(PipelineStage):
             moved += 1
 
         context.counters["uploaded_files_moved"] += moved
+        context.set_stage_stats(self.stage_id, inputs=len(candidates), outputs=moved)
         context.log(f"Moved {moved} uploaded files into the unsorted folder")
         return context

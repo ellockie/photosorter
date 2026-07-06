@@ -78,6 +78,7 @@ class FolderSortingStage(PipelineStage):
         camera_image_shot_keys.discard(None)
 
         moved = 0
+        undated = 0
         sorted_by_label: dict[str, list] = {}
         located_folders: dict[Path, dict] = {}
 
@@ -89,6 +90,7 @@ class FolderSortingStage(PipelineStage):
             # the event folder (e.g. "2026-04-12_(Sun) - Japan").
             label = asset.metadata.get("origin_label") or asset.metadata.get("location_suffix")
             if captured_at is None:
+                undated += 1
                 event_folder = Path(config["paths"]["ready_folder"])
             else:
                 event_folder = final_event_folder(captured_at, config, label)
@@ -166,7 +168,10 @@ class FolderSortingStage(PipelineStage):
         self._route_geodata(context, sorted_by_label)
 
         context.counters["sorted_assets"] = moved
+        context.set_stage_stats(self.stage_id, inputs=moved, outputs=moved, errors=undated)
         context.log(f"Sorted {moved} assets into event folders")
+        if undated:
+            context.log(f"Routed {undated} assets without a capture date to READY")
         return context
 
     def _route_geodata(self, context: PipelineContext, sorted_by_label: dict[str, list]) -> None:

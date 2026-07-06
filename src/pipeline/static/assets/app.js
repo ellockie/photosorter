@@ -34,7 +34,25 @@ const STATE_ICON = {
   skipped: "–",   // –  skipped
 };
 
-function renderGraph(states) {
+function renderNodeStats(stats) {
+  const box = document.createElement("span");
+  box.className = "node-stats";
+  const parts = [
+    ["in", stats.inputs, "node-stat"],
+    ["out", stats.outputs, "node-stat"],
+    ["err", stats.errors, "node-stat node-errors"],
+  ];
+  parts.forEach(([label, value, className]) => {
+    if (value === undefined || (label === "err" && !value)) return;
+    const part = document.createElement("span");
+    part.className = className;
+    part.textContent = `${label} ${value}`;
+    box.appendChild(part);
+  });
+  return box;
+}
+
+function renderGraph(states, stats = {}) {
   graphEl.innerHTML = "";
   graph.forEach((node, index) => {
     const state = states[node.id] || "pending";
@@ -43,19 +61,32 @@ function renderGraph(states) {
     const icon = document.createElement("span");
     icon.className = "node-icon";
     icon.textContent = STATE_ICON[state] || STATE_ICON.pending;
+    const number = document.createElement("span");
+    number.className = "node-number";
+    number.textContent = String(index + 1).padStart(2, "0");
+    const separator = document.createElement("span");
+    separator.className = "node-sep";
+    separator.textContent = "·";
     const text = document.createElement("span");
     text.className = "node-text";
-    text.textContent = `${String(index + 1).padStart(2, "0")}  ${node.label}`;
-    el.append(icon, text);
+    text.textContent = node.label;
+    el.append(icon, number, separator, text);
+    const nodeStats = stats[node.id];
+    if (nodeStats && Object.values(nodeStats).some(value => value)) {
+      el.appendChild(renderNodeStats(nodeStats));
+    }
     graphEl.appendChild(el);
   });
 }
 
-function renderStageLog(parent, line, stageNumber) {
+function renderStageLog(parent, line) {
   const stageId = line.slice("Stage: ".length);
+  // Number by the stage's position in the pipeline graph, so it stays stable
+  // even when older log lines scroll out of the retained window.
+  const index = graph.findIndex(node => node.id === stageId);
   const number = document.createElement("span");
   number.className = "stage-number";
-  number.textContent = String(stageNumber).padStart(2, "0");
+  number.textContent = index >= 0 ? String(index + 1).padStart(2, "0") : "--";
   const label = document.createElement("span");
   label.textContent = "Stage: ";
   const name = document.createElement("strong");
@@ -187,16 +218,14 @@ function renderState(state) {
   processedEl.textContent = state.counters?.sorted_assets || 0;
   promptsEl.textContent = (state.prompts || []).filter(prompt => !prompt.answered).length;
   renderPrompts(state.prompts);
-  renderGraph(state.stage_states || {});
+  renderGraph(state.stage_states || {}, state.stage_stats || {});
   logsEl.innerHTML = "";
-  let stageNumber = 0;
   // Stage outcome is shown by the node icons, so drop the bare status lines.
   const STATUS_LINES = new Set(["Completed.", "Failed.", "Paused."]);
-  (state.logs || []).slice(-160).filter(line => !STATUS_LINES.has(String(line).trim())).forEach(line => {
+  (state.logs || []).filter(line => !STATUS_LINES.has(String(line).trim())).forEach(line => {
     const row = document.createElement("div");
     if (String(line).startsWith("Stage: ")) {
-      stageNumber += 1;
-      renderStageLog(row, String(line), stageNumber);
+      renderStageLog(row, String(line));
     } else {
       row.className = "log-line";
       row.textContent = line;
