@@ -46,6 +46,36 @@ def _unique_target(folder: Path, file_name: str, source: Path) -> Path:
     return target
 
 
+def _demote_existing_occupant(context: PipelineContext, folder: Path, file_name: str, current_path: Path) -> None:
+    # A different file already sits at the destination name (a stale leftover
+    # or a genuine same-name collision). Flag it as a duplicate using its own
+    # hash instead of silently leaving it there unmarked, and drag its
+    # sidecars along so they don't end up orphaned under a stale name.
+    existing = folder / file_name
+    if not existing.exists() or existing == current_path:
+        return
+    demoted = _unique_target(folder, file_name, existing)
+    old_name = existing.name
+    safe_move(existing, demoted)
+    for asset in context.assets:
+        if asset.primary_path != existing:
+            continue
+        asset.primary_path = demoted
+        for name, sidecar_path in list(asset.sidecars.items()):
+            if not sidecar_path.exists():
+                continue
+            desired = renamed_sidecar_path(sidecar_path, old_name, demoted.name)
+            sidecar_target = resolve_sidecar_target(sidecar_path, desired)
+            if sidecar_target is None:
+                safe_delete(sidecar_path)
+                del asset.sidecars[name]
+                continue
+            if sidecar_target != sidecar_path:
+                safe_move(sidecar_path, sidecar_target)
+                asset.sidecars[name] = sidecar_target
+        break
+
+
 class FolderSortingStage(PipelineStage):
     def __init__(self):
         super().__init__(
@@ -114,6 +144,7 @@ class FolderSortingStage(PipelineStage):
 
             primary_folder.mkdir(parents=True, exist_ok=True)
             old_primary_name = asset.primary_path.name
+            _demote_existing_occupant(context, primary_folder, primary_name, asset.primary_path)
             primary_target = _unique_target(primary_folder, primary_name, asset.primary_path)
             safe_move(asset.primary_path, primary_target)
             asset.primary_path = primary_target

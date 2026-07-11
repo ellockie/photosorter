@@ -66,6 +66,7 @@ from constants.constants import \
 from common.globals import COUNTERS, file_info_array, FULL_PATH_SUBFOLDER, created_folders
 from utils.decorators import print_current_task_name, display_timing
 from move_other_images import move_other_images
+from other_image_classifier import classify_other_images
 from folder_sorter import folder_sorter
 from utils.colorise import Colorise
 
@@ -103,6 +104,12 @@ def _TASK_verify_if_folders_exist(all_folders):
 @display_timing
 def _TASK_move_other_images_from_uploads_folder():
     move_other_images()
+
+
+@print_current_task_name
+@display_timing
+def _TASK_classify_other_images():
+    classify_other_images(os.path.join(CAMERA_UPLOADS_PATH, "_Other images"))
 
 
 @print_current_task_name
@@ -471,6 +478,7 @@ def legacy_main():
 
     processing_start_time = time.time()
     _TASK_move_other_images_from_uploads_folder()
+    _TASK_classify_other_images()
     _TASK_move_media_from_uploads_folder_into_sort_folder()
     _TASK_verify_if_folders_exist(FOLDERS_ALL)
     all_files_count = get_all_files_count()

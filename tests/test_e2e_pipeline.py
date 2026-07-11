@@ -206,6 +206,54 @@ def test_e2e_labeled_folder_stays_separate_from_loose_files(tmp_path, monkeypatc
     assert (labeled / "__GEOLOCATIONS" / "track.gpx").exists()
 
 
+def test_folder_sorting_demotes_existing_occupant_on_name_collision(tmp_path):
+    # Two different assets land on the same event folder + file name (e.g. two
+    # distinct shots that both got named "shot.jpg" upstream). The asset moved
+    # in first must not be left silently occupying the plain name once a
+    # second, different file wants it too: both get flagged as _DUPE_<md5>,
+    # and the first asset's sidecar follows its rename.
+    config = build_config(tmp_path)
+    inbox = Path(config["paths"]["inbox_folder"])
+    inbox.mkdir(parents=True)
+    other = inbox / "other"
+    other.mkdir(parents=True)
+    captured = datetime.datetime(2026, 5, 14, 10, 30, 0)
+    shared = {
+        "captured_at": captured,
+        "image_datetime": "2026-05-14_(Thu)_10.30.00",
+        "camera_symbol": "C6D",
+    }
+
+    first = inbox / "shot.jpg"
+    first.write_text("first-content", encoding="utf-8")
+    first_exif = inbox / "shot.jpg._exif"
+    first_exif.write_text("first exif", encoding="utf-8")
+    second = other / "shot.jpg"
+    second.write_text("second-content-different", encoding="utf-8")
+
+    first_asset = MediaAsset(first, {"exif": first_exif})
+    first_asset.metadata.update(shared)
+    second_asset = MediaAsset(second)
+    second_asset.metadata.update(shared)
+
+    first_md5 = file_md5(first)
+
+    context = PipelineContext(config=config)
+    context.assets = [first_asset, second_asset]
+    FolderSortingStage().execute(context)
+
+    event_folder = final_event_folder(captured, config)
+    assert (event_folder / "shot.jpg").exists()
+    assert second_asset.primary_path == event_folder / "shot.jpg"
+
+    demoted = event_folder / f"shot_DUPE_{first_md5}_1.jpg"
+    assert demoted.exists()
+    assert demoted.read_text(encoding="utf-8") == "first-content"
+    assert first_asset.primary_path == demoted
+    assert first_asset.sidecars["exif"] == event_folder / "__EXIF" / (demoted.name + "._exif")
+    assert first_asset.sidecars["exif"].read_text(encoding="utf-8") == "first exif"
+
+
 def test_representative_suffix_ordering():
     from src.pipeline_stages.taxonomy import apply_representative_suffixes
 

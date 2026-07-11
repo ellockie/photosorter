@@ -17,6 +17,7 @@ from src.core import \
     file_md5
 from src.core import normalize_config_paths
 from src.pipeline_stages.empty_file_quarantine import EmptyFileQuarantineStage
+from src.pipeline_stages.classify_other_images import ClassifyOtherImagesStage
 from src.pipeline_stages.exiftool_batch import ExiftoolBatchStage
 from src.pipeline_stages.legacy import \
     duplicate_name, \
@@ -552,3 +553,39 @@ def test_move_other_images_stage_wraps_legacy_function(monkeypatch, tmp_path):
     assert seen_kwargs["src_path"] == str(tmp_path / "Camera Uploads")
     assert seen_kwargs["other_image_extensions"] == [".png", ".gif"]
     assert seen_kwargs["video_extensions"] == [".mp4"]
+
+
+def test_classify_other_images_stage_publishes_live_input_output_stats(monkeypatch, tmp_path):
+    import src.other_image_classifier as classifier_module
+
+    context = make_context(tmp_path)
+    camera_uploads = tmp_path / "Camera Uploads"
+    context.config["paths"]["camera_uploads"] = str(camera_uploads)
+    context.config["paths"]["ingest"] = {"camera_uploads": str(camera_uploads)}
+    live_stats = []
+
+    def fake_classify_other_images(path, progress_callback):
+        assert path == str(camera_uploads / "_Other images")
+        progress_callback(0, 4)
+        live_stats.append(dict(context.stage_stats["classify-other-images"]))
+        progress_callback(4, 0)
+        return {
+            classifier_module.PHOTO_FOLDER: 2,
+            classifier_module.INFOGRAPHIC_FOLDER: 1,
+            classifier_module.TEXT_SCREENSHOT_FOLDER: 0,
+        }
+
+    monkeypatch.setattr(
+        classifier_module,
+        "classify_other_images",
+        fake_classify_other_images,
+    )
+
+    ClassifyOtherImagesStage().execute(context)
+
+    assert live_stats == [{"inputs": 4, "outputs": 0, "errors": 0}]
+    assert context.stage_stats["classify-other-images"] == {
+        "inputs": 4,
+        "outputs": 3,
+        "errors": 1,
+    }

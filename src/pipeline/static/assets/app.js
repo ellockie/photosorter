@@ -72,7 +72,7 @@ function renderGraph(states, stats = {}) {
     text.textContent = node.label;
     el.append(icon, number, separator, text);
     const nodeStats = stats[node.id];
-    if (nodeStats && Object.values(nodeStats).some(value => value)) {
+    if (nodeStats && Object.values(nodeStats).some(value => value !== undefined)) {
       el.appendChild(renderNodeStats(nodeStats));
     }
     graphEl.appendChild(el);
@@ -214,8 +214,8 @@ function renderState(state) {
   } else {
     alertEl.classList.add("hidden");
   }
-  assetsEl.textContent = state.counters?.assets || state.counters?.input_files || 0;
-  processedEl.textContent = state.counters?.sorted_assets || 0;
+  assetsEl.textContent = state.counters?.other_images_classification_pending ?? state.counters?.assets ?? state.counters?.input_files ?? 0;
+  processedEl.textContent = state.counters?.other_images_classification_processed ?? state.counters?.sorted_assets ?? 0;
   promptsEl.textContent = (state.prompts || []).filter(prompt => !prompt.answered).length;
   renderPrompts(state.prompts);
   renderGraph(state.stage_states || {}, state.stage_stats || {});
