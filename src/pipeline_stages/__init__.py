@@ -14,6 +14,7 @@ from src.pipeline_stages.move_results import MoveResultsStage
 from src.pipeline_stages.move_other_images import MoveOtherImagesStage
 from src.pipeline_stages.raw_staged_conversion import RawStagedConversionStage
 from src.pipeline_stages.rename_and_sort import RenameAndSortStage
+from src.pipeline_stages.screenshot_grouping import ScreenshotGroupingStage
 from src.pipeline_stages.show_stats import ShowStatsStage
 from src.pipeline_stages.stale_exif_relocation import StaleExifRelocationStage
 from src.pipeline_stages.timezone_and_travel import TimezoneAndTravelStage
@@ -36,6 +37,7 @@ __all__ = [
     "RenameAndSortStage",
     "RawStagedConversionStage",
     "FolderSortingStage",
+    "ScreenshotGroupingStage",
     "ShowStatsStage",
     "DisplayExtraMessagesStage",
     "build_default_stages",

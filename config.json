@@ -70,6 +70,15 @@
     "attempts": 5,
     "delay_seconds": 0.2
   },
+  "screenshot_grouping": {
+    "enabled": true,
+    "project_path": "c:\\Users\\luxxa\\Dropbox\\___Projects\\SCREENSHOT_GROUPER\\screnshot-grouper",
+    "python": "c:\\Users\\luxxa\\AppData\\Local\\pypoetry\\Cache\\virtualenvs\\screenshot-grouper-bPT5Y6s0-py3.10\\Scripts\\python.exe",
+    "target_folders": [
+      "_Other images/_POTENTIAL_TEXT_SCREENSHOTS",
+      "_Other images/_POTENTIAL_INFOGRAPHICS"
+    ]
+  },
   "safety": {
     "enabled": true,
     "hash_chunk_size": 1048576

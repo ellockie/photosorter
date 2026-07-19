@@ -181,6 +181,18 @@ def default_config() -> dict:
             "journal_folder": ".JOURNAL",
             "geodata_extensions": [".gpx"],
         },
+        # Final sorting of classified screenshots into dated group folders,
+        # delegated to the external screenshot-grouper project (shared with
+        # the Mac workflow). Off until its python/project paths are configured.
+        "screenshot_grouping": {
+            "enabled": False,
+            "python": "",
+            "project_path": "",
+            "target_folders": [
+                "_Other images/_POTENTIAL_TEXT_SCREENSHOTS",
+                "_Other images/_POTENTIAL_INFOGRAPHICS",
+            ],
+        },
         # Two-timeline timezone & travel model (design.md Decision 9). Zones are
         # a small alias map over IANA names; offsets are derived, never typed.
         "zones": {},
