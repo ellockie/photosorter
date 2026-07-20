@@ -6,24 +6,27 @@ import pytest
 from src.core import PipelineContext
 from src.pipeline_stages.screenshot_grouping import ScreenshotGroupingStage
 
+PLACEHOLDER = " - 1. ######"
 
-def make_context(tmp_path, enabled=True, python=None, project=None, targets=None):
-    camera_uploads = tmp_path / "Camera Uploads"
-    camera_uploads.mkdir(parents=True, exist_ok=True)
+
+def make_context(tmp_path, enabled=True, python=None, project=None, max_folders=0):
+    root = tmp_path / "__PHOTOS"
+    root.mkdir(parents=True, exist_ok=True)
     return PipelineContext(
         config={
-            "paths": {
-                "camera_uploads": str(camera_uploads),
-                "ingest": {"camera_uploads": str(camera_uploads)},
+            "paths": {"root_folder": str(root)},
+            "extensions": {
+                "lossy_images": [".jpg", ".jpeg"],
+                "other_images": [".png"],
+                "raw_images": [".cr2"],
+                "videos": [".mp4", ".mov"],
             },
+            "legacy": {"date_folder_suffix": PLACEHOLDER},
             "screenshot_grouping": {
                 "enabled": enabled,
                 "python": str(python) if python else "",
                 "project_path": str(project) if project else "",
-                "target_folders": targets if targets is not None else [
-                    "_Other images/_POTENTIAL_TEXT_SCREENSHOTS",
-                    "_Other images/_POTENTIAL_INFOGRAPHICS",
-                ],
+                "max_folders": max_folders,
             },
         },
     )
@@ -36,104 +39,162 @@ def grouper_install(tmp_path):
     python.write_text("", encoding="utf-8")
     project = tmp_path / "grouper-project"
     project.mkdir()
+    (project / "main.py").write_text("", encoding="utf-8")
     return python, project
 
 
-def completed(args, returncode=0, stdout="", stderr=""):
-    return subprocess.CompletedProcess(args, returncode, stdout, stderr)
+def make_event_folder(tmp_path, name, images=0, videos=0, with_raw_subdir=False):
+    folder = tmp_path / "__PHOTOS" / "2026" / "07. July" / name
+    folder.mkdir(parents=True)
+    for i in range(images):
+        (folder / f"img_{i}.jpg").write_bytes(b"x")
+    for i in range(videos):
+        (folder / f"vid_{i}.mp4").write_bytes(b"x")
+    if with_raw_subdir:
+        raw = folder / "__RAW"
+        raw.mkdir()
+        (raw / "orig.cr2").write_bytes(b"x")
+    return folder
 
 
-def test_disabled_skips_without_invoking_tool(tmp_path, monkeypatch):
-    def explode(*args, **kwargs):
-        raise AssertionError("subprocess.run should not be called when disabled")
+def ok(cmd, **kwargs):
+    return subprocess.CompletedProcess(cmd, 0)
 
-    monkeypatch.setattr(subprocess, "run", explode)
+
+def test_disabled_skips(tmp_path, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("should not run"))
     context = make_context(tmp_path, enabled=False)
-
     ScreenshotGroupingStage().execute(context)
-
-    assert context.stage_stats["screenshot-grouping"] == {"inputs": 0, "outputs": 0, "errors": 0}
     assert any("disabled" in line for line in context.logs)
 
 
-def test_missing_tool_skips_gracefully(tmp_path, monkeypatch):
-    def explode(*args, **kwargs):
-        raise AssertionError("subprocess.run should not be called when tool is missing")
-
-    monkeypatch.setattr(subprocess, "run", explode)
-    context = make_context(tmp_path, python=tmp_path / "nope" / "python.exe")
-
+def test_missing_tool_skips(tmp_path, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("should not run"))
+    context = make_context(tmp_path, python=tmp_path / "nope.exe", project=tmp_path / "nope")
     ScreenshotGroupingStage().execute(context)
-
     assert any("not available" in line for line in context.logs)
 
 
-def test_groups_each_existing_target_folder(tmp_path, monkeypatch, grouper_install):
+def test_renames_placeholder_and_launches_gui(tmp_path, monkeypatch, grouper_install):
     python, project = grouper_install
-    camera_uploads = tmp_path / "Camera Uploads"
-    screenshots = camera_uploads / "_Other images" / "_POTENTIAL_TEXT_SCREENSHOTS"
-    screenshots.mkdir(parents=True)
-    # _POTENTIAL_INFOGRAPHICS deliberately absent
+    make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=3, videos=1,
+                       with_raw_subdir=True)
 
     calls = []
-
-    def fake_run(command, **kwargs):
-        calls.append((command, kwargs))
-        return completed(command, stdout="All-days batch done: moved 7 file(s) across 3 day(s)")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: calls.append((cmd, k)) or ok(cmd))
     context = make_context(tmp_path, python=python, project=project)
 
     ScreenshotGroupingStage().execute(context)
+
+    renamed = tmp_path / "__PHOTOS" / "2026" / "07. July" / "2026-07-18_(Sat) - __TO_SPLIT__(i=3_v=1)"
+    assert renamed.is_dir()
+    assert not (tmp_path / "__PHOTOS" / "2026" / "07. July" / f"2026-07-18_(Sat){PLACEHOLDER}").exists()
 
     assert len(calls) == 1
-    command, kwargs = calls[0]
-    assert command == [
-        str(python), "-m", "screenshot_grouper.daily_batch", "--all", str(screenshots)]
+    cmd, kwargs = calls[0]
+    assert cmd == [str(python), str(project / "main.py"), "--alternative", str(renamed)]
     assert kwargs["cwd"] == str(project)
-    assert context.counters["screenshots_grouped"] == 7
-    assert context.stage_stats["screenshot-grouping"] == {"inputs": 7, "outputs": 7, "errors": 0}
-    assert any("skipping" in line and "_POTENTIAL_INFOGRAPHICS" in line for line in context.logs)
+    assert context.counters["screenshot_folders_grouped"] == 1
+    assert context.stage_stats["screenshot-grouping"] == {"inputs": 1, "outputs": 1, "errors": 0}
 
 
-def test_tool_failure_recorded_not_raised(tmp_path, monkeypatch, grouper_install):
+def test_processes_folders_one_by_one_most_recent_first(tmp_path, monkeypatch, grouper_install):
     python, project = grouper_install
-    camera_uploads = tmp_path / "Camera Uploads"
-    (camera_uploads / "_Other images" / "_POTENTIAL_TEXT_SCREENSHOTS").mkdir(parents=True)
-    (camera_uploads / "_Other images" / "_POTENTIAL_INFOGRAPHICS").mkdir(parents=True)
+    make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=1)
+    make_event_folder(tmp_path, f"2026-07-19_(Sun){PLACEHOLDER}", images=1)
 
-    responses = iter([
-        completed([], returncode=1, stderr="Traceback: boom"),
-        completed([], stdout="All-days batch done: moved 2 file(s) across 1 day(s)"),
-    ])
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: next(responses))
+    order = []
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda cmd, **k: order.append(Path(cmd[-1]).name) or ok(cmd))
     context = make_context(tmp_path, python=python, project=project)
 
     ScreenshotGroupingStage().execute(context)
 
-    assert context.stage_stats["screenshot-grouping"]["errors"] == 1
-    assert context.counters["screenshots_grouped"] == 2
-    assert any("failed" in line for line in context.logs)
+    assert order == [
+        "2026-07-19_(Sun) - __TO_SPLIT__(i=1)",
+        "2026-07-18_(Sat) - __TO_SPLIT__(i=1)",
+    ]
+    assert context.counters["screenshot_folders_grouped"] == 2
 
 
-def test_absolute_target_folder_kept_as_is(tmp_path, monkeypatch, grouper_install):
+def test_existing_to_split_folder_opened_without_rename(tmp_path, monkeypatch, grouper_install):
     python, project = grouper_install
-    external = tmp_path / "external-screenshots"
-    external.mkdir()
+    folder = make_event_folder(tmp_path, "2026-07-18_(Sat) - __TO_SPLIT__(i=2)", images=2)
 
     calls = []
-
-    def fake_run(command, **kwargs):
-        calls.append(command)
-        return completed(command, stdout="All-days batch done: moved 1 file(s) across 1 day(s)")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    context = make_context(
-        tmp_path, python=python, project=project, targets=[str(external)])
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: calls.append(cmd) or ok(cmd))
+    context = make_context(tmp_path, python=python, project=project)
 
     ScreenshotGroupingStage().execute(context)
 
-    assert calls[0][-1] == str(external)
+    assert calls[0][-1] == str(folder)
+    assert folder.is_dir()
+
+
+def test_folder_without_media_is_skipped(tmp_path, monkeypatch, grouper_install):
+    python, project = grouper_install
+    # Only a __RAW subdir, no top-level media
+    make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", with_raw_subdir=True)
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("should not launch"))
+    context = make_context(tmp_path, python=python, project=project)
+
+    ScreenshotGroupingStage().execute(context)
+
+    assert context.counters["screenshot_folders_grouped"] == 0
+    assert any("no top-level media" in line for line in context.logs)
+
+
+def test_dropbox_and_ingest_trees_never_scanned(tmp_path, monkeypatch, grouper_install):
+    python, project = grouper_install
+    root = tmp_path / "__PHOTOS"
+    # A placeholder-named folder outside the YYYY/Month structure must be ignored
+    (root / "____INGEST_PIPELINE" / f"2026-07-18_(Sat){PLACEHOLDER}").mkdir(parents=True)
+    (root / "____INGEST_PIPELINE" / f"2026-07-18_(Sat){PLACEHOLDER}" / "a.jpg").write_bytes(b"x")
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("should not launch"))
+    context = make_context(tmp_path, python=python, project=project)
+
+    ScreenshotGroupingStage().execute(context)
+
+    assert context.counters["screenshot_folders_grouped"] == 0
+
+
+def test_launch_failure_isolated_and_recorded(tmp_path, monkeypatch, grouper_install):
+    python, project = grouper_install
+    make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=1)
+    make_event_folder(tmp_path, f"2026-07-19_(Sun){PLACEHOLDER}", images=1)
+
+    results = iter([
+        subprocess.CompletedProcess([], 1),  # first folder fails
+        subprocess.CompletedProcess([], 0),  # second succeeds
+    ])
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: next(results))
+    context = make_context(tmp_path, python=python, project=project)
+
+    ScreenshotGroupingStage().execute(context)
+
+    stats = context.stage_stats["screenshot-grouping"]
+    assert stats["errors"] == 1
+    assert context.counters["screenshot_folders_grouped"] == 1
+
+
+def test_max_folders_caps_launches(tmp_path, monkeypatch, grouper_install):
+    python, project = grouper_install
+    make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=1)
+    make_event_folder(tmp_path, f"2026-07-19_(Sun){PLACEHOLDER}", images=1)
+    make_event_folder(tmp_path, f"2026-07-20_(Mon){PLACEHOLDER}", images=1)
+
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: calls.append(cmd) or ok(cmd))
+    context = make_context(tmp_path, python=python, project=project, max_folders=2)
+
+    ScreenshotGroupingStage().execute(context)
+
+    assert len(calls) == 2  # most recent two only
+    assert Path(calls[0][-1]).name.startswith("2026-07-20")
+    assert Path(calls[1][-1]).name.startswith("2026-07-19")
 
 
 def test_stage_in_default_pipeline_after_folder_sorting():

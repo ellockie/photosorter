@@ -181,17 +181,16 @@ def default_config() -> dict:
             "journal_folder": ".JOURNAL",
             "geodata_extensions": [".gpx"],
         },
-        # Final sorting of classified screenshots into dated group folders,
-        # delegated to the external screenshot-grouper project (shared with
-        # the Mac workflow). Off until its python/project paths are configured.
+        # Final review step: open the external screenshot-grouper GUI (shared
+        # with the Mac workflow) on each freshly sorted, ungrouped event folder
+        # so the day can be split into named sub-events. Off until its
+        # python/project paths are configured. max_folders caps how many GUIs
+        # a single run will open (0 = no limit).
         "screenshot_grouping": {
             "enabled": False,
             "python": "",
             "project_path": "",
-            "target_folders": [
-                "_Other images/_POTENTIAL_TEXT_SCREENSHOTS",
-                "_Other images/_POTENTIAL_INFOGRAPHICS",
-            ],
+            "max_folders": 0,
         },
         # Two-timeline timezone & travel model (design.md Decision 9). Zones are
         # a small alias map over IANA names; offsets are derived, never typed.
