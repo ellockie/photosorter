@@ -192,6 +192,11 @@ def default_config() -> dict:
             "project_path": "",
             "max_folders": 0,
         },
+        # After grouping, move each shot's RAW/EXIF/video companions to follow
+        # its representative image into the new sub-event folder.
+        "companion_reconciliation": {
+            "enabled": False,
+        },
         # Two-timeline timezone & travel model (design.md Decision 9). Zones are
         # a small alias map over IANA names; offsets are derived, never typed.
         "zones": {},
@@ -547,6 +552,11 @@ class PipelineContext:
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     provenance: dict[str, dict] = field(default_factory=dict)
     geodata: list[dict] = field(default_factory=list)
+    # Event folders that folder-sorting moved assets into this run, and the
+    # subset the screenshot-grouping stage actually opened in the grouper (as
+    # their renamed __TO_SPLIT__ paths) — consumed by companion-reconciliation.
+    affected_event_folders: set[Path] = field(default_factory=set)
+    screenshot_grouped_folders: list[Path] = field(default_factory=list)
     lock: threading.RLock = field(default_factory=threading.RLock)
 
     @classmethod

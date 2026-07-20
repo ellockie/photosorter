@@ -57,6 +57,11 @@ def make_event_folder(tmp_path, name, images=0, videos=0, with_raw_subdir=False)
     return folder
 
 
+def affect(context, *folders):
+    """Register folders as the ones folder-sorting touched this run."""
+    context.affected_event_folders.update(folders)
+
+
 def ok(cmd, **kwargs):
     return subprocess.CompletedProcess(cmd, 0)
 
@@ -77,18 +82,19 @@ def test_missing_tool_skips(tmp_path, monkeypatch):
 
 def test_renames_placeholder_and_launches_gui(tmp_path, monkeypatch, grouper_install):
     python, project = grouper_install
-    make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=3, videos=1,
-                       with_raw_subdir=True)
+    folder = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=3, videos=1,
+                               with_raw_subdir=True)
 
     calls = []
     monkeypatch.setattr(subprocess, "run", lambda cmd, **k: calls.append((cmd, k)) or ok(cmd))
     context = make_context(tmp_path, python=python, project=project)
+    affect(context, folder)
 
     ScreenshotGroupingStage().execute(context)
 
     renamed = tmp_path / "__PHOTOS" / "2026" / "07. July" / "2026-07-18_(Sat) - __TO_SPLIT__(i=3_v=1)"
     assert renamed.is_dir()
-    assert not (tmp_path / "__PHOTOS" / "2026" / "07. July" / f"2026-07-18_(Sat){PLACEHOLDER}").exists()
+    assert not folder.exists()
 
     assert len(calls) == 1
     cmd, kwargs = calls[0]
@@ -96,18 +102,53 @@ def test_renames_placeholder_and_launches_gui(tmp_path, monkeypatch, grouper_ins
     assert kwargs["cwd"] == str(project)
     assert context.counters["screenshot_folders_grouped"] == 1
     assert context.stage_stats["screenshot-grouping"] == {"inputs": 1, "outputs": 1, "errors": 0}
+    # The renamed folder is recorded for the reconciliation stage.
+    assert context.screenshot_grouped_folders == [renamed]
+
+
+def test_only_affected_folders_are_touched(tmp_path, monkeypatch, grouper_install):
+    python, project = grouper_install
+    affected = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=1)
+    # A second placeholder folder on disk that this run did NOT sort into
+    make_event_folder(tmp_path, f"2026-07-01_(Wed){PLACEHOLDER}", images=1)
+
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: calls.append(cmd) or ok(cmd))
+    context = make_context(tmp_path, python=python, project=project)
+    affect(context, affected)  # only the first is registered
+
+    ScreenshotGroupingStage().execute(context)
+
+    assert len(calls) == 1
+    assert Path(calls[0][-1]).name.startswith("2026-07-18")
+    assert (tmp_path / "__PHOTOS" / "2026" / "07. July" / f"2026-07-01_(Wed){PLACEHOLDER}").is_dir()
+
+
+def test_labelled_folder_left_alone(tmp_path, monkeypatch, grouper_install):
+    python, project = grouper_install
+    trip = make_event_folder(tmp_path, "2026-07-18_(Sat) - Japan trip", images=2)
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("should not launch"))
+    context = make_context(tmp_path, python=python, project=project)
+    affect(context, trip)
+
+    ScreenshotGroupingStage().execute(context)
+
+    assert context.counters["screenshot_folders_grouped"] == 0
+    assert trip.is_dir()
 
 
 def test_processes_folders_one_by_one_most_recent_first(tmp_path, monkeypatch, grouper_install):
     python, project = grouper_install
-    make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=1)
-    make_event_folder(tmp_path, f"2026-07-19_(Sun){PLACEHOLDER}", images=1)
+    a = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=1)
+    b = make_event_folder(tmp_path, f"2026-07-19_(Sun){PLACEHOLDER}", images=1)
 
     order = []
     monkeypatch.setattr(
         subprocess, "run",
         lambda cmd, **k: order.append(Path(cmd[-1]).name) or ok(cmd))
     context = make_context(tmp_path, python=python, project=project)
+    affect(context, a, b)
 
     ScreenshotGroupingStage().execute(context)
 
@@ -125,6 +166,7 @@ def test_existing_to_split_folder_opened_without_rename(tmp_path, monkeypatch, g
     calls = []
     monkeypatch.setattr(subprocess, "run", lambda cmd, **k: calls.append(cmd) or ok(cmd))
     context = make_context(tmp_path, python=python, project=project)
+    affect(context, folder)
 
     ScreenshotGroupingStage().execute(context)
 
@@ -134,11 +176,11 @@ def test_existing_to_split_folder_opened_without_rename(tmp_path, monkeypatch, g
 
 def test_folder_without_media_is_skipped(tmp_path, monkeypatch, grouper_install):
     python, project = grouper_install
-    # Only a __RAW subdir, no top-level media
-    make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", with_raw_subdir=True)
+    folder = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", with_raw_subdir=True)
 
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("should not launch"))
     context = make_context(tmp_path, python=python, project=project)
+    affect(context, folder)
 
     ScreenshotGroupingStage().execute(context)
 
@@ -146,32 +188,18 @@ def test_folder_without_media_is_skipped(tmp_path, monkeypatch, grouper_install)
     assert any("no top-level media" in line for line in context.logs)
 
 
-def test_dropbox_and_ingest_trees_never_scanned(tmp_path, monkeypatch, grouper_install):
-    python, project = grouper_install
-    root = tmp_path / "__PHOTOS"
-    # A placeholder-named folder outside the YYYY/Month structure must be ignored
-    (root / "____INGEST_PIPELINE" / f"2026-07-18_(Sat){PLACEHOLDER}").mkdir(parents=True)
-    (root / "____INGEST_PIPELINE" / f"2026-07-18_(Sat){PLACEHOLDER}" / "a.jpg").write_bytes(b"x")
-
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("should not launch"))
-    context = make_context(tmp_path, python=python, project=project)
-
-    ScreenshotGroupingStage().execute(context)
-
-    assert context.counters["screenshot_folders_grouped"] == 0
-
-
 def test_launch_failure_isolated_and_recorded(tmp_path, monkeypatch, grouper_install):
     python, project = grouper_install
-    make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=1)
-    make_event_folder(tmp_path, f"2026-07-19_(Sun){PLACEHOLDER}", images=1)
+    a = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=1)
+    b = make_event_folder(tmp_path, f"2026-07-19_(Sun){PLACEHOLDER}", images=1)
 
     results = iter([
-        subprocess.CompletedProcess([], 1),  # first folder fails
-        subprocess.CompletedProcess([], 0),  # second succeeds
+        subprocess.CompletedProcess([], 1),  # first (most recent) fails
+        subprocess.CompletedProcess([], 0),
     ])
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: next(results))
     context = make_context(tmp_path, python=python, project=project)
+    affect(context, a, b)
 
     ScreenshotGroupingStage().execute(context)
 
@@ -182,13 +210,14 @@ def test_launch_failure_isolated_and_recorded(tmp_path, monkeypatch, grouper_ins
 
 def test_max_folders_caps_launches(tmp_path, monkeypatch, grouper_install):
     python, project = grouper_install
-    make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=1)
-    make_event_folder(tmp_path, f"2026-07-19_(Sun){PLACEHOLDER}", images=1)
-    make_event_folder(tmp_path, f"2026-07-20_(Mon){PLACEHOLDER}", images=1)
+    a = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=1)
+    b = make_event_folder(tmp_path, f"2026-07-19_(Sun){PLACEHOLDER}", images=1)
+    c = make_event_folder(tmp_path, f"2026-07-20_(Mon){PLACEHOLDER}", images=1)
 
     calls = []
     monkeypatch.setattr(subprocess, "run", lambda cmd, **k: calls.append(cmd) or ok(cmd))
     context = make_context(tmp_path, python=python, project=project, max_folders=2)
+    affect(context, a, b, c)
 
     ScreenshotGroupingStage().execute(context)
 

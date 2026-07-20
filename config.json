@@ -70,6 +70,9 @@
     "attempts": 5,
     "delay_seconds": 0.2
   },
+  "companion_reconciliation": {
+    "enabled": true
+  },
   "screenshot_grouping": {
     "enabled": true,
     "max_folders": 0,

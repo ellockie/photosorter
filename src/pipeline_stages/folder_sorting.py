@@ -124,6 +124,7 @@ class FolderSortingStage(PipelineStage):
                 event_folder = Path(config["paths"]["ready_folder"])
             else:
                 event_folder = final_event_folder(captured_at, config, label)
+                context.affected_event_folders.add(event_folder)
 
             is_raw = is_raw_extension(asset.primary_path.suffix, config)
             is_video = asset.primary_path.suffix.lower() in video_extensions

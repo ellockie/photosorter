@@ -1,4 +1,3 @@
-import re
 import subprocess
 from pathlib import Path
 
@@ -7,7 +6,6 @@ from src.core import \
     PipelineStage
 from src.pipeline_stages.legacy import date_folder_suffix
 
-_YEAR_DIR = re.compile(r"\d{4}")
 _TO_SPLIT_MARKER = "__TO_SPLIT__"
 
 
@@ -85,7 +83,7 @@ class ScreenshotGroupingStage(PipelineStage):
             )
             return context
 
-        candidates = self._candidate_folders(context.config)
+        candidates = self._candidate_folders(context)
         max_folders = settings.get("max_folders", 0)
         if max_folders and len(candidates) > max_folders:
             context.log(
@@ -108,6 +106,7 @@ class ScreenshotGroupingStage(PipelineStage):
             target = self._prepare_folder(context, folder, image_exts, video_exts)
             if target is None:
                 continue
+            context.screenshot_grouped_folders.append(target)
             context.log(f"Launching grouper GUI on {target.name}")
             try:
                 result = subprocess.run(
@@ -132,31 +131,23 @@ class ScreenshotGroupingStage(PipelineStage):
         context.log(f"Grouped {launched} event folder(s) via the grouper GUI")
         return context
 
-    def _candidate_folders(self, config: dict) -> list[Path]:
-        """Event folders under root that still need grouping (most recent first).
+    def _candidate_folders(self, context: PipelineContext) -> list[Path]:
+        """The event folders this run sorted assets into that still need grouping.
 
-        Matches folders whose name carries the placeholder date suffix
-        (" - 1. ######") or already the "__TO_SPLIT__" marker, at the
-        root/YYYY/<Month>/<event> level only — so the ingest pipeline, READY,
-        and legacy trees are never scanned.
+        Uses the list folder-sorting recorded (context.affected_event_folders)
+        rather than scanning the archive, so only folders actually touched this
+        run are opened — and never the Dropbox intake or ingest/READY trees.
+        Keeps unlabelled days (the " - 1. ######" placeholder) and existing
+        "__TO_SPLIT__" folders; labelled folders (trips) are already named and
+        left alone. Most recent day first.
         """
-        root = Path(config["paths"]["root_folder"])
-        if not root.is_dir():
-            return []
-
-        placeholder = date_folder_suffix(config)
+        placeholder = date_folder_suffix(context.config)
         found: list[Path] = []
-        for year_dir in root.iterdir():
-            if not year_dir.is_dir() or not _YEAR_DIR.fullmatch(year_dir.name):
+        for folder in context.affected_event_folders:
+            if not folder.is_dir():
                 continue
-            for month_dir in year_dir.iterdir():
-                if not month_dir.is_dir():
-                    continue
-                for event_dir in month_dir.iterdir():
-                    if not event_dir.is_dir():
-                        continue
-                    if event_dir.name.endswith(placeholder) or _TO_SPLIT_MARKER in event_dir.name:
-                        found.append(event_dir)
+            if folder.name.endswith(placeholder) or _TO_SPLIT_MARKER in folder.name:
+                found.append(folder)
 
         # Most recent day first: the YYYY-MM-DD prefix sorts lexically.
         found.sort(key=lambda p: str(p), reverse=True)
