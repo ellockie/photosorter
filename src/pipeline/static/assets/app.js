@@ -58,6 +58,49 @@ function playSequence(notes) {
   notes.forEach(playTone);
 }
 
+// Bell-like tone: a fundamental plus a few overtone partials, each with its
+// own slow decay, layered together. Used for the long pipeline-end chimes so
+// they read as a ringing chime rather than a short beep.
+const CHIME_PARTIALS = [
+  { ratio: 1, amp: 1 },
+  { ratio: 2.0, amp: 0.5 },
+  { ratio: 3.0, amp: 0.3 },
+  { ratio: 4.2, amp: 0.15 },
+];
+// Slightly inharmonic ratio (1.5x) gives this set a duller, clangier "toll"
+// character instead of a clean bell — used for the failure chime.
+const TOLL_PARTIALS = [
+  { ratio: 1, amp: 1 },
+  { ratio: 1.5, amp: 0.45 },
+  { ratio: 2.0, amp: 0.25 },
+];
+
+function playChimeNote({ freq, startTime = 0, duration = 1.6, gain = 0.15, partials = CHIME_PARTIALS, type = "sine" }) {
+  if (!soundEnabled) return;
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+  const now = ctx.currentTime + startTime;
+  partials.forEach(({ ratio, amp }) => {
+    try {
+      const osc = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      osc.type = type;
+      osc.frequency.value = freq * ratio;
+      const peak = gain * amp;
+      gainNode.gain.setValueAtTime(0.0001, now);
+      gainNode.gain.exponentialRampToValueAtTime(peak, now + 0.02);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      osc.connect(gainNode).connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + duration + 0.05);
+    } catch {}
+  });
+}
+
+function playChimeSequence(notes) {
+  notes.forEach(playChimeNote);
+}
+
 const SOUNDS = {
   pipelineStart: () => playSequence([
     { freq: 440, startTime: 0, duration: 0.1 },
@@ -66,14 +109,20 @@ const SOUNDS = {
   taskStart: () => playTone({ freq: 523, duration: 0.07, gain: 0.1 }),
   taskSuccess: () => playTone({ freq: 784, duration: 0.1, gain: 0.13 }),
   taskFailure: () => playTone({ freq: 220, duration: 0.22, type: "square", gain: 0.15 }),
-  pipelineSuccess: () => playSequence([
-    { freq: 523, startTime: 0, duration: 0.12 },
-    { freq: 659, startTime: 0.11, duration: 0.12 },
-    { freq: 784, startTime: 0.22, duration: 0.24 },
+  // Long, bright ascending arpeggio with clean harmonic overtones — each note
+  // rings and overlaps the next, ~3s total.
+  pipelineSuccess: () => playChimeSequence([
+    { freq: 523.25, startTime: 0, duration: 1.6, gain: 0.15 },    // C5
+    { freq: 659.25, startTime: 0.18, duration: 1.7, gain: 0.15 }, // E5
+    { freq: 783.99, startTime: 0.36, duration: 1.9, gain: 0.15 }, // G5
+    { freq: 1046.5, startTime: 0.58, duration: 2.3, gain: 0.16 }, // C6, long tail
   ]),
-  pipelineFailure: () => playSequence([
-    { freq: 392, startTime: 0, duration: 0.16, type: "sawtooth" },
-    { freq: 262, startTime: 0.15, duration: 0.3, type: "sawtooth" },
+  // Long, low tolling chime with a dissonant clash and duller overtones —
+  // deliberately unsettling rather than bright, ~3s total.
+  pipelineFailure: () => playChimeSequence([
+    { freq: 293.66, startTime: 0, duration: 1.4, gain: 0.15, partials: TOLL_PARTIALS, type: "triangle" },    // D4
+    { freq: 277.18, startTime: 0.16, duration: 1.4, gain: 0.13, partials: TOLL_PARTIALS, type: "triangle" }, // C#4 clashes with D4
+    { freq: 196.0, startTime: 0.6, duration: 2.6, gain: 0.18, partials: TOLL_PARTIALS, type: "triangle" },   // G3, long low tail
   ]),
   decisionPrompt: () => playSequence([
     { freq: 880, startTime: 0, duration: 0.09, type: "triangle", gain: 0.15 },
