@@ -3,6 +3,9 @@ from pathlib import Path
 
 from src.constants.constants import \
     KNOWN_CAMERAS_SYMBOLS
+from src.pipeline_stages.stamps import \
+    format_day_prefix, \
+    format_stamp
 
 
 MONTH_FOLDERS = {
@@ -112,7 +115,7 @@ def parse_exif_datetime(value: str) -> datetime.datetime:
 
 def legacy_image_datetime(value: str) -> str:
     captured = parse_exif_datetime(value)
-    return captured.strftime("%Y-%m-%d_(%a)_%H.%M.%S")
+    return format_stamp(captured)
 
 
 def camera_symbol_for_model(camera_name: str, config: dict) -> str:
@@ -172,7 +175,7 @@ def legacy_date_folder_name(captured_at: datetime.datetime, config: dict,
                             label: str | None = None) -> str:
     folder_date = date_folder_datetime(captured_at, config)
     suffix = f" - {label}" if label else date_folder_suffix(config)
-    return folder_date.strftime("%Y-%m-%d_(%a)") + suffix
+    return format_day_prefix(folder_date) + suffix
 
 
 def month_folder_name(captured_at: datetime.datetime, config: dict) -> str:

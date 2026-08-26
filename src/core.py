@@ -24,6 +24,9 @@ DEFAULT_COLLISION_THRESHOLD = 0.5
 DEFAULT_DASHBOARD_PORT = 8888
 DEFAULT_RETRY_ATTEMPTS = 5
 DEFAULT_RETRY_DELAY_SECONDS = 0.2
+# How often a stage blocked on a prompt re-checks for an abort. NOT a timeout:
+# the wait itself is unbounded (see PipelineContext.await_prompt).
+PROMPT_POLL_SECONDS = 0.25
 
 
 class PipelineState(str, Enum):
@@ -80,6 +83,10 @@ class PromptRequest:
     stage_id: str | None = None
     answered: bool = False
     answer: dict | None = None
+    # Set the moment an answer arrives, so a stage blocked in
+    # PipelineContext.await_prompt() wakes immediately instead of polling.
+    answered_event: threading.Event = field(
+        default_factory=threading.Event, repr=False, compare=False)
 
 
 @dataclass
@@ -191,6 +198,13 @@ def default_config() -> dict:
             "python": "",
             "project_path": "",
             "max_folders": 0,
+        },
+        # Hold the run until this batch's event folders have really been named,
+        # and re-resolve their paths afterwards. `null` follows
+        # screenshot_grouping.enabled: a run that opened the grouper is a run
+        # where naming was expected, and one that did not is not worth blocking.
+        "grouping_review": {
+            "enabled": None,
         },
         # After grouping, move each shot's RAW/EXIF/video companions to follow
         # its representative image into the new sub-event folder.
@@ -547,6 +561,10 @@ class PipelineContext:
     safety_exceptions: dict[str, str] = field(default_factory=dict)
     prompt_queue: deque[PromptRequest] = field(default_factory=deque)
     prompt_answers: dict[str, dict] = field(default_factory=dict)
+    # The prompt a stage is currently blocked on, so the dashboard can say so
+    # instead of looking idle, and an abort request so it can let go.
+    waiting_prompt_id: str | None = None
+    abort_event: threading.Event = field(default_factory=threading.Event, repr=False)
     logs: list[str] = field(default_factory=list)
     mode: PipelineMode = PipelineMode.CLI
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex)
@@ -645,7 +663,62 @@ class PipelineContext:
                 if prompt.prompt_id == prompt_id:
                     prompt.answered = True
                     prompt.answer = answer
+                    prompt.answered_event.set()
                     break
+
+    def await_prompt(self, prompt: PromptRequest, auto_answer: dict | None = None) -> dict:
+        """Block until the user answers `prompt`. There is no timeout.
+
+        A prompt exists because the pipeline cannot proceed without a human
+        decision — resolving a name collision, converting RAWs by hand, naming
+        the folders the grouper just created. Guessing after N seconds is
+        always wrong: it either discards the user's work or writes a decision
+        they never made. So this waits as long as it takes, and the only ways
+        out are an answer or an explicit abort (the dashboard's Pause button,
+        via `request_abort`).
+
+        Waking is event-driven; the short poll interval exists only so an abort
+        raised on another thread is noticed promptly.
+
+        Outside UI mode nobody can answer. Rather than hang a headless run
+        forever, `auto_answer` supplies the documented fallback and the choice
+        is logged; without one, the run pauses as it always has.
+        """
+        if prompt.answered:
+            return prompt.answer or {}
+
+        if self.mode != PipelineMode.UI:
+            if auto_answer is None:
+                raise PipelinePaused(
+                    f"Prompt {prompt.prompt_type} needs the dashboard to answer it"
+                )
+            self.log(
+                f"No UI to answer {prompt.prompt_type}, continuing with {auto_answer}"
+            )
+            self.answer_prompt(prompt.prompt_id, auto_answer)
+            return auto_answer
+
+        with self.lock:
+            self.waiting_prompt_id = prompt.prompt_id
+        self.log(f"Waiting for you: {prompt.prompt_type} (the pipeline will not time out)")
+        try:
+            while not prompt.answered_event.wait(PROMPT_POLL_SECONDS):
+                if self.abort_event.is_set():
+                    raise PipelinePaused(
+                        f"Run aborted while waiting for {prompt.prompt_type}"
+                    )
+        finally:
+            with self.lock:
+                self.waiting_prompt_id = None
+        self.log(f"Answered {prompt.prompt_type}: {prompt.answer}")
+        return prompt.answer or {}
+
+    def request_abort(self) -> None:
+        """Release any stage blocked in `await_prompt`, ending the run."""
+        self.abort_event.set()
+
+    def clear_abort(self) -> None:
+        self.abort_event.clear()
 
 
 @dataclass

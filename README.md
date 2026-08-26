@@ -143,6 +143,48 @@ poetry run python src\main.py --ui --port 8888
 
 The dashboard is intended to show pipeline stage progress, logs, prompt handling, unknown camera mapping, collision resolution, and safety verification alerts.
 
+### Prompts never time out
+
+A prompt exists because the pipeline cannot proceed without a human decision, so
+it waits as long as that takes. There is no timer anywhere in the wait; the
+status line reads **Waiting for you** and the run stays open until you answer.
+The only other way out is the **Pause** button, which releases the wait and ends
+the run as paused (everything already written to disk stays written).
+
+Prompts that block the run:
+
+| Prompt | What it is asking |
+| --- | --- |
+| `name_collision` | Two files claim one name and neither age nor size settles it. |
+| `crw_conversion` / `dpviewer_conversion` | Convert these RAWs before later stages move them. |
+| `raw_conversion` | Convert the staged workspace; it is swept the moment you answer. |
+| `grouping_review` | Event folders from this run are still unnamed. |
+
+### Grouping review
+
+Closing the grouper window is not the same as finishing the job. After grouping,
+the **Grouping Review** stage lists every folder from this run still carrying
+`__TO_SPLIT__`, `__TO_LABEL__`, or the bare `- 1. ######` placeholder, and holds
+the run there. Rename them — in the grouper or in Explorer — and press
+**Re-scan**; **Continue anyway** fast-forwards past folders you meant to leave
+unnamed. Either way the stage then re-scans the archive as it stands *now*, so
+companion reconciliation follows the folders the grouper actually created rather
+than paths captured before it ran. Configured under `grouping_review.enabled`
+(unset follows `screenshot_grouping.enabled`).
+
+### Dated-name convention
+
+One canonical form is written everywhere — note the **double** underscore before
+the time, matching the screenshot grouper:
+
+```
+2026-08-14_(Fri)__15.32.01__f1.7__T1_180__L23.0.eq__I12__SG23U.jpg
+```
+
+Weekday abbreviations are fixed English, never locale-dependent. Earlier forms
+(`_(Fri)_15.32.01` and `__15.32.01`) are still read, so an existing archive keeps
+working and its sidecars keep matching their images.
+
 ## Safety Goals
 
 The new architecture includes a safety verifier that checks:

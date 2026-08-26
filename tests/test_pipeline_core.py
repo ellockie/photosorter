@@ -341,16 +341,16 @@ def test_metadata_extraction_parses_legacy_exif_and_rename_matches_old_task(tmp_
     )
 
     metadata = parse_legacy_exif_sidecar(exif, context.config)
-    assert metadata["image_datetime"] == "2026-05-14_(Thu)_10.30.00"
+    assert metadata["image_datetime"] == "2026-05-14_(Thu)__10.30.00"
     assert metadata["camera_symbol"] == "6D"
 
     MetadataExtractionStage().execute(context)
     RenameAndSortStage().execute(context)
 
-    renamed_photo = inbox / "2026-05-14_(Thu)_10.30.00__f2.8__T1_250__L50.0__I100__6D.jpg"
+    renamed_photo = inbox / "2026-05-14_(Thu)__10.30.00__f2.8__T1_250__L50.0__I100__6D.jpg"
     # Sidecars keep the full primary filename embedded, including the photo's
     # extension, before their own extension.
-    renamed_exif = inbox / "2026-05-14_(Thu)_10.30.00__f2.8__T1_250__L50.0__I100__6D.jpg._exif"
+    renamed_exif = inbox / "2026-05-14_(Thu)__10.30.00__f2.8__T1_250__L50.0__I100__6D.jpg._exif"
     assert renamed_photo.exists()
     assert renamed_exif.exists()
     assert context.assets[0].primary_path == renamed_photo

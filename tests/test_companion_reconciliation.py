@@ -48,6 +48,29 @@ def test_shot_key_normalizes_forms():
     assert shot_key("not-a-dated-file.png") is None
 
 
+def test_representative_reprefixed_by_the_grouper_still_matches(tmp_path):
+    """An older grouper re-standardised names by *prefixing* its own timestamp
+    (taken from the file's mtime) and pushing the Photosorter name into trailing
+    text. The sidecar in __EXIF still carries only the original stamp, so
+    matching on the leading stamp alone stranded every one of them — the state
+    found in the July 2026 folders. Both stamps must be honoured."""
+    month = tmp_path / "2026" / "07. July"
+    to_split = month / "2026-07-19_(Sun) - __TO_SPLIT__(i=1)"
+    (to_split / "__EXIF").mkdir(parents=True)
+    original = "2026-07-19_(Sun)_15.37.10__f1.7__T1_460__SG23U"
+    (to_split / "__EXIF" / f"{original}.jpg._exif").write_bytes(b"exif")
+
+    sub_event = month / "2026-07-19__21.29.04 - Hikaru's guitar exam place"
+    sub_event.mkdir(parents=True)
+    # Grouper prefix (mtime-derived) + the original Photosorter name.
+    (sub_event / f"2026-07-19__21.29.04__SCR__{original}.jpg").write_bytes(b"jpg")
+
+    report = reconcile_folder(to_split, make_config())
+
+    assert (report.moved, report.unmatched, report.errors) == (1, 0, 0)
+    assert (sub_event / "__EXIF" / f"{original}.jpg._exif").is_file()
+
+
 def test_companions_follow_representative_into_sub_event(tmp_path):
     to_split, sub_event = build_split_layout(tmp_path)
 
@@ -313,4 +336,4 @@ def test_stage_in_default_pipeline_after_grouping():
     ids = [stage.stage_id for stage in stages]
     assert "companion-reconciliation" in ids
     stage = stages[ids.index("companion-reconciliation")]
-    assert stage.dependencies == ("screenshot-grouping",)
+    assert stage.dependencies == ("grouping-review",)

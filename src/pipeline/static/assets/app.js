@@ -270,13 +270,37 @@ function promptActions(prompt) {
       ["Keep existing", { action: "keep_existing" }],
       ["Keep new file", { action: "keep_candidate" }],
       ["Rename new file", { action: "rename_candidate" }],
+      ["Skip this file", { action: "skip" }],
       ["Cancel run", { action: "cancel" }],
+    ];
+  }
+  if (prompt.prompt_type === "grouping_review") {
+    // Re-scan is the normal path: rename the folders (here or in Explorer),
+    // then have the pipeline look again. Continue anyway is the fast-forward
+    // for folders you meant to leave unnamed.
+    return [
+      ["Re-scan folders", { action: "rescan" }],
+      ["Continue anyway", { action: "continue" }],
     ];
   }
   if (prompt.prompt_type === "unknown_camera") {
     return null; // handled by the camera mapping form
   }
   return [["Done", { done: true }]];
+}
+
+function describeList(title, items) {
+  const block = document.createElement("div");
+  block.className = "prompt-file";
+  const heading = document.createElement("strong");
+  heading.textContent = title;
+  block.appendChild(heading);
+  (items || []).forEach(text => {
+    const row = document.createElement("div");
+    row.textContent = text;
+    block.appendChild(row);
+  });
+  return block;
 }
 
 function renderCameraForm(card, prompt) {
@@ -308,9 +332,23 @@ function renderPrompts(prompts) {
     title.textContent = prompt.prompt_type.replaceAll("_", " ");
     card.appendChild(title);
 
+    if (prompt.payload && prompt.payload.instructions) {
+      const note = document.createElement("p");
+      note.className = "prompt-instructions";
+      note.textContent = prompt.payload.instructions;
+      card.appendChild(note);
+    }
+
     if (prompt.prompt_type === "name_collision") {
       card.appendChild(describeFile("Existing", prompt.payload.existing));
       card.appendChild(describeFile("New file", prompt.payload.candidate));
+    } else if (prompt.prompt_type === "grouping_review") {
+      const names = prompt.payload.names || [];
+      card.appendChild(describeList(`Still unnamed (${names.length})`, names));
+    } else if (prompt.payload && prompt.payload.paths) {
+      card.appendChild(describeList(
+        `${prompt.payload.asset_count ?? prompt.payload.paths.length} file(s)`,
+        prompt.payload.paths));
     } else if (prompt.prompt_type === "unknown_camera") {
       const model = document.createElement("div");
       model.textContent = `Camera model: ${prompt.payload.camera_model}`;
@@ -341,7 +379,11 @@ function renderPrompts(prompts) {
 
 function renderState(state) {
   detectAndPlayTransitionSounds(state);
-  statusEl.textContent = state.error || (state.running ? "Running" : state.paused ? "Paused" : "Idle");
+  // A run blocked on a prompt is still running; saying so is the difference
+  // between "it is waiting for me" and "it hung".
+  statusEl.textContent = state.error
+    || (state.waiting_for ? "Waiting for you" : state.running ? "Running" : state.paused ? "Paused" : "Idle");
+  document.body.classList.toggle("awaiting-prompt", Boolean(state.waiting_for));
   if (state.error) {
     alertEl.textContent = state.error;
     alertEl.classList.remove("hidden");

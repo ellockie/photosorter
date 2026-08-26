@@ -185,7 +185,9 @@ def test_retime_archive_refolds_across_day_boundary_and_is_idempotent(tmp_path):
     assert summary["refolded"] == 1
 
     new_folder = parent / "2026-06-01_(Mon) - Holiday"
-    new_image = "2026-06-01_(Mon)_05.30.00__Holiday__f2.8__T1_250__I200__C6D.jpg"
+    # Retiming also upgrades the legacy single-underscore stamp it read to the
+    # canonical "_(Ddd)__HH.MM.SS" form.
+    new_image = "2026-06-01_(Mon)__05.30.00__Holiday__f2.8__T1_250__I200__C6D.jpg"
     assert (new_folder / new_image).exists()
     assert (new_folder / "__EXIF" / f"{new_image}._exif").exists()
     assert not (old_folder / image).exists()

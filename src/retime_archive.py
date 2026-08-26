@@ -36,12 +36,14 @@ from src.pipeline_stages.legacy import (
     date_folder_suffix,
     parse_legacy_exif_sidecar,
 )
+from src.pipeline_stages.stamps import LEADING_STAMP_RE, format_day_prefix
 from src.pipeline_stages.taxonomy import taxonomy_folder
 from src.pipeline_stages.timezone_engine import correct, format_stamp
 
 # Event folder: ``2026-04-12_(Sun)`` optionally followed by `` - <description>``.
 _EVENT_FOLDER = re.compile(r"^(\d{4}-\d{2}-\d{2})_\(([A-Za-z]{3})\)(?: - (.*))?$")
-_LEADING_STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}_\([A-Za-z]{3}\)_\d{2}\.\d{2}\.\d{2}")
+# Accepts every historical separator; see ``stamps``.
+_LEADING_STAMP = LEADING_STAMP_RE
 _PLACEHOLDER = re.compile(r"######")
 
 
@@ -61,7 +63,7 @@ def _event_folders(parent: Path) -> list[Path]:
 
 
 def _target_folder_name(new_date: datetime.datetime, description: str | None, config: dict) -> str:
-    base = new_date.strftime("%Y-%m-%d_(%a)")
+    base = format_day_prefix(new_date)
     if description:
         return f"{base} - {description}"
     return base + date_folder_suffix(config)
@@ -118,7 +120,7 @@ def retime_archive(folder, from_date, to_date, config: dict, dry_run: bool = Fal
             if target_folder != event_folder and description and _PLACEHOLDER.search(description):
                 siblings = [
                     p for p in event_folder.parent.iterdir()
-                    if p.is_dir() and p.name.startswith(new_date.strftime("%Y-%m-%d_(%a)"))
+                    if p.is_dir() and p.name.startswith(format_day_prefix(new_date))
                     and _PLACEHOLDER.search(p.name)
                 ]
                 if len(siblings) > 1:

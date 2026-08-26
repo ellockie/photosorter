@@ -27,14 +27,11 @@ from src.core import \
     PipelineContext, \
     PipelineStage, \
     safe_move
+from src.pipeline_stages.stamps import \
+    leading_stamp_key, \
+    stamp_keys
 from src.pipeline_stages.taxonomy import DEFAULT_TAXONOMY
 
-# Leading date + time shared by every file of one shot, tolerant of the
-# Photosorter form "2026-07-18_(Sat)_17.04.53…" and the grouper form
-# "2026-07-18__14.30.00…". Normalised to bare digits so both compare equal.
-_DT_KEY = re.compile(
-    r"^(\d{4})-(\d{2})-(\d{2})(?:[ _]+\(\w{3}\))?[ _]+(\d{2})\.(\d{2})\.(\d{2})"
-)
 _TO_SPLIT_MARKER = "__TO_SPLIT__"
 
 # Per-folder, per-kind cap on individual filenames written to the log, so one
@@ -43,11 +40,24 @@ _MAX_REPORTED_PER_KIND = 20
 
 
 def shot_key(name: str) -> str | None:
-    """Return the normalized YYYYMMDDHHMMSS key of a filename, or None."""
-    match = _DT_KEY.match(name)
-    if not match:
-        return None
-    return "".join(match.groups())
+    """The normalized YYYYMMDDHHMMSS key a companion filename opens with.
+
+    Companions are named by this pipeline, so their own stamp always leads.
+    """
+    return leading_stamp_key(name)
+
+
+def representative_keys(name: str) -> list[str]:
+    """Every shot key a representative image can legitimately answer to.
+
+    Normally just the leading stamp. But the grouper may *prefix* a file with a
+    timestamp of its own and push the Photosorter name into trailing text
+    ("2026-07-19__21.29.04__SCR__2026-07-19_(Sun)_15.37.10__f1.7…"). The sidecar
+    in __EXIF still carries only the original stamp, so indexing a
+    representative under every stamp in its name is what keeps the two
+    matchable — without it exactly those companions are stranded.
+    """
+    return stamp_keys(name)
 
 
 def taxonomy_dir_names(config: dict) -> set[str]:
@@ -209,9 +219,10 @@ def _representative_index(event_folder: Path, tax_names: set[str],
         for entry in _list_dir(folder, reporter):
             if not _is_file(entry, reporter):
                 continue
-            key = shot_key(entry.name)
-            if key is not None:
-                candidates.setdefault(key, []).append((folder, entry.name))
+            for key in representative_keys(entry.name):
+                entries = candidates.setdefault(key, [])
+                if (folder, entry.name) not in entries:
+                    entries.append((folder, entry.name))
 
     index_folder(event_folder)
     for entry in _list_dir(event_folder.parent, reporter):
@@ -371,7 +382,7 @@ class CompanionReconciliationStage(PipelineStage):
         super().__init__(
             stage_id="companion-reconciliation",
             display_name="Companion Reconciliation",
-            dependencies=("screenshot-grouping",),
+            dependencies=("grouping-review",),
         )
 
     def execute(self, context: PipelineContext) -> PipelineContext:

@@ -96,5 +96,8 @@
       "raw": "##   RAWs   ##",
       "unsupported": "##   UNSUPPORTED EXTENSIONS   ##"
     }
+  },
+  "grouping_review": {
+    "enabled": true
   }
 }

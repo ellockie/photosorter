@@ -6,6 +6,7 @@ from src.pipeline_stages.display_extra_messages import DisplayExtraMessagesStage
 from src.pipeline_stages.exiftool_batch import ExiftoolBatchStage
 from src.pipeline_stages.empty_file_quarantine import EmptyFileQuarantineStage
 from src.pipeline_stages.folder_sorting import FolderSortingStage
+from src.pipeline_stages.grouping_review import GroupingReviewStage
 from src.pipeline_stages.initialization import InitializationStage
 from src.pipeline_stages.legacy_unsorted_migration import LegacyUnsortedMigrationStage
 from src.pipeline_stages.metadata_extraction import MetadataExtractionStage
@@ -39,6 +40,7 @@ __all__ = [
     "RawStagedConversionStage",
     "FolderSortingStage",
     "ScreenshotGroupingStage",
+    "GroupingReviewStage",
     "CompanionReconciliationStage",
     "ShowStatsStage",
     "DisplayExtraMessagesStage",

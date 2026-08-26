@@ -18,11 +18,17 @@ class LaunchDpviewerStage(PipelineStage):
             if asset.primary_path.suffix.lower() == ".cr2" and asset.primary_path.exists()
         ]
         if cr2_assets:
-            context.create_prompt(
+            prompt = context.create_prompt(
                 "dpviewer_conversion",
-                {"asset_count": len(cr2_assets)},
+                {
+                    "asset_count": len(cr2_assets),
+                    "paths": [str(asset.primary_path) for asset in cr2_assets[:20]],
+                },
                 self.stage_id,
             )
+            # Hold the pipeline here until DPViewer has finished; later stages
+            # move these files out from under it.
+            context.await_prompt(prompt, auto_answer={"done": True})
         context.counters["dpviewer_candidates"] = len(cr2_assets)
         context.log(f"Prepared {len(cr2_assets)} CR2 assets for DPViewer")
         return context

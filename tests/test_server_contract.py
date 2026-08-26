@@ -44,9 +44,11 @@ def test_state_endpoint_payload_schema(client):
     response = client.get("/api/pipeline/state")
     assert response.status_code == 200
     state = response.json()
-    for key in ("running", "paused", "error", "counters", "stage_states", "logs", "prompts"):
+    for key in ("running", "paused", "waiting_for", "error", "counters", "stage_states", "logs", "prompts"):
         assert key in state
     assert state["running"] is False
+    # No stage is blocked on a prompt on a fresh runtime.
+    assert state["waiting_for"] is None
     assert isinstance(state["counters"], dict)
     assert isinstance(state["prompts"], list)
 

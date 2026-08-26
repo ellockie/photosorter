@@ -74,6 +74,10 @@ class PipelineRuntime:
             return {
                 "running": self.thread is not None and self.thread.is_alive(),
                 "paused": self.paused,
+                # The prompt a stage is blocked on, if any. A run waiting on the
+                # user is still "running" — this is what lets the dashboard say
+                # so instead of looking stalled.
+                "waiting_for": self.context.waiting_prompt_id,
                 "error": str(self.error) if self.error else None,
                 "counters": dict(self.context.counters),
                 "stage_states": {
@@ -106,6 +110,7 @@ class PipelineRuntime:
                 return
             self.error = None
             self.paused = False
+            self.context.clear_abort()
             self.thread = threading.Thread(target=self._run, daemon=True)
             self.thread.start()
 
@@ -119,12 +124,17 @@ class PipelineRuntime:
             self.error = error
 
     def pause(self):
+        # A run blocked on a prompt would otherwise wait forever by design, so
+        # Pause is the escape hatch: it releases the wait and the stage ends as
+        # paused. Everything already done on disk stays done.
         with self._lock:
             self.paused = True
+        self.context.request_abort()
 
     def resume(self):
         with self._lock:
             self.paused = False
+        self.context.clear_abort()
 
     def step(self):
         self.start()
@@ -284,6 +294,7 @@ def create_app(config_path=None, base_folder=None):
                 signature = (
                     state["running"],
                     state["paused"],
+                    state["waiting_for"],
                     state["error"],
                     # Total count, not window length: once the log window is
                     # full its length stops changing while lines keep arriving.

@@ -159,6 +159,24 @@ dd {
   display: block;
   color: #f4f1e8;
 }
+.prompt-instructions {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #d8d3c0;
+}
+/* A run blocked on a prompt is waiting on purpose and can wait indefinitely.
+   The pulse makes that visible so it never reads as a hang. */
+body.awaiting-prompt #status {
+  color: #e9c789;
+  animation: awaiting-pulse 1.6s ease-in-out infinite;
+}
+@keyframes awaiting-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body.awaiting-prompt #status { animation: none; }
+}
 .prompt-actions {
   display: flex;
   gap: 8px;

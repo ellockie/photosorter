@@ -141,7 +141,7 @@ def test_e2e_fixture_matrix_full_default_dag(tmp_path, monkeypatch, no_legacy_up
     build_default_orchestrator().run(context)
 
     japan_folder = root / "2026" / "04. April" / "2026-04-12_(Sun) - Japan"
-    expected_stem = "2026-04-12_(Sun)_18.00.00__Japan__f4.0__T1_250__L28.0__I100__NE71"
+    expected_stem = "2026-04-12_(Sun)__18.00.00__Japan__f4.0__T1_250__L28.0__I100__NE71"
     representative = japan_folder / f"{expected_stem}.jpg"
     assert representative.exists(), sorted(p.name for p in japan_folder.iterdir()) if japan_folder.exists() else "missing folder"
     assert (japan_folder / "__EXIF" / f"{expected_stem}.jpg._exif").exists()
@@ -149,7 +149,7 @@ def test_e2e_fixture_matrix_full_default_dag(tmp_path, monkeypatch, no_legacy_up
     assert (japan_folder / "__GEOLOCATIONS" / "_location.json").exists()
 
     may_folder = root / "2026" / "05. May" / "2026-05-01_(Fri) - 1. ######"
-    raw_name = "2026-05-01_(Fri)_14.30.00__RAW__f2.8__T1_500__L50.0__I200__C6D.CR2"
+    raw_name = "2026-05-01_(Fri)__14.30.00__RAW__f2.8__T1_500__L50.0__I200__C6D.CR2"
     assert (may_folder / "__RAW" / raw_name).exists()
     assert (may_folder / "__EXIF" / f"{raw_name}._exif").exists()
 
@@ -168,7 +168,7 @@ def test_e2e_fixture_matrix_full_default_dag(tmp_path, monkeypatch, no_legacy_up
     # Day boundary: 03:30 is before 04.44.44, so the file keeps its own date
     # in the filename but groups into the previous day's folder.
     boundary_folder = root / "2026" / "05. May" / "2026-05-01_(Fri) - 1. ######"
-    boundary_files = list(boundary_folder.glob("2026-05-02_(Sat)_03.30.00*.jpg"))
+    boundary_files = list(boundary_folder.glob("2026-05-02_(Sat)__03.30.00*.jpg"))
     assert len(boundary_files) == 1
 
     # Zero file loss: the safety stage completed without raising.

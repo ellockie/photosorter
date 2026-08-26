@@ -22,12 +22,21 @@ class RawStagedConversionStage(StagedWorkspaceStage):
         context.log(
             f"Prepared RAW workspace {workspace} with {len(staged_assets)} assets"
         )
-        if staged_assets:
-            context.create_prompt(
-                "raw_conversion",
-                {
-                    "workspace": str(workspace),
-                    "asset_count": len(staged_assets),
-                },
-                self.stage_id,
-            )
+        if not staged_assets:
+            return
+        prompt = context.create_prompt(
+            "raw_conversion",
+            {
+                "workspace": str(workspace),
+                "asset_count": len(staged_assets),
+                "instructions": (
+                    "Convert the RAWs in this workspace, then press Done — "
+                    "the folder is swept as soon as you do."
+                ),
+            },
+            self.stage_id,
+        )
+        # Blocking here is the whole point. StagedWorkspaceStage.execute deletes
+        # the workspace in its finally-block, so without a wait the folder the
+        # prompt is pointing at is gone before the user can even read the path.
+        context.await_prompt(prompt, auto_answer={"done": True})

@@ -23,14 +23,16 @@ import logging
 import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from src.pipeline_stages.stamps import \
+    STAMP_RE, \
+    format_stamp as format_photo_stamp
+
 logger = logging.getLogger(__name__)
 
-# Photo-grammar timestamp, e.g. ``2026-04-12_(Sun)_18.00.00``. The weekday is
-# decorative; only the numeric fields are parsed so a wrong day name never
-# rejects an otherwise valid stamp.
-_PHOTO_STAMP = re.compile(
-    r"(\d{4})-(\d{2})-(\d{2})_\([A-Za-z]{3}\)_(\d{2})\.(\d{2})\.(\d{2})"
-)
+# Photo-grammar timestamp, e.g. ``2026-04-12_(Sun)__18.00.00``. Every accepted
+# form lives in ``stamps``; the weekday is decorative there, so a wrong day name
+# never rejects an otherwise valid stamp.
+_PHOTO_STAMP = STAMP_RE
 
 UTC = datetime.timezone.utc
 
@@ -51,8 +53,8 @@ def parse_stamp(value) -> datetime.datetime:
 
 
 def format_stamp(value: datetime.datetime) -> str:
-    """Render a naive datetime back into the photo grammar."""
-    return value.strftime("%Y-%m-%d_(%a)_%H.%M.%S")
+    """Render a naive datetime back into the canonical photo grammar."""
+    return format_photo_stamp(value)
 
 
 def resolve_zone(config: dict, name: str | None) -> ZoneInfo | None:

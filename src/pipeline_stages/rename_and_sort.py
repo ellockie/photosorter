@@ -2,8 +2,10 @@ from pathlib import Path
 
 from src.core import \
     CollisionDecision, \
+    CollisionResult, \
     NameCollisionResolver, \
     PipelineContext, \
+    PipelinePaused, \
     PipelineStage, \
     file_md5, \
     safe_delete, \
@@ -52,6 +54,16 @@ class RenameAndSortStage(PipelineStage):
             target_path = source_path.with_name(new_name)
             if target_path.exists() and target_path != source_path:
                 result = resolver.resolve(target_path, source_path, context, self.stage_id)
+                if result.decision == CollisionDecision.PROMPT:
+                    # Ambiguous collision: only the user can call it. Block here
+                    # until they do — for as long as that takes — then carry
+                    # their choice into the same handling as an automatic one.
+                    # Skipping (what this used to do) silently stranded the file
+                    # in the inbox and made the answer they clicked a no-op.
+                    result = self._resolve_by_prompt(context, result, source_path)
+                    if result is None:
+                        skipped += 1
+                        continue
                 if result.decision == CollisionDecision.DISCARD_DUPLICATE:
                     # The image is a redundant duplicate: drop it AND its
                     # sidecars so they cannot be orphaned into __EXIF later.
@@ -59,10 +71,6 @@ class RenameAndSortStage(PipelineStage):
                         if sidecar_path.exists():
                             safe_delete(sidecar_path)
                     safe_delete(source_path)
-                    skipped += 1
-                    continue
-                if result.decision == CollisionDecision.PROMPT:
-                    context.log(f"Rename paused for collision prompt: {source_path.name}")
                     skipped += 1
                     continue
                 duplicate_suffix = (
@@ -101,6 +109,41 @@ class RenameAndSortStage(PipelineStage):
         )
         context.log(f"Renamed {renamed} media assets and EXIF sidecars")
         return context
+
+    # The dashboard's name-collision buttons, mapped onto the same decisions the
+    # resolver reaches on its own. "keep_existing" and "rename_candidate" are two
+    # phrasings of one outcome: the incoming file keeps the loser's _DUPE grammar.
+    _PROMPT_DECISIONS = {
+        "keep_existing": CollisionDecision.RENAME_CANDIDATE,
+        "rename_candidate": CollisionDecision.RENAME_CANDIDATE,
+        "keep_candidate": CollisionDecision.KEEP_CANDIDATE,
+        "discard_duplicate": CollisionDecision.DISCARD_DUPLICATE,
+    }
+
+    def _resolve_by_prompt(self, context: PipelineContext, result: CollisionResult,
+                           source_path: Path) -> CollisionResult | None:
+        """Turn an answered collision prompt into a decision, or None to skip.
+
+        Blocks until the answer arrives. Outside the UI there is nobody to ask,
+        so the historical behaviour — leave the file alone and report it — is the
+        fallback, chosen explicitly rather than by timing out.
+        """
+        context.log(f"Name collision needs your decision: {source_path.name}")
+        answer = context.await_prompt(result.prompt, auto_answer={"action": "skip"})
+        action = str(answer.get("action", "skip"))
+
+        if action == "cancel":
+            raise PipelinePaused(f"Run cancelled at name collision: {source_path.name}")
+        decision = self._PROMPT_DECISIONS.get(action)
+        if decision is None:
+            context.log(f"  left in place, no decision made: {source_path.name}")
+            return None
+        return CollisionResult(
+            decision=decision,
+            original=result.original,
+            duplicate=result.duplicate,
+            reason=f"user:{action}",
+        )
 
     def _retarget_collision_loser(self, context: PipelineContext,
                                   old_path: Path, demoted_path: Path) -> None:
