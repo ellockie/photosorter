@@ -31,8 +31,7 @@ from src.pipeline_stages.stamps import \
     leading_stamp_key, \
     stamp_keys
 from src.pipeline_stages.taxonomy import DEFAULT_TAXONOMY
-
-_TO_SPLIT_MARKER = "__TO_SPLIT__"
+from src.pipeline_stages.grouping_names import TO_SPLIT_MARKER as _TO_SPLIT_MARKER
 
 # Per-folder, per-kind cap on individual filenames written to the log, so one
 # pathological folder cannot bury the rest of the run. Errors are never capped.

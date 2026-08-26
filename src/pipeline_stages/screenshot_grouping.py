@@ -5,45 +5,11 @@ from src.core import \
     PipelineContext, \
     PipelineStage
 from src.pipeline_stages.legacy import date_folder_suffix
-
-_TO_SPLIT_MARKER = "__TO_SPLIT__"
-
-
-def _extension_sets(config: dict) -> tuple[set[str], set[str]]:
-    extensions = config.get("extensions", {})
-    video_exts = {value.lower() for value in extensions.get("videos", [])}
-    image_exts = {
-        value.lower()
-        for group in ("lossy_images", "other_images", "raw_images")
-        for value in extensions.get(group, [])
-    }
-    return image_exts, video_exts
-
-
-def _count_top_level_media(folder: Path, image_exts: set[str], video_exts: set[str]) -> tuple[int, int]:
-    """Count top-level image and video files (what the grouper GUI will show)."""
-    images = 0
-    videos = 0
-    for path in folder.iterdir():
-        if not path.is_file():
-            continue
-        suffix = path.suffix.lower()
-        if suffix in video_exts:
-            videos += 1
-        elif suffix in image_exts:
-            images += 1
-    return images, videos
-
-
-def _to_split_suffix(images: int, videos: int) -> str:
-    # "=" not ":" — the grouper uses ":" on macOS but Photosorter is Windows,
-    # where ":" is illegal in filenames (matches COUNT_SEPARATOR in the grouper).
-    parts = []
-    if images:
-        parts.append(f"i={images}")
-    if videos:
-        parts.append(f"v={videos}")
-    return "(" + "_".join(parts) + ")" if parts else ""
+from src.pipeline_stages.grouping_names import \
+    TO_SPLIT_MARKER as _TO_SPLIT_MARKER, \
+    count_top_level_media as _count_top_level_media, \
+    extension_sets as _extension_sets, \
+    to_split_name as _to_split_name
 
 
 class ScreenshotGroupingStage(PipelineStage):
@@ -174,7 +140,7 @@ class ScreenshotGroupingStage(PipelineStage):
 
         placeholder = date_folder_suffix(context.config)
         base = folder.name[: -len(placeholder)] if folder.name.endswith(placeholder) else folder.name
-        new_name = f"{base} - {_TO_SPLIT_MARKER}{_to_split_suffix(images, videos)}"
+        new_name = _to_split_name(base, images, videos)
         target = folder.with_name(new_name)
         if target == folder:
             return folder
