@@ -13,6 +13,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from src.utils.stage_banner import \
+    announce_to_console, \
+    format_end, \
+    format_start
+
 
 CONFIG_FILE_NAME = "config.json"
 # The travel/clock data is hand-edited and conceptually separate from the app
@@ -739,12 +744,16 @@ class PipelineStage(ABC):
 
 
 class PipelineOrchestrator:
-    def __init__(self, stages: list[PipelineStage], mode: PipelineMode = PipelineMode.CLI):
+    def __init__(self, stages: list[PipelineStage], mode: PipelineMode = PipelineMode.CLI,
+                 announce=None):
         self.stages = {
             stage.stage_id: stage
             for stage in stages
         }
         self.mode = mode
+        # Where stage banners go. Injectable so tests can capture them; the
+        # default writes to the console the run was launched from.
+        self.announce = announce_to_console if announce is None else announce
         self._validate_graph()
 
     def _validate_graph(self) -> None:
@@ -790,25 +799,51 @@ class PipelineOrchestrator:
 
     def run(self, context: PipelineContext) -> PipelineContext:
         context.mode = self.mode
-        for stage in self.ordered_stages():
-            context.log(f"Stage: {stage.stage_id}")
-            context.set_stage_state(stage.stage_id, PipelineState.ACTIVE)
-            try:
-                if self.mode == PipelineMode.CLI and not stage.headless:
-                    raise PipelinePaused(f"Stage requires UI prompt: {stage.stage_id}")
-                context = stage.execute(context)
-                context.set_stage_state(stage.stage_id, PipelineState.COMPLETE)
-                context.log("Completed.")
-            except PipelinePaused:
-                context.set_stage_state(stage.stage_id, PipelineState.PAUSED)
-                context.log("Paused.")
-                raise
-            except Exception:
-                context.set_stage_state(stage.stage_id, PipelineState.FAILED)
-                context.log("Failed.")
-                stage.cleanup(context)
-                raise
+        ordered = self.ordered_stages()
+        total = len(ordered)
+        for index, stage in enumerate(ordered, start=1):
+            context = self._run_stage(context, stage, index, total)
         return context
+
+    def _run_stage(self, context: PipelineContext, stage: PipelineStage,
+                   index: int, total: int) -> PipelineContext:
+        """Run one stage between its two banners.
+
+        The exit banner is emitted from a `finally`, so every path out of a
+        stage — success, failure, pause, or an interrupt that no `except` here
+        catches — is announced exactly once. A stage can never leave the
+        transcript with an opening line and no closing one.
+        """
+        self.announce(format_start(index, total, stage.stage_id, stage.display_name))
+        context.log(f"Stage: {stage.stage_id}")
+        context.set_stage_state(stage.stage_id, PipelineState.ACTIVE)
+        started = time.monotonic()
+        # Nothing below catches BaseException, so an interrupt lands here.
+        outcome, detail = "ABORTED", ""
+        try:
+            if self.mode == PipelineMode.CLI and not stage.headless:
+                raise PipelinePaused(f"Stage requires UI prompt: {stage.stage_id}")
+            context = stage.execute(context)
+            context.set_stage_state(stage.stage_id, PipelineState.COMPLETE)
+            context.log("Completed.")
+            outcome = "COMPLETE"
+            return context
+        except PipelinePaused as error:
+            context.set_stage_state(stage.stage_id, PipelineState.PAUSED)
+            context.log("Paused.")
+            outcome, detail = "PAUSED", str(error)
+            raise
+        except Exception as error:
+            context.set_stage_state(stage.stage_id, PipelineState.FAILED)
+            context.log("Failed.")
+            outcome, detail = "FAILED", repr(error)
+            stage.cleanup(context)
+            raise
+        finally:
+            self.announce(format_end(
+                index, total, stage.stage_id, stage.display_name,
+                outcome, time.monotonic() - started, detail,
+            ))
 
 
 @dataclass

@@ -56,8 +56,10 @@ def build_default_stages() -> list[PipelineStage]:
     ]
 
 
-def build_default_orchestrator(mode=None) -> PipelineOrchestrator:
+def build_default_orchestrator(mode=None, announce=None) -> PipelineOrchestrator:
     kwargs = {}
     if mode is not None:
         kwargs["mode"] = mode
+    if announce is not None:
+        kwargs["announce"] = announce
     return PipelineOrchestrator(build_default_stages(), **kwargs)

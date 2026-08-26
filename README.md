@@ -143,6 +143,23 @@ poetry run python src\main.py --ui --port 8888
 
 The dashboard is intended to show pipeline stage progress, logs, prompt handling, unknown camera mapping, collision resolution, and safety verification alerts.
 
+### Every stage announces itself
+
+The orchestrator prints a banner on entry to each stage and another on exit,
+carrying the display name, the stage id and the outcome:
+
+```
+>> STAGE  12/23  START     Rename and Sort  [rename-and-sort]
+<< STAGE  12/23  COMPLETE  Rename and Sort  [rename-and-sort]  (4.1s)
+```
+
+The exit banner comes from a `finally` block, so **every** way out of a stage is
+announced exactly once — `COMPLETE`, `FAILED` (with the exception), `PAUSED`
+(with the reason), or `ABORTED` for an interrupt. A stage cannot leave the
+transcript with an opening line and no closing one, and a new stage cannot
+forget to announce itself: stages never emit these, only the orchestrator does.
+`tests/test_stage_banners.py` enforces it against the whole default graph.
+
 ### Prompts never time out
 
 A prompt exists because the pipeline cannot proceed without a human decision, so
@@ -171,6 +188,12 @@ unnamed. Either way the stage then re-scans the archive as it stands *now*, so
 companion reconciliation follows the folders the grouper actually created rather
 than paths captured before it ran. Configured under `grouping_review.enabled`
 (unset follows `screenshot_grouping.enabled`).
+
+Folders are opened in the grouper — and listed in the review — in **alphabetical
+order**, which for `YYYY-MM-DD…` names is oldest day first. That is the order
+Explorer shows, so it is always obvious which folder the GUI is on and which are
+still to come. With `screenshot_grouping.max_folders` set, the cap keeps the
+first N in that order.
 
 ### Dated-name convention
 

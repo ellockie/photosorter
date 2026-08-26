@@ -87,8 +87,8 @@ class ScreenshotGroupingStage(PipelineStage):
         max_folders = settings.get("max_folders", 0)
         if max_folders and len(candidates) > max_folders:
             context.log(
-                f"Found {len(candidates)} folders to group, limiting to {max_folders} "
-                "(screenshot_grouping.max_folders)"
+                f"Found {len(candidates)} folders to group, limiting to the first "
+                f"{max_folders} in alphabetical order (screenshot_grouping.max_folders)"
             )
             candidates = candidates[:max_folders]
 
@@ -139,7 +139,7 @@ class ScreenshotGroupingStage(PipelineStage):
         run are opened — and never the Dropbox intake or ingest/READY trees.
         Keeps unlabelled days (the " - 1. ######" placeholder) and existing
         "__TO_SPLIT__" folders; labelled folders (trips) are already named and
-        left alone. Most recent day first.
+        left alone. Alphabetical order.
         """
         placeholder = date_folder_suffix(context.config)
         found: list[Path] = []
@@ -149,8 +149,11 @@ class ScreenshotGroupingStage(PipelineStage):
             if folder.name.endswith(placeholder) or _TO_SPLIT_MARKER in folder.name:
                 found.append(folder)
 
-        # Most recent day first: the YYYY-MM-DD prefix sorts lexically.
-        found.sort(key=lambda p: str(p), reverse=True)
+        # Alphabetical — the order Explorer shows, so it is always obvious
+        # which folder the GUI is on and which are still to come. Because the
+        # names open with "YYYY-MM-DD", that is also oldest day first.
+        # Case-insensitive to match Windows' own collation.
+        found.sort(key=lambda p: str(p).lower())
         return found
 
     def _prepare_folder(self, context: PipelineContext, folder: Path,

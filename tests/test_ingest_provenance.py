@@ -252,9 +252,16 @@ def test_base_folder_override_keeps_external_absolute_paths(tmp_path):
     assert paths["root_folder"] == str(base)
 
 
-def test_load_config_with_base_folder_reroots_absolute_config(tmp_path):
+def test_load_config_with_base_folder_reroots_absolute_config(tmp_path, monkeypatch):
     # End-to-end through load_config: an absolute-path config.json plus the
     # --base-folder CLI override must produce a fully scratch-rooted config.
+    #
+    # The config below is written against the production root, and keys it
+    # omits (working_folder, ready_folder, ...) are filled from default_config()
+    # — which follows PHOTO_BASE_FOLDER. conftest points that at a sandbox for
+    # every other test, so pin it back here or the defaults arrive already
+    # rooted somewhere the c:\__PHOTOS reroot cannot map. No files are written.
+    monkeypatch.setenv("PHOTO_BASE_FOLDER", r"c:\__PHOTOS")
     base = tmp_path / "SCRATCH"
     cfg_path = tmp_path / "config.json"
     cfg_path.write_text(

@@ -138,7 +138,7 @@ def test_labelled_folder_left_alone(tmp_path, monkeypatch, grouper_install):
     assert trip.is_dir()
 
 
-def test_processes_folders_one_by_one_most_recent_first(tmp_path, monkeypatch, grouper_install):
+def test_processes_folders_one_by_one_in_alphabetical_order(tmp_path, monkeypatch, grouper_install):
     python, project = grouper_install
     a = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=1)
     b = make_event_folder(tmp_path, f"2026-07-19_(Sun){PLACEHOLDER}", images=1)
@@ -152,9 +152,10 @@ def test_processes_folders_one_by_one_most_recent_first(tmp_path, monkeypatch, g
 
     ScreenshotGroupingStage().execute(context)
 
+    # Alphabetical: the order Explorer shows, oldest day first.
     assert order == [
-        "2026-07-19_(Sun) - __TO_SPLIT__(i=1)",
         "2026-07-18_(Sat) - __TO_SPLIT__(i=1)",
+        "2026-07-19_(Sun) - __TO_SPLIT__(i=1)",
     ]
     assert context.counters["screenshot_folders_grouped"] == 2
 
@@ -194,7 +195,7 @@ def test_launch_failure_isolated_and_recorded(tmp_path, monkeypatch, grouper_ins
     b = make_event_folder(tmp_path, f"2026-07-19_(Sun){PLACEHOLDER}", images=1)
 
     results = iter([
-        subprocess.CompletedProcess([], 1),  # first (most recent) fails
+        subprocess.CompletedProcess([], 1),  # first alphabetically fails
         subprocess.CompletedProcess([], 0),
     ])
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: next(results))
@@ -221,8 +222,8 @@ def test_max_folders_caps_launches(tmp_path, monkeypatch, grouper_install):
 
     ScreenshotGroupingStage().execute(context)
 
-    assert len(calls) == 2  # most recent two only
-    assert Path(calls[0][-1]).name.startswith("2026-07-20")
+    assert len(calls) == 2  # first two alphabetically only
+    assert Path(calls[0][-1]).name.startswith("2026-07-18")
     assert Path(calls[1][-1]).name.startswith("2026-07-19")
 
 

@@ -90,7 +90,7 @@ def is_unnamed(folder: Path, config: dict) -> bool:
 
 
 def pending_folders(context: PipelineContext, scope: dict[Path, set[str]]) -> list[Path]:
-    """Every in-scope folder that is still unnamed, most recent day first."""
+    """Every in-scope folder that is still unnamed, in alphabetical order."""
     found: list[Path] = []
     for parent, days in scope.items():
         if not parent.is_dir():
@@ -100,7 +100,8 @@ def pending_folders(context: PipelineContext, scope: dict[Path, set[str]]) -> li
                 continue
             if is_unnamed(child, context.config):
                 found.append(child)
-    found.sort(key=str, reverse=True)
+    # Alphabetical, matching the order the grouper opened them in.
+    found.sort(key=lambda path: str(path).lower())
     return found
 
 
@@ -123,7 +124,7 @@ def reconcilable_folders(context: PipelineContext, scope: dict[Path, set[str]]) 
                 continue
             if any((child / name).is_dir() for name in tax_names):
                 found.append(child)
-    found.sort(key=str, reverse=True)
+    found.sort(key=lambda path: str(path).lower())
     return found
 
 
