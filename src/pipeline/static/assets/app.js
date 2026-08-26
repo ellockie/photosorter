@@ -58,6 +58,43 @@ function playSequence(notes) {
   notes.forEach(playTone);
 }
 
+// White-noise buffer, shaped through a high-pass/band-pass filter with a
+// fast decay — reads as a crisp, percussive "tick" rather than a musical
+// tone, similar to a Slack-style notification ping.
+let noiseBufferCache = null;
+
+function getNoiseBuffer(ctx) {
+  const length = ctx.sampleRate * 0.5;
+  if (noiseBufferCache && noiseBufferCache.sampleRate === ctx.sampleRate) return noiseBufferCache;
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+  noiseBufferCache = buffer;
+  return buffer;
+}
+
+function playNoiseBurst({ startTime = 0, duration = 0.05, gain = 0.18, filterType = "highpass", filterFreq = 6500, filterQ = 0.8 } = {}) {
+  if (!soundEnabled) return;
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+  try {
+    const now = ctx.currentTime + startTime;
+    const source = ctx.createBufferSource();
+    source.buffer = getNoiseBuffer(ctx);
+    const filter = ctx.createBiquadFilter();
+    filter.type = filterType;
+    filter.frequency.value = filterFreq;
+    filter.Q.value = filterQ;
+    const gainNode = ctx.createGain();
+    gainNode.gain.setValueAtTime(0.0001, now);
+    gainNode.gain.exponentialRampToValueAtTime(gain, now + 0.004);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    source.connect(filter).connect(gainNode).connect(ctx.destination);
+    source.start(now);
+    source.stop(now + duration + 0.02);
+  } catch {}
+}
+
 // Bell-like tone: a fundamental plus a few overtone partials, each with its
 // own slow decay, layered together. Used for the long pipeline-end chimes so
 // they read as a ringing chime rather than a short beep.
@@ -106,7 +143,12 @@ const SOUNDS = {
     { freq: 440, startTime: 0, duration: 0.1 },
     { freq: 660, startTime: 0.09, duration: 0.16 },
   ]),
-  taskStart: () => playTone({ freq: 523, duration: 0.07, gain: 0.1 }),
+  // Short burst of high-frequency filtered noise, like a Slack-style
+  // notification ping, rather than a musical tone.
+  taskStart: () => {
+    playNoiseBurst({ startTime: 0, duration: 0.045, gain: 0.2, filterFreq: 7500, filterQ: 0.9 });
+    playNoiseBurst({ startTime: 0.04, duration: 0.06, gain: 0.14, filterFreq: 5500, filterQ: 0.9 });
+  },
   taskSuccess: () => playTone({ freq: 784, duration: 0.1, gain: 0.13 }),
   taskFailure: () => playTone({ freq: 220, duration: 0.22, type: "square", gain: 0.15 }),
   // Long, bright ascending arpeggio with clean harmonic overtones — each note
