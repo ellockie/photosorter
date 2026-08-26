@@ -185,6 +185,17 @@ def create_app(config_path=None, base_folder=None):
     app = FastAPI(title="photosorter dashboard")
     static_dir = Path(__file__).resolve().parent / "pipeline" / "static"
 
+    @app.middleware("http")
+    async def no_cache_headers(request, call_next):
+        # This is a single-user local dev dashboard whose static files change
+        # frequently; browsers otherwise cache index.html/app.js/app.css
+        # across plain reloads and silently keep serving stale UI.
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
