@@ -6,7 +6,140 @@ const processedEl = document.querySelector("#processed");
 const promptsEl = document.querySelector("#prompts");
 const promptListEl = document.querySelector("#prompt-list");
 const logsEl = document.querySelector("#logs");
+const soundToggleEl = document.querySelector("#sound-toggle");
 let graph = [];
+
+// --- Sound effects -----------------------------------------------------
+// Small synthesized tones (Web Audio API) rather than shipped audio files,
+// so no binary assets need to live in the repo.
+
+const SOUND_ENABLED_KEY = "photosorter.soundEnabled";
+let soundEnabled = localStorage.getItem(SOUND_ENABLED_KEY) !== "off";
+let audioCtx = null;
+
+function ensureAudioContext() {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  if (!audioCtx) audioCtx = new Ctx();
+  if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+  return audioCtx;
+}
+
+// Browsers require a user gesture before audio can play; prime the context
+// on the first click/keypress so later, event-driven sounds are unblocked.
+function primeAudioOnce() {
+  ensureAudioContext();
+  document.removeEventListener("pointerdown", primeAudioOnce);
+  document.removeEventListener("keydown", primeAudioOnce);
+}
+document.addEventListener("pointerdown", primeAudioOnce, { once: true });
+document.addEventListener("keydown", primeAudioOnce, { once: true });
+
+function playTone({ freq, duration = 0.14, type = "sine", startTime = 0, gain = 0.16 }) {
+  if (!soundEnabled) return;
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+  try {
+    const osc = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    const now = ctx.currentTime + startTime;
+    gainNode.gain.setValueAtTime(0.0001, now);
+    gainNode.gain.exponentialRampToValueAtTime(gain, now + 0.012);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    osc.connect(gainNode).connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + duration + 0.03);
+  } catch {}
+}
+
+function playSequence(notes) {
+  notes.forEach(playTone);
+}
+
+const SOUNDS = {
+  pipelineStart: () => playSequence([
+    { freq: 440, startTime: 0, duration: 0.1 },
+    { freq: 660, startTime: 0.09, duration: 0.16 },
+  ]),
+  taskStart: () => playTone({ freq: 523, duration: 0.07, gain: 0.1 }),
+  taskSuccess: () => playTone({ freq: 784, duration: 0.1, gain: 0.13 }),
+  taskFailure: () => playTone({ freq: 220, duration: 0.22, type: "square", gain: 0.15 }),
+  pipelineSuccess: () => playSequence([
+    { freq: 523, startTime: 0, duration: 0.12 },
+    { freq: 659, startTime: 0.11, duration: 0.12 },
+    { freq: 784, startTime: 0.22, duration: 0.24 },
+  ]),
+  pipelineFailure: () => playSequence([
+    { freq: 392, startTime: 0, duration: 0.16, type: "sawtooth" },
+    { freq: 262, startTime: 0.15, duration: 0.3, type: "sawtooth" },
+  ]),
+  decisionPrompt: () => playSequence([
+    { freq: 880, startTime: 0, duration: 0.09, type: "triangle", gain: 0.15 },
+    { freq: 880, startTime: 0.16, duration: 0.09, type: "triangle", gain: 0.15 },
+  ]),
+};
+
+function setSoundEnabled(enabled) {
+  soundEnabled = enabled;
+  localStorage.setItem(SOUND_ENABLED_KEY, enabled ? "on" : "off");
+  if (soundToggleEl) {
+    soundToggleEl.textContent = enabled ? "\u{1F50A} Sound" : "\u{1F507} Sound";
+    soundToggleEl.setAttribute("aria-pressed", String(!enabled));
+  }
+}
+
+if (soundToggleEl) {
+  setSoundEnabled(soundEnabled);
+  soundToggleEl.addEventListener("click", () => setSoundEnabled(!soundEnabled));
+}
+
+// Diffing state used to detect transitions between renderState() calls.
+let stateBaselineCaptured = false;
+let previousRunning = false;
+let previousStageStates = {};
+let previousPromptIds = new Set();
+
+function detectAndPlayTransitionSounds(state) {
+  const running = Boolean(state.running);
+  const stageStates = state.stage_states || {};
+  const promptIds = new Set((state.prompts || []).filter(p => !p.answered).map(p => p.prompt_id));
+
+  if (!stateBaselineCaptured) {
+    // First render reflects whatever the server already had (e.g. a page
+    // reload mid-run) rather than a live transition, so establish a
+    // baseline silently instead of firing sounds for pre-existing state.
+    stateBaselineCaptured = true;
+    previousRunning = running;
+    previousStageStates = { ...stageStates };
+    previousPromptIds = promptIds;
+    return;
+  }
+
+  if (running && !previousRunning) {
+    SOUNDS.pipelineStart();
+  } else if (!running && previousRunning) {
+    if (state.error) SOUNDS.pipelineFailure();
+    else SOUNDS.pipelineSuccess();
+  }
+
+  Object.entries(stageStates).forEach(([stageId, value]) => {
+    const previous = previousStageStates[stageId];
+    if (value === previous) return;
+    if (value === "active") SOUNDS.taskStart();
+    else if (value === "complete") SOUNDS.taskSuccess();
+    else if (value === "failed") SOUNDS.taskFailure();
+  });
+
+  promptIds.forEach(id => {
+    if (!previousPromptIds.has(id)) SOUNDS.decisionPrompt();
+  });
+
+  previousRunning = running;
+  previousStageStates = { ...stageStates };
+  previousPromptIds = promptIds;
+}
 
 async function api(path, options) {
   const r = await fetch(path, options);
@@ -207,6 +340,7 @@ function renderPrompts(prompts) {
 }
 
 function renderState(state) {
+  detectAndPlayTransitionSounds(state);
   statusEl.textContent = state.error || (state.running ? "Running" : state.paused ? "Paused" : "Idle");
   if (state.error) {
     alertEl.textContent = state.error;
