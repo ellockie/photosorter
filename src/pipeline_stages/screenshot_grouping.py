@@ -7,9 +7,11 @@ from src.core import \
 from src.pipeline_stages.legacy import date_folder_suffix
 from src.pipeline_stages.grouping_names import \
     TO_SPLIT_MARKER as _TO_SPLIT_MARKER, \
-    count_top_level_media as _count_top_level_media, \
+    count_media as _count_media, \
     extension_sets as _extension_sets, \
-    to_split_name as _to_split_name
+    select_media as _select_media, \
+    to_split_name as _to_split_name, \
+    with_earliest_time as _with_earliest_time
 
 
 def _stderr_tail(stderr: str | None, limit: int = 5) -> list[str]:
@@ -147,7 +149,9 @@ class ScreenshotGroupingStage(PipelineStage):
         top-level media to group. Folders already carrying the __TO_SPLIT__
         marker are opened as-is.
         """
-        images, videos = _count_top_level_media(folder, image_exts, video_exts)
+        top_level_files = [path for path in folder.iterdir() if path.is_file()]
+        media = _select_media(top_level_files, image_exts, video_exts)
+        images, videos = _count_media(media, image_exts, video_exts)
         if images == 0 and videos == 0:
             context.log(f"Skipping {folder.name}: no top-level media to group")
             return None
@@ -157,7 +161,7 @@ class ScreenshotGroupingStage(PipelineStage):
 
         placeholder = date_folder_suffix(context.config)
         base = folder.name[: -len(placeholder)] if folder.name.endswith(placeholder) else folder.name
-        new_name = _to_split_name(base, images, videos)
+        new_name = _to_split_name(_with_earliest_time(base, media), images, videos)
         target = folder.with_name(new_name)
         if target == folder:
             return folder

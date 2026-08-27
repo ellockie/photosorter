@@ -106,6 +106,43 @@ def test_renames_placeholder_and_launches_gui(tmp_path, monkeypatch, grouper_ins
     assert context.screenshot_grouped_folders == [renamed]
 
 
+def test_renamed_folder_gains_time_of_earliest_stamped_file(tmp_path, monkeypatch, grouper_install):
+    python, project = grouper_install
+    folder = tmp_path / "__PHOTOS" / "2026" / "07. July" / f"2026-07-18_(Sat){PLACEHOLDER}"
+    folder.mkdir(parents=True)
+    # Deliberately out of chronological order, and one video: the earliest
+    # stamp must win regardless of listing order or media type.
+    (folder / "2026-07-18_(Sat)__14.30.00__NIKON__f2.8.jpg").write_bytes(b"x")
+    (folder / "2026-07-18_(Sat)__09.12.53__NIKON__f2.8.jpg").write_bytes(b"x")
+    (folder / "2026-07-18_(Sat)__20.00.01__NIKON.mp4").write_bytes(b"x")
+
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: ok(cmd))
+    context = make_context(tmp_path, python=python, project=project)
+    affect(context, folder)
+
+    ScreenshotGroupingStage().execute(context)
+
+    renamed = (tmp_path / "__PHOTOS" / "2026" / "07. July" /
+              "2026-07-18_(Sat)__09.12.53 - __TO_SPLIT__(i=2_v=1)")
+    assert renamed.is_dir()
+
+
+def test_renamed_folder_keeps_no_time_when_files_are_unstamped(tmp_path, monkeypatch, grouper_install):
+    """Plain filenames (no leading stamp) leave the old day-only base alone."""
+    python, project = grouper_install
+    folder = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=2)
+
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: ok(cmd))
+    context = make_context(tmp_path, python=python, project=project)
+    affect(context, folder)
+
+    ScreenshotGroupingStage().execute(context)
+
+    renamed = (tmp_path / "__PHOTOS" / "2026" / "07. July" /
+              "2026-07-18_(Sat) - __TO_SPLIT__(i=2)")
+    assert renamed.is_dir()
+
+
 def test_only_affected_folders_are_touched(tmp_path, monkeypatch, grouper_install):
     python, project = grouper_install
     affected = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=1)

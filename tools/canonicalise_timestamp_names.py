@@ -200,48 +200,21 @@ def folder_media(folder, media_files, settings):
     return grouping.select_media(nested, settings.image_exts, settings.video_exts)
 
 
-def earliest_time_text(media):
-    """``HH.MM.SS`` of the earliest stamped file, or None if none is stamped."""
-    moments = []
-    for path in media:
-        match = stamps.LEADING_STAMP_RE.match(Path(path).name)
-        if not match:
-            continue
-        try:
-            moments.append(datetime.datetime(*(int(part) for part in match.groups())))
-        except ValueError:
-            continue
-    return f"{min(moments):%H.%M.%S}" if moments else None
-
-
-def with_earliest_time(base, media):
-    """Give a day prefix the time of its earliest file: ``2026-07-03_(Fri)__09.12.53``.
-
-    Only the time is taken. The date stays as folder-sorting wrote it, because
-    that is a decision this tool must not silently revisit: a shot after
-    midnight but before the day-boundary time belongs to the previous day's
-    folder, and rewriting the date would move the day out from under its month
-    folder as well.
-    """
-    if stamps.LEADING_STAMP_RE.match(base):
-        return base                    # already carries a time
-    text = earliest_time_text(media)
-    return f"{base}__{text}" if text else base
-
-
 def canonical_placeholder_name(folder, name, media_files, settings):
     """Put a day folder onto the grouper's ``__TO_SPLIT__`` convention.
 
     Both halves of the name are brought up to date: the dated prefix gains the
     time of the day's earliest file, and the legacy placeholder becomes the
-    marker with its media counts.
+    marker with its media counts. The time itself comes from
+    ``grouping.with_earliest_time`` -- the same function the live
+    screenshot-grouping stage uses -- so this tool cannot drift from it.
     """
     base = grouping.strip_placeholder(name, settings.placeholder)
     if base is not None:
         media = folder_media(folder, media_files, settings)
         images, videos = grouping.count_media(
             media, settings.image_exts, settings.video_exts)
-        return grouping.to_split_name(with_earliest_time(base, media), images, videos)
+        return grouping.to_split_name(grouping.with_earliest_time(base, media), images, videos)
 
     existing = grouping.split_to_split_name(name)
     if existing is not None:
@@ -249,7 +222,7 @@ def canonical_placeholder_name(folder, name, media_files, settings):
         # they are -- the grouper may be part-way through that folder.
         base, tail = existing
         media = folder_media(folder, media_files, settings)
-        return with_earliest_time(base, media) + tail
+        return grouping.with_earliest_time(base, media) + tail
 
     return name
 
