@@ -173,6 +173,18 @@ const SOUNDS = {
     playNoiseBurst({ startTime: 0.04, duration: 0.06, gain: 0.14, filterFreq: 5500, filterQ: 0.9 });
   },
   taskSuccess: () => playTone({ freq: 784, duration: 0.1, gain: 0.13 }),
+  // The screenshot-grouping stage blocks the whole pipeline while it pops an
+  // external GUI window (the Image Grouper) that needs the user's attention,
+  // so it gets its own cue instead of the generic taskStart tick: a shutter-
+  // click burst (nod to "image") followed by a bright rising triangle-wave
+  // run, longer and more melodic so it doesn't blend into ordinary stage
+  // starts.
+  imageGrouperLaunch: () => {
+    playNoiseBurst({ startTime: 0, duration: 0.03, gain: 0.22, filterType: "bandpass", filterFreq: 3000, filterQ: 1.4 });
+    playTone({ freq: 587.33, startTime: 0.05, duration: 0.13, type: "triangle", gain: 0.16 }); // D5
+    playTone({ freq: 880.0, startTime: 0.16, duration: 0.16, type: "triangle", gain: 0.16 });   // A5
+    playTone({ freq: 1174.66, startTime: 0.3, duration: 0.28, type: "triangle", gain: 0.17 });  // D6, bright landing note
+  },
   // Two harsh, descending square-wave buzzes ("wrong answer" register) plus a
   // filtered noise rasp under the second note, so a single failed stage reads
   // as an unambiguous error rather than a faint blip.
@@ -228,6 +240,10 @@ if (soundToggleEl) {
   soundToggleEl.addEventListener("click", () => setSoundEnabled(!soundEnabled));
 }
 
+// Stage that launches the external Image Grouper GUI — gets its own start
+// sound (SOUNDS.imageGrouperLaunch) instead of the generic taskStart tick.
+const IMAGE_GROUPER_STAGE_ID = "screenshot-grouping";
+
 // Diffing state used to detect transitions between renderState() calls.
 let stateBaselineCaptured = false;
 let previousRunning = false;
@@ -266,7 +282,10 @@ function detectAndPlayTransitionSounds(state) {
   Object.entries(stageStates).forEach(([stageId, value]) => {
     const previous = previousStageStates[stageId];
     if (value === previous) return;
-    if (value === "active") SOUNDS.taskStart();
+    if (value === "active") {
+      if (stageId === IMAGE_GROUPER_STAGE_ID) SOUNDS.imageGrouperLaunch();
+      else SOUNDS.taskStart();
+    }
     else if (value === "complete") SOUNDS.taskSuccess();
     else if (value === "failed") SOUNDS.taskFailure();
   });
