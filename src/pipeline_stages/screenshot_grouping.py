@@ -12,13 +12,21 @@ from src.pipeline_stages.grouping_names import \
     to_split_name as _to_split_name
 
 
+def _stderr_tail(stderr: str | None, limit: int = 5) -> list[str]:
+    """The last few non-empty stderr lines, for the failure log."""
+    if not stderr:
+        return []
+    lines = [line.rstrip() for line in stderr.splitlines() if line.strip()]
+    return lines[-limit:]
+
+
 class ScreenshotGroupingStage(PipelineStage):
     """Launch the grouper GUI on each freshly sorted, ungrouped event folder.
 
     After folder-sorting drops photos into event folders like
     "2026-07-18_(Sat) - 1. ######", this stage renames the placeholder
     suffix to the grouper's "__TO_SPLIT__(i=N_v=M)" convention and opens the
-    external screenshot-grouper GUI (alternative thumbnail grouper) on each
+    external screenshot-grouper GUI (the Image Grouper thumbnail view) on each
     folder, one at a time, so the day can be reviewed and split into named
     sub-event folders. Only the sorted photo tree under root_folder is
     touched — never the Dropbox intake folders.
@@ -73,11 +81,14 @@ class ScreenshotGroupingStage(PipelineStage):
             if target is None:
                 continue
             context.screenshot_grouped_folders.append(target)
+            command = [str(python_exe), str(main_script), str(target)]
             context.log(f"Launching grouper GUI on {target.name}")
             try:
                 result = subprocess.run(
-                    [str(python_exe), str(main_script), "--alternative", str(target)],
+                    command,
                     cwd=str(project_path),
+                    stderr=subprocess.PIPE,
+                    text=True,
                 )
             except OSError as error:
                 errors += 1
@@ -85,9 +96,15 @@ class ScreenshotGroupingStage(PipelineStage):
                 continue
             if result.returncode != 0:
                 errors += 1
+                # The bare exit code says nothing about what went wrong — the
+                # grouper's own message (an argparse usage error, a traceback)
+                # only reaches its stderr, so echo the tail of it here.
                 context.log(
                     f"  ! grouper exited with code {result.returncode} for {target.name}"
                 )
+                context.log(f"    command: {subprocess.list2cmdline(command)}")
+                for line in _stderr_tail(result.stderr):
+                    context.log(f"    {line}")
                 continue
             launched += 1
 

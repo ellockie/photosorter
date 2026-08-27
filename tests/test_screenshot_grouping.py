@@ -98,7 +98,7 @@ def test_renames_placeholder_and_launches_gui(tmp_path, monkeypatch, grouper_ins
 
     assert len(calls) == 1
     cmd, kwargs = calls[0]
-    assert cmd == [str(python), str(project / "main.py"), "--alternative", str(renamed)]
+    assert cmd == [str(python), str(project / "main.py"), str(renamed)]
     assert kwargs["cwd"] == str(project)
     assert context.counters["screenshot_folders_grouped"] == 1
     assert context.stage_stats["screenshot-grouping"] == {"inputs": 1, "outputs": 1, "errors": 0}
@@ -207,6 +207,26 @@ def test_launch_failure_isolated_and_recorded(tmp_path, monkeypatch, grouper_ins
     stats = context.stage_stats["screenshot-grouping"]
     assert stats["errors"] == 1
     assert context.counters["screenshot_folders_grouped"] == 1
+
+
+def test_failure_logs_command_and_stderr(tmp_path, monkeypatch, grouper_install):
+    python, project = grouper_install
+    folder = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=1)
+
+    failure = subprocess.CompletedProcess(
+        [], 2,
+        stderr="usage: main.py [-h] [folder]\n"
+               "main.py: error: unrecognized arguments: --alternative\n")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: failure)
+    context = make_context(tmp_path, python=python, project=project)
+    affect(context, folder)
+
+    ScreenshotGroupingStage().execute(context)
+
+    logs = "\n".join(context.logs)
+    assert "exited with code 2" in logs
+    assert "main.py" in logs and "__TO_SPLIT__" in logs
+    assert "unrecognized arguments: --alternative" in logs
 
 
 def test_max_folders_caps_launches(tmp_path, monkeypatch, grouper_install):

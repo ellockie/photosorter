@@ -173,7 +173,14 @@ const SOUNDS = {
     playNoiseBurst({ startTime: 0.04, duration: 0.06, gain: 0.14, filterFreq: 5500, filterQ: 0.9 });
   },
   taskSuccess: () => playTone({ freq: 784, duration: 0.1, gain: 0.13 }),
-  taskFailure: () => playTone({ freq: 220, duration: 0.22, type: "square", gain: 0.15 }),
+  // Two harsh, descending square-wave buzzes ("wrong answer" register) plus a
+  // filtered noise rasp under the second note, so a single failed stage reads
+  // as an unambiguous error rather than a faint blip.
+  taskFailure: () => {
+    playTone({ freq: 196, duration: 0.16, type: "square", gain: 0.2 });
+    playTone({ freq: 138.6, startTime: 0.15, duration: 0.32, type: "square", gain: 0.2 });
+    playNoiseBurst({ startTime: 0.15, duration: 0.28, gain: 0.1, filterType: "lowpass", filterFreq: 900, filterQ: 0.7 });
+  },
   // Long, bright ascending arpeggio with clean harmonic overtones — each note
   // rings and overlaps the next, ~3s total.
   pipelineSuccess: () => playChimeSequence([
@@ -183,11 +190,16 @@ const SOUNDS = {
     { freq: 1046.5, startTime: 0.58, duration: 2.3, gain: 0.16 }, // C6, long tail
   ]),
   // Long, low tolling chime with a dissonant clash and duller overtones —
-  // deliberately unsettling rather than bright, ~3s total.
+  // deliberately unsettling rather than bright. The D4/C#4 clash tolls twice
+  // (like a klaxon repeating) before the long low tail, both to read as more
+  // urgent than a single strike and to guarantee ample time to be heard —
+  // ~4.2s total, louder than the plain success chime.
   pipelineFailure: () => playChimeSequence([
-    { freq: 293.66, startTime: 0, duration: 1.4, gain: 0.15, partials: TOLL_PARTIALS, type: "triangle" },    // D4
-    { freq: 277.18, startTime: 0.16, duration: 1.4, gain: 0.13, partials: TOLL_PARTIALS, type: "triangle" }, // C#4 clashes with D4
-    { freq: 196.0, startTime: 0.6, duration: 2.6, gain: 0.18, partials: TOLL_PARTIALS, type: "triangle" },   // G3, long low tail
+    { freq: 293.66, startTime: 0, duration: 1.1, gain: 0.18, partials: TOLL_PARTIALS, type: "triangle" },    // D4
+    { freq: 277.18, startTime: 0.16, duration: 1.1, gain: 0.16, partials: TOLL_PARTIALS, type: "triangle" }, // C#4 clashes with D4
+    { freq: 293.66, startTime: 0.85, duration: 1.1, gain: 0.18, partials: TOLL_PARTIALS, type: "triangle" }, // D4, second strike
+    { freq: 277.18, startTime: 1.01, duration: 1.1, gain: 0.16, partials: TOLL_PARTIALS, type: "triangle" }, // C#4 clashes again
+    { freq: 196.0, startTime: 1.6, duration: 2.6, gain: 0.2, partials: TOLL_PARTIALS, type: "triangle" },    // G3, long low tail
   ]),
   // A prompt halts the whole run until it is answered, so this is the one
   // sound that has to carry across a room: a three-times-repeated two-note
