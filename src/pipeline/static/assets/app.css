@@ -132,11 +132,29 @@ dd {
   color: #74c7bd;
   font-variant-numeric: tabular-nums;
 }
+.prompt-dialog {
+  width: min(560px, calc(100vw - 48px));
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  border: 1px solid #c7a974;
+  border-radius: 10px;
+  background: #151812;
+  color: #f4f1e8;
+  padding: 20px 22px;
+  box-shadow: 0 24px 64px #000000b3;
+}
+.prompt-dialog h2 {
+  margin: 0 0 14px;
+  color: #e9c789;
+}
+.prompt-dialog::backdrop {
+  background: #06070591;
+  backdrop-filter: blur(2px);
+}
 .prompt-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-bottom: 18px;
 }
 .prompt-card {
   border: 2px solid #c7a974;

@@ -5,6 +5,7 @@ const assetsEl = document.querySelector("#assets");
 const processedEl = document.querySelector("#processed");
 const promptsEl = document.querySelector("#prompts");
 const promptListEl = document.querySelector("#prompt-list");
+const promptDialogEl = document.querySelector("#prompt-dialog");
 const logsEl = document.querySelector("#logs");
 const soundToggleEl = document.querySelector("#sound-toggle");
 let graph = [];
@@ -20,9 +21,31 @@ let audioCtx = null;
 function ensureAudioContext() {
   const Ctx = window.AudioContext || window.webkitAudioContext;
   if (!Ctx) return null;
-  if (!audioCtx) audioCtx = new Ctx();
+  if (!audioCtx) {
+    audioCtx = new Ctx();
+    audioCtx.onstatechange = flushAnnouncement;
+  }
   if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
   return audioCtx;
+}
+
+// A page that has had no user gesture yet cannot play audio, which is exactly
+// the state a freshly reloaded tab is in — so an already-pending prompt would
+// be announced silently. Hold the sound instead and let it out the moment the
+// context unblocks. resume() is async, hence the statechange hook above.
+let pendingAnnouncement = null;
+
+function announce(sound) {
+  const ctx = ensureAudioContext();
+  if (ctx && ctx.state === "running") sound();
+  else pendingAnnouncement = sound;
+}
+
+function flushAnnouncement() {
+  const sound = pendingAnnouncement;
+  if (!sound || !audioCtx || audioCtx.state !== "running") return;
+  pendingAnnouncement = null;
+  sound();
 }
 
 // Browsers require a user gesture before audio can play; prime the context
@@ -166,9 +189,16 @@ const SOUNDS = {
     { freq: 277.18, startTime: 0.16, duration: 1.4, gain: 0.13, partials: TOLL_PARTIALS, type: "triangle" }, // C#4 clashes with D4
     { freq: 196.0, startTime: 0.6, duration: 2.6, gain: 0.18, partials: TOLL_PARTIALS, type: "triangle" },   // G3, long low tail
   ]),
-  decisionPrompt: () => playSequence([
-    { freq: 880, startTime: 0, duration: 0.09, type: "triangle", gain: 0.15 },
-    { freq: 880, startTime: 0.16, duration: 0.09, type: "triangle", gain: 0.15 },
+  // A prompt halts the whole run until it is answered, so this is the one
+  // sound that has to carry across a room: a three-times-repeated two-note
+  // "ding-dong" that rings for ~3s, distinct from the end-of-run chimes.
+  decisionPrompt: () => playChimeSequence([
+    { freq: 987.77, startTime: 0, duration: 0.9, gain: 0.17 },    // B5
+    { freq: 739.99, startTime: 0.3, duration: 1.1, gain: 0.17 },  // F#5
+    { freq: 987.77, startTime: 0.95, duration: 0.9, gain: 0.16 },
+    { freq: 739.99, startTime: 1.25, duration: 1.1, gain: 0.16 },
+    { freq: 987.77, startTime: 1.9, duration: 1.0, gain: 0.16 },
+    { freq: 739.99, startTime: 2.2, duration: 1.6, gain: 0.17 },  // long tail
   ]),
 };
 
@@ -197,14 +227,20 @@ function detectAndPlayTransitionSounds(state) {
   const stageStates = state.stage_states || {};
   const promptIds = new Set((state.prompts || []).filter(p => !p.answered).map(p => p.prompt_id));
 
+  // Several prompts can arrive in one state update; one chime covers the batch
+  // rather than stacking overlapping copies of a 3s sound.
+  const hasNewPrompt = [...promptIds].some(id => !previousPromptIds.has(id));
+
   if (!stateBaselineCaptured) {
     // First render reflects whatever the server already had (e.g. a page
-    // reload mid-run) rather than a live transition, so establish a
-    // baseline silently instead of firing sounds for pre-existing state.
+    // reload mid-run) rather than a live transition, so stage and run sounds
+    // here would be phantoms. A pending prompt is the exception: it is a live
+    // request that is still waiting to be answered, so it still gets announced.
     stateBaselineCaptured = true;
     previousRunning = running;
     previousStageStates = { ...stageStates };
     previousPromptIds = promptIds;
+    if (hasNewPrompt) announce(SOUNDS.decisionPrompt);
     return;
   }
 
@@ -223,9 +259,7 @@ function detectAndPlayTransitionSounds(state) {
     else if (value === "failed") SOUNDS.taskFailure();
   });
 
-  promptIds.forEach(id => {
-    if (!previousPromptIds.has(id)) SOUNDS.decisionPrompt();
-  });
+  if (hasNewPrompt) announce(SOUNDS.decisionPrompt);
 
   previousRunning = running;
   previousStageStates = { ...stageStates };
@@ -413,10 +447,30 @@ function renderCameraForm(card, prompt) {
   card.appendChild(form);
 }
 
+// The dialog is deliberately not dismissible: the run cannot continue until
+// the decision is made, so closing it would only hide the thing being waited on.
+if (promptDialogEl) {
+  promptDialogEl.addEventListener("cancel", event => event.preventDefault());
+}
+
+function syncPromptDialog(pendingCount) {
+  // The click that answers a held-back prompt is itself the gesture that
+  // unblocks audio, so without this the chime would ring just as the user
+  // resolves the thing it was announcing.
+  if (!pendingCount) pendingAnnouncement = null;
+  if (!promptDialogEl) return;
+  if (pendingCount && !promptDialogEl.open) {
+    promptDialogEl.showModal();
+  } else if (!pendingCount && promptDialogEl.open) {
+    promptDialogEl.close();
+  }
+}
+
 function renderPrompts(prompts) {
   if (!promptListEl) return;
   promptListEl.innerHTML = "";
-  (prompts || []).filter(prompt => !prompt.answered).forEach(prompt => {
+  const pending = (prompts || []).filter(prompt => !prompt.answered);
+  pending.forEach(prompt => {
     const card = document.createElement("div");
     card.className = "prompt-card";
     const title = document.createElement("h3");
@@ -466,6 +520,7 @@ function renderPrompts(prompts) {
     }
     promptListEl.appendChild(card);
   });
+  syncPromptDialog(pending.length);
 }
 
 function renderState(state) {

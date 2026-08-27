@@ -242,7 +242,58 @@ def merge_dicts(defaults: dict, overrides: dict) -> dict:
     return merged
 
 
-def normalize_config_paths(config: dict, base_folder: str | Path | None = None) -> dict:
+def _confine_ingest_paths(paths: dict, root_path: Path, declared_paths: dict) -> None:
+    # Ingest sources are read-and-emptied: the pipeline harvests files out of
+    # them and into the run's own tree. An absolute one pointing outside the
+    # tree this run was told to operate on would therefore drain the real
+    # Dropbox folder into a scratch tree — the --base-folder override and the
+    # partial-scratch-config cases both hit this, because default_config()
+    # hardcodes the real Camera Uploads path and _reroot() cannot map a path
+    # that was never under the old root.
+    #
+    # So an external ingest path is trusted only when the config file declared
+    # it *and* declared the very root this run resolved to. Anything else is
+    # confined to the root, which for a scratch run means a folder that simply
+    # does not exist and the harvest stages skip.
+    logger = logging.getLogger(__name__)
+    declared_root = declared_paths.get("root_folder") or declared_paths.get("photo_base_folder")
+    root_is_declared = declared_root is not None and Path(declared_root) == root_path
+
+    def confine(value: str, key: str, declared: bool) -> str:
+        path = Path(value)
+        if not path.is_absolute():
+            return str(root_path / path)
+        # Pass the original string back rather than str(Path(...)): rewriting
+        # separators here would churn the user's config.json on every save.
+        if path.is_relative_to(root_path):
+            return value
+        if declared and root_is_declared:
+            return value
+        confined = root_path / path.name
+        logger.warning(
+            "Ingest path %s=%s lies outside the run root %s and was not configured "
+            "for it; using %s instead so this run cannot harvest from it.",
+            key, path, root_path, confined,
+        )
+        return str(confined)
+
+    camera_uploads = paths.get("camera_uploads")
+    if isinstance(camera_uploads, str) and camera_uploads:
+        paths["camera_uploads"] = confine(
+            camera_uploads, "camera_uploads", "camera_uploads" in declared_paths
+        )
+
+    ingest = paths.get("ingest")
+    if isinstance(ingest, dict):
+        declared_ingest = declared_paths.get("ingest")
+        declared_ingest = declared_ingest if isinstance(declared_ingest, dict) else {}
+        for key, value in list(ingest.items()):
+            if isinstance(value, str) and value:
+                ingest[key] = confine(value, f"ingest.{key}", key in declared_ingest)
+
+
+def normalize_config_paths(config: dict, base_folder: str | Path | None = None,
+                           declared_config: dict | None = None) -> dict:
     paths = config.setdefault("paths", {})
     persisted_root = paths.get("root_folder") or paths.get("photo_base_folder")
     root_folder = base_folder or persisted_root or os.environ.get("PHOTO_BASE_FOLDER") or r"c:\__PHOTOS"
@@ -303,6 +354,9 @@ def normalize_config_paths(config: dict, base_folder: str | Path | None = None) 
     paths["unsorted_folder"] = str(inbox_path)
     paths["temp_root"] = str(temp_path)
     paths.pop("photo_base_folder", None)
+
+    declared_paths = (declared_config or {}).get("paths")
+    _confine_ingest_paths(paths, root_path, declared_paths if isinstance(declared_paths, dict) else {})
     return config
 
 
@@ -337,13 +391,15 @@ def load_config(config_path: str | Path | None = None, base_folder: str | Path |
     path = Path(config_path) if config_path else project_root() / CONFIG_FILE_NAME
     defaults = default_config()
     if not path.exists():
-        config = normalize_config_paths(defaults, base_folder)
+        # Nothing was declared for this tree, so the hardcoded default ingest
+        # paths are not trusted for it.
+        config = normalize_config_paths(defaults, base_folder, declared_config={})
     else:
         with path.open("r", encoding="utf-8") as handler:
             loaded = json.load(handler)
         if not isinstance(loaded, dict):
             raise PipelineConfigError(f"Config file must contain an object: {path}")
-        config = normalize_config_paths(merge_dicts(defaults, loaded), base_folder)
+        config = normalize_config_paths(merge_dicts(defaults, loaded), base_folder, declared_config=loaded)
     _load_timezone_file(config, config_path)
     _warn_timezone_config(config)
     return config

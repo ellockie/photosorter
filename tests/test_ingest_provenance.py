@@ -252,6 +252,105 @@ def test_base_folder_override_keeps_external_absolute_paths(tmp_path):
     assert paths["root_folder"] == str(base)
 
 
+DROPBOX_UPLOADS = r"c:\Users\luxxa\Dropbox\Camera Uploads"
+
+
+def _ingest_paths(paths: dict) -> list[str]:
+    return [paths["camera_uploads"], paths["ingest"]["camera_uploads"]]
+
+
+def test_base_folder_override_confines_external_ingest_paths(tmp_path):
+    # Regression: ingest sources are read-and-emptied, so a --base-folder run
+    # must never keep pointing at the real Dropbox folder. It previously did:
+    # the path is outside the persisted root, so _reroot() left it alone, and a
+    # scratch run harvested the user's photos out of Dropbox for real.
+    base = tmp_path / "SCRATCH"
+    config = {
+        "paths": {
+            "root_folder": r"c:\__PHOTOS",
+            "camera_uploads": DROPBOX_UPLOADS,
+            "ingest": {"camera_uploads": DROPBOX_UPLOADS},
+        }
+    }
+
+    paths = normalize_config_paths(
+        config, base_folder=str(base), declared_config=json.loads(json.dumps(config))
+    )["paths"]
+
+    for value in _ingest_paths(paths):
+        assert Path(value).is_relative_to(base), f"ingest path escaped the base folder: {value}"
+        assert "Dropbox" not in value
+
+
+def test_declared_external_ingest_survives_for_its_own_root(tmp_path):
+    # The normal run: config.json declares the Dropbox folder alongside the very
+    # root being used, so it is a deliberate external source and must survive.
+    config = {
+        "paths": {
+            "root_folder": r"c:\__PHOTOS",
+            "camera_uploads": DROPBOX_UPLOADS,
+            "ingest": {"camera_uploads": DROPBOX_UPLOADS},
+        }
+    }
+
+    paths = normalize_config_paths(
+        config, declared_config=json.loads(json.dumps(config))
+    )["paths"]
+
+    assert _ingest_paths(paths) == [DROPBOX_UPLOADS, DROPBOX_UPLOADS]
+
+
+def test_undeclared_ingest_path_is_confined_even_without_base_folder(tmp_path):
+    # The partial-scratch-config case: the file names a scratch root but says
+    # nothing about ingest, so merge_dicts() fills in the hardcoded Dropbox
+    # default. That default belongs to the real tree, not this one.
+    scratch = tmp_path / "SCRATCH"
+    declared = {"paths": {"root_folder": str(scratch)}}
+    config = {
+        "paths": {
+            "root_folder": str(scratch),
+            "camera_uploads": DROPBOX_UPLOADS,
+            "ingest": {"camera_uploads": DROPBOX_UPLOADS},
+        }
+    }
+
+    paths = normalize_config_paths(config, declared_config=declared)["paths"]
+
+    for value in _ingest_paths(paths):
+        assert Path(value).is_relative_to(scratch), f"ingest path escaped the root: {value}"
+
+
+def test_load_config_without_config_file_confines_default_ingest(tmp_path):
+    # No config file at all: default_config()'s hardcoded Dropbox path is not
+    # declared for this tree. This is exactly the shape of the dashboard test
+    # run that pointed --base-folder at a scratch directory.
+    base = tmp_path / "SCRATCH"
+
+    paths = load_config(str(tmp_path / "missing.json"), base_folder=str(base))["paths"]
+
+    for value in _ingest_paths(paths):
+        assert Path(value).is_relative_to(base), f"ingest path escaped the base folder: {value}"
+
+
+def test_ingest_confinement_is_idempotent(tmp_path):
+    # normalize runs on every load; a confined path must not walk deeper into
+    # the tree each time (root/Camera Uploads, root/root/Camera Uploads, ...).
+    base = tmp_path / "SCRATCH"
+    config = {
+        "paths": {
+            "root_folder": r"c:\__PHOTOS",
+            "camera_uploads": DROPBOX_UPLOADS,
+            "ingest": {"camera_uploads": DROPBOX_UPLOADS},
+        }
+    }
+
+    once = normalize_config_paths(config, base_folder=str(base), declared_config={})["paths"]
+    first = _ingest_paths(once)
+    twice = normalize_config_paths(once and config, base_folder=str(base), declared_config={})["paths"]
+
+    assert _ingest_paths(twice) == first
+
+
 def test_load_config_with_base_folder_reroots_absolute_config(tmp_path, monkeypatch):
     # End-to-end through load_config: an absolute-path config.json plus the
     # --base-folder CLI override must produce a fully scratch-rooted config.
