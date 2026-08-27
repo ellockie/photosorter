@@ -22,6 +22,53 @@ def _stderr_tail(stderr: str | None, limit: int = 5) -> list[str]:
     return lines[-limit:]
 
 
+def grouper_install(settings: dict) -> tuple[Path, Path] | None:
+    """``(python_exe, project_path)`` of the external grouper, or None.
+
+    Module-level rather than a method because the dashboard offers the same
+    launch from the grouping-review prompt, and both must agree on what counts
+    as "installed".
+    """
+    python_exe = Path(settings.get("python", ""))
+    project_path = Path(settings.get("project_path", ""))
+    if not python_exe.is_file() or not (project_path / "main.py").is_file():
+        return None
+    return python_exe, project_path
+
+
+def launch_grouper(context: PipelineContext, folder: Path,
+                   python_exe: Path, project_path: Path) -> bool:
+    """Open the grouper GUI on one folder, blocking until its window closes.
+
+    Returns True when it exited cleanly; every failure is logged rather than
+    raised, so one bad folder cannot take the rest of a batch down with it.
+    """
+    command = [str(python_exe), str(project_path / "main.py"), str(folder)]
+    context.log(f"Launching grouper GUI on {folder.name}")
+    try:
+        result = subprocess.run(
+            command,
+            cwd=str(project_path),
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except OSError as error:
+        context.log(f"  ! could not launch grouper for {folder.name}: {error}")
+        return False
+    if result.returncode != 0:
+        # The bare exit code says nothing about what went wrong -- the
+        # grouper's own message (an argparse usage error, a traceback) only
+        # reaches its stderr, so echo the tail of it here.
+        context.log(
+            f"  ! grouper exited with code {result.returncode} for {folder.name}"
+        )
+        context.log(f"    command: {subprocess.list2cmdline(command)}")
+        for line in _stderr_tail(result.stderr):
+            context.log(f"    {line}")
+        return False
+    return True
+
+
 class ScreenshotGroupingStage(PipelineStage):
     """Launch the grouper GUI on each freshly sorted, ungrouped event folder.
 
@@ -49,15 +96,15 @@ class ScreenshotGroupingStage(PipelineStage):
             context.log("Screenshot grouping disabled, skipping")
             return context
 
-        python_exe = Path(settings.get("python", ""))
-        project_path = Path(settings.get("project_path", ""))
-        main_script = project_path / "main.py"
-        if not python_exe.is_file() or not main_script.is_file():
+        install = grouper_install(settings)
+        if install is None:
             context.log(
                 "Screenshot grouper not available "
-                f"(python: {python_exe}, project: {project_path}), skipping"
+                f"(python: {settings.get('python', '')}, "
+                f"project: {settings.get('project_path', '')}), skipping"
             )
             return context
+        python_exe, project_path = install
 
         candidates = self._candidate_folders(context)
         max_folders = settings.get("max_folders", 0)
@@ -83,32 +130,10 @@ class ScreenshotGroupingStage(PipelineStage):
             if target is None:
                 continue
             context.screenshot_grouped_folders.append(target)
-            command = [str(python_exe), str(main_script), str(target)]
-            context.log(f"Launching grouper GUI on {target.name}")
-            try:
-                result = subprocess.run(
-                    command,
-                    cwd=str(project_path),
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
-            except OSError as error:
+            if launch_grouper(context, target, python_exe, project_path):
+                launched += 1
+            else:
                 errors += 1
-                context.log(f"  ! could not launch grouper for {target.name}: {error}")
-                continue
-            if result.returncode != 0:
-                errors += 1
-                # The bare exit code says nothing about what went wrong — the
-                # grouper's own message (an argparse usage error, a traceback)
-                # only reaches its stderr, so echo the tail of it here.
-                context.log(
-                    f"  ! grouper exited with code {result.returncode} for {target.name}"
-                )
-                context.log(f"    command: {subprocess.list2cmdline(command)}")
-                for line in _stderr_tail(result.stderr):
-                    context.log(f"    {line}")
-                continue
-            launched += 1
 
         context.counters["screenshot_folders_grouped"] += launched
         context.set_stage_stats(

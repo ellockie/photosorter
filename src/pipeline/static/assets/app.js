@@ -399,6 +399,32 @@ function answerPrompt(promptId, answer) {
   }).catch(showError);
 }
 
+// True while a grouper opened from the review prompt still has windows up.
+// Server-driven rather than local, so every tab agrees and a reload does not
+// lose it: the run is blocked on the prompt either way.
+let grouperRunning = false;
+
+const GROUPER_BUSY_LABEL = "Grouper open…";
+
+function launchGrouper(promptId, button) {
+  // The GUI takes as long as the naming takes, so the button only starts it;
+  // the server reports back through grouper_running until the last window is
+  // closed. This click is a user gesture, so the launch cue can play here.
+  SOUNDS.imageGrouperLaunch();
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = GROUPER_BUSY_LABEL;
+  api(`/api/prompts/${promptId}/regroup`, { method: "POST" })
+    .then(payload => { if (payload.state) renderState(payload.state); })
+    .catch(error => {
+      // A refused launch pushes no new state, so nothing would re-render the
+      // button out of its "open" label — put it back by hand.
+      button.disabled = false;
+      button.textContent = label;
+      showError(error);
+    });
+}
+
 function describeFile(title, info) {
   const block = document.createElement("div");
   block.className = "prompt-file";
@@ -541,9 +567,26 @@ function renderPrompts(prompts) {
     } else {
       const row = document.createElement("div");
       row.className = "prompt-actions";
+      if (prompt.prompt_type === "grouping_review") {
+        // The folders in this card are exactly the ones the grouper should be
+        // pointed at, so offer it here instead of sending the user to Explorer
+        // to find them and start the GUI by hand.
+        const count = (prompt.payload.folders || prompt.payload.names || []).length;
+        const launch = document.createElement("button");
+        launch.className = "primary";
+        launch.textContent = grouperRunning
+          ? GROUPER_BUSY_LABEL
+          : `Open grouper on ${count} folder(s)`;
+        launch.disabled = grouperRunning;
+        launch.addEventListener("click", () => launchGrouper(prompt.prompt_id, launch));
+        row.appendChild(launch);
+      }
       actions.forEach(([label, answer]) => {
         const button = document.createElement("button");
         button.textContent = label;
+        // Answering while the GUI is still up would let reconciliation run
+        // against a tree the user is mid-way through splitting.
+        button.disabled = grouperRunning && prompt.prompt_type === "grouping_review";
         button.addEventListener("click", () => answerPrompt(prompt.prompt_id, answer));
         row.appendChild(button);
       });
@@ -561,6 +604,8 @@ function renderState(state) {
   statusEl.textContent = state.error
     || (state.waiting_for ? "Waiting for you" : state.running ? "Running" : state.paused ? "Paused" : "Idle");
   document.body.classList.toggle("awaiting-prompt", Boolean(state.waiting_for));
+  // Set before renderPrompts: the prompt buttons are rebuilt from it.
+  grouperRunning = Boolean(state.grouper_running);
   if (state.error) {
     alertEl.textContent = state.error;
     alertEl.classList.remove("hidden");

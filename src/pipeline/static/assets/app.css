@@ -56,6 +56,17 @@ button:hover {
 button:active {
   transform: translateY(0);
 }
+/* Buttons are disabled while an external GUI holds the decision (the grouper
+   opened from a review prompt): they must read as out of reach, not broken. */
+button:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+button:disabled:hover {
+  border-color: #484b3b;
+  background: #24281f;
+  transform: none;
+}
 .alert {
   flex: 0 0 auto;
   padding: 12px 24px;

@@ -8,6 +8,9 @@ from src.core import \
     PipelinePaused, \
     load_config, \
     save_config
+from src.pipeline_stages.screenshot_grouping import \
+    grouper_install, \
+    launch_grouper
 from src.stages import build_default_orchestrator
 
 
@@ -65,6 +68,10 @@ class PipelineRuntime:
         )
         self.orchestrator = build_default_orchestrator(PipelineMode.UI)
         self.thread = None
+        # The grouper GUI opened from a grouping-review prompt, if any: it
+        # cannot run on the pipeline thread, which is parked in await_prompt
+        # waiting for that very prompt to be answered.
+        self.grouper_thread = None
         self.error = None
         self.paused = False
         self._lock = threading.RLock()
@@ -78,6 +85,10 @@ class PipelineRuntime:
                 # user is still "running" — this is what lets the dashboard say
                 # so instead of looking stalled.
                 "waiting_for": self.context.waiting_prompt_id,
+                # A grouper window opened from the review prompt is blocking
+                # the user, not the server: the dashboard uses this to keep the
+                # prompt's own buttons out of reach until it is closed.
+                "grouper_running": self._grouper_busy(),
                 "error": str(self.error) if self.error else None,
                 "counters": dict(self.context.counters),
                 "stage_states": {
@@ -163,6 +174,77 @@ class PipelineRuntime:
             self.thread = None
             self.error = None
             self.paused = False
+
+    def _grouper_busy(self) -> bool:
+        thread = self.grouper_thread
+        return thread is not None and thread.is_alive()
+
+    def pending_prompt(self, prompt_id: str):
+        """The unanswered prompt with this id, or None."""
+        with self._lock:
+            for prompt in self.context.prompt_queue:
+                if prompt.prompt_id == prompt_id and not prompt.answered:
+                    return prompt
+        return None
+
+    def open_grouper(self, prompt_id: str) -> list[str]:
+        """Re-open the grouper GUI on the folders a grouping-review prompt lists.
+
+        The review prompt exists precisely because those folders still need
+        naming, and the grouper is the tool for it — so offer it there rather
+        than making the user find the folders in Explorer and start the GUI by
+        hand. It runs on its own thread: the pipeline thread is blocked in
+        `await_prompt`, and the dashboard has to keep streaming while the
+        windows are open.
+
+        The folders come from the payload the server itself wrote when it
+        raised the prompt, never from the request, so this cannot be pointed at
+        an arbitrary path. Returns the folders it is opening.
+        """
+        prompt = self.pending_prompt(prompt_id)
+        if prompt is None:
+            raise LookupError(f"No pending prompt {prompt_id}")
+        if prompt.prompt_type != "grouping_review":
+            raise ValueError(f"A {prompt.prompt_type} prompt has no folders to group")
+        with self._lock:
+            if self._grouper_busy():
+                raise RuntimeError("The grouper is already open")
+            install = grouper_install(self.context.config.get("screenshot_grouping", {}))
+            if install is None:
+                raise RuntimeError(
+                    "The screenshot grouper is not installed on this machine "
+                    "(check screenshot_grouping.python and .project_path)"
+                )
+            # A folder renamed since the prompt was raised is already done;
+            # what is left under the recorded name is exactly what still needs
+            # the GUI.
+            folders = [Path(path) for path in prompt.payload.get("folders", [])]
+            folders = [folder for folder in folders if folder.is_dir()]
+            if not folders:
+                raise RuntimeError(
+                    "None of those folders are still on disk under that name - "
+                    "press Re-scan"
+                )
+            self.grouper_thread = threading.Thread(
+                target=self._run_grouper,
+                args=(folders, *install),
+                daemon=True,
+            )
+            self.grouper_thread.start()
+        return [str(folder) for folder in folders]
+
+    def _run_grouper(self, folders, python_exe, project_path):
+        self.context.log(
+            f"Re-opening the grouper on {len(folders)} folder(s) from the review"
+        )
+        for folder in folders:
+            # An earlier window in this same batch may have renamed this one
+            # (the grouper splits a day into new folders and removes the old).
+            if not folder.is_dir():
+                self.context.log(f"Skipping {folder.name}: no longer under that name")
+                continue
+            launch_grouper(self.context, folder, python_exe, project_path)
+        self.context.log("Grouper closed - press Re-scan when the folders are named")
 
     def answer_prompt(self, prompt_id: str, answer: dict):
         self.context.answer_prompt(prompt_id, answer)
@@ -291,6 +373,23 @@ def create_app(config_path=None, base_folder=None):
         await events.broadcast(payload)
         return payload
 
+    @app.post("/api/prompts/{prompt_id}/regroup")
+    async def regroup_prompt(prompt_id: str):
+        try:
+            folders = runtime.open_grouper(prompt_id)
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error))
+        except (RuntimeError, ValueError) as error:
+            raise HTTPException(status_code=409, detail=str(error))
+        payload = {
+            "event": "grouper_launched",
+            "prompt_id": prompt_id,
+            "folders": folders,
+            "state": runtime.state(),
+        }
+        await events.broadcast(payload)
+        return payload
+
     @app.websocket("/ws/events")
     async def websocket_events(websocket: WebSocket):
         await events.connect(websocket)
@@ -306,6 +405,7 @@ def create_app(config_path=None, base_folder=None):
                     state["running"],
                     state["paused"],
                     state["waiting_for"],
+                    state["grouper_running"],
                     state["error"],
                     # Total count, not window length: once the log window is
                     # full its length stops changing while lines keep arriving.
