@@ -18,6 +18,23 @@ archive already carries::
     2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=111)
     2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=79_v=3)
 
+``i`` and ``v`` state what the grouper GUI will put in front of the reviewer:
+the day's top-level images and videos. Two further letters may follow, and
+they are audit markers rather than work counts -- each appears only when the
+folder holds something those first two do not account for::
+
+    2026-07-01_(Wed)__13.07.11 - __TO_SPLIT__(i=129_s=6)   6 files in subfolders
+    2026-07-25_(Sat) - __TO_SPLIT__(e=7)                   7 orphaned sidecars
+
+``e`` is the number of sidecars ("._exif") in the whole folder tree, written
+only when it does not match the number of media files in that tree -- one
+sidecar per media file is the norm, and any other number means a sidecar was
+orphaned when its image moved, or an image arrived without one. ``s`` is the
+number of non-sidecar files below the top level, written whenever there are
+any: videos routed into "__VIDEOS", RAWs, an already-split sub-event. Both are
+written by the maintenance tool (``tools/canonicalise_timestamp_names.py``);
+the live grouping stage writes ``i``/``v`` alone.
+
 A labelled folder ("... - Lens tests") is already named by a human and never
 carries either form.
 
@@ -44,6 +61,13 @@ TO_SPLIT_MARKER = "__TO_SPLIT__"
 # stays loadable with no config in hand.
 DEFAULT_DATE_FOLDER_SUFFIX = " - 1. ######"
 
+# Matches config.json extensions.sidecars, for the same reason.
+DEFAULT_SIDECAR_EXTENSIONS = ("._exif",)
+
+# The letters of the count bracket, in the order they are written. "i"/"v" are
+# the media the grouper shows; "e"/"s" are the audit markers described above.
+COUNT_LETTERS = ("i", "v", "e", "s")
+
 # Matches stamps.LEADING_STAMP_RE: a leading "YYYY-MM-DD[_(Ddd)]_HH.MM.SS".
 # Duplicated rather than imported -- see the module docstring.
 _LEADING_STAMP_RE = re.compile(
@@ -66,6 +90,38 @@ def extension_sets(config: dict) -> tuple[set[str], set[str]]:
         for value in extensions.get(group, [])
     }
     return image_exts, video_exts
+
+
+def sidecar_extensions(config: dict) -> set[str]:
+    """Sidecar suffixes (``._exif``), lower-cased, from config.
+
+    An explicitly empty list means the archive keeps no sidecars, and the
+    ``e=`` marker is then never written; a missing key just means this module
+    was handed a bare config and falls back to the project default.
+    """
+    extensions = config.get("extensions", {})
+    if "sidecars" not in extensions:
+        return {value.lower() for value in DEFAULT_SIDECAR_EXTENSIONS}
+    return {value.lower() for value in extensions["sidecars"]}
+
+
+def select_sidecars(paths, sidecar_exts: set[str]) -> list:
+    """The sidecar files among ``paths``, in order.
+
+    A sidecar keeps its subject's extension in front of its own --
+    "shot.jpg._exif" -- so ``Path.suffix`` is "._exif" and the set match is
+    exact, the mirror image of ``select_media`` letting them fall out.
+
+    A sidecar is also named after the file it describes, so it carries that
+    file's capture time in its own leading stamp: a folder whose images have
+    gone can still be dated from what they left behind.
+    """
+    return [path for path in paths if Path(path).suffix.lower() in sidecar_exts]
+
+
+def count_sidecars(paths, sidecar_exts: set[str]) -> int:
+    """How many of ``paths`` are sidecars."""
+    return len(select_sidecars(paths, sidecar_exts))
 
 
 def select_media(paths, image_exts: set[str], video_exts: set[str]) -> list:
@@ -133,7 +189,17 @@ def with_earliest_time(base: str, media) -> str:
     return f"{base}__{earliest:%H.%M.%S}" if earliest else base
 
 
-def to_split_suffix(images: int, videos: int) -> str:
+def to_split_suffix(images: int, videos: int,
+                    sidecars: int | None = None,
+                    subfolder_files: int | None = None) -> str:
+    """The count bracket: ``(i=79_v=3_e=83_s=4)``, or "" when it has nothing to say.
+
+    ``images`` and ``videos`` are omitted when zero, since a day with no video
+    should not carry "v=0" forever. The two audit markers work the other way
+    round: they are omitted when ``None``, and the caller passes ``None``
+    precisely when there is nothing to report -- so ``e=0`` is a real and
+    deliberate statement ("this folder's sidecars are all gone"), not padding.
+    """
     # "=" not ":" — the grouper uses ":" on macOS but Photosorter is Windows,
     # where ":" is illegal in filenames (matches COUNT_SEPARATOR in the grouper).
     parts = []
@@ -141,16 +207,24 @@ def to_split_suffix(images: int, videos: int) -> str:
         parts.append(f"i={images}")
     if videos:
         parts.append(f"v={videos}")
+    if sidecars is not None:
+        parts.append(f"e={sidecars}")
+    if subfolder_files is not None:
+        parts.append(f"s={subfolder_files}")
     return "(" + "_".join(parts) + ")" if parts else ""
 
 
-def to_split_name(base: str, images: int, videos: int) -> str:
+def to_split_name(base: str, images: int, videos: int,
+                  sidecars: int | None = None,
+                  subfolder_files: int | None = None) -> str:
     """The full ``__TO_SPLIT__`` folder name for a dated ``base`` prefix.
 
     ``base`` is expected to already carry whatever time it needs (see
-    ``with_earliest_time``); this only appends the marker and its counts.
+    ``with_earliest_time``); this only appends the marker and its counts. The
+    two audit markers default to absent, so the live grouping stage keeps
+    writing the plain ``(i=N_v=M)`` name it always has.
     """
-    return f"{base} - {TO_SPLIT_MARKER}{to_split_suffix(images, videos)}"
+    return f"{base} - {TO_SPLIT_MARKER}{to_split_suffix(images, videos, sidecars, subfolder_files)}"
 
 
 def strip_placeholder(name: str, placeholder: str) -> str | None:
@@ -171,3 +245,20 @@ def split_to_split_name(name: str) -> tuple[str, str] | None:
     if index == -1:
         return None
     return name[:index], name[index:]
+
+
+# A tail of nothing but the marker and a well-formed count bracket.
+_COUNT_PAIR = r"[%s]=\d+" % "".join(COUNT_LETTERS)
+_COUNT_BRACKET_RE = re.compile(r"\(%s(?:_%s)*\)" % (_COUNT_PAIR, _COUNT_PAIR))
+
+
+def to_split_tail_is_only_counts(tail: str) -> bool:
+    """True when a ``__TO_SPLIT__`` tail carries counts and nothing else.
+
+    Recomputing a folder's counts means rewriting the whole tail, which would
+    silently throw away anything a human added after the marker. So the rewrite
+    is only offered for a tail this recognises: the bare marker, or the marker
+    followed by a bracket of nothing but ``letter=number`` pairs.
+    """
+    remainder = tail[len(f" - {TO_SPLIT_MARKER}"):]
+    return remainder == "" or bool(_COUNT_BRACKET_RE.fullmatch(remainder))

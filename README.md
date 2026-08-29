@@ -60,6 +60,10 @@ Event folders use:
 YYYY-MM-DD_(Thu) - 1. ######
 ```
 
+That placeholder is the legacy form. A folder awaiting review now carries the
+`__TO_SPLIT__` marker and its counts instead — see
+[Event-folder counts](#event-folder-counts).
+
 Month folders use:
 
 ```text
@@ -207,6 +211,129 @@ the time, matching the screenshot grouper:
 Weekday abbreviations are fixed English, never locale-dependent. Earlier forms
 (`_(Fri)_15.32.01` and `__15.32.01`) are still read, so an existing archive keeps
 working and its sidecars keep matching their images.
+
+### Event-folder counts
+
+An event folder still awaiting review carries the `__TO_SPLIT__` marker and a
+bracket of counts, so the size of the job is visible in Explorer before the
+grouper is opened:
+
+```text
+2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=79_v=3)
+```
+
+| Letter | Counts | Written when |
+| --- | --- | --- |
+| `i` | top-level images | there are any |
+| `v` | top-level videos | there are any |
+| `e` | `._exif` sidecars in the whole folder | the count does not match the media in that folder |
+| `s` | non-sidecar files below the top level | there are any |
+
+`i` and `v` are the review job. The grouper GUI shows the top level only, so
+they state exactly what it will put in front of you. A day whose every file was
+routed into a subfolder — a video-only day, everything in `__VIDEOS` — is
+counted from the subtree instead, rather than reported as empty.
+
+`e` and `s` are audit markers. They are written only by the maintenance tool
+below, and only when something does not add up:
+
+```text
+2026-07-01_(Wed)__13.07.11 - __TO_SPLIT__(i=129_s=6)   6 files sit in subfolders
+2026-07-25_(Sat) - __TO_SPLIT__(e=7)                   7 sidecars, and no media
+```
+
+One `._exif` per media file is the norm, so `e` appears only when that breaks:
+`e=7` beside no images means the day's photos left without their sidecars, and
+`e=0` beside a folder full of images means the sidecars are gone. `s` means the
+grouper will not show you everything the folder holds.
+
+The grammar lives in `src/pipeline_stages/grouping_names.py` and nowhere else.
+The live grouping stage writes `i`/`v` alone; so does the screenshot grouper,
+which rebuilds the bracket from scratch when it touches a folder and will
+therefore drop any `e`/`s` it finds. They come back on the next tool run.
+
+## Maintenance Tools
+
+### Canonicalising an existing archive
+
+`tools/canonicalise_timestamp_names.py` rewrites names an earlier version of the
+pipeline — or the screenshot grouper — left in a different shape, so an existing
+archive converges on the conventions above.
+
+```powershell
+python tools/canonicalise_timestamp_names.py                       # dry run over <root_folder>\<year>
+python tools/canonicalise_timestamp_names.py "c:\__PHOTOS\2026" --apply
+python tools/canonicalise_timestamp_names.py --undo <journal> --apply
+```
+
+**Nothing is renamed without `--apply`.** The default run is a report; with
+`--apply` every rename is appended to a journal that `--undo` replays backwards.
+Exit codes: `0` nothing left to do, `1` changes pending or failures, `2` error.
+
+It does two things:
+
+- **Timestamps.** Every dated name converges on the canonical form:
+  `_(Fri)_15.32.01`, `__15.32.01`, and a stale or lower-case weekday all become
+  `_(Fri)__15.32.01`. Only the timestamp span is touched — markers, camera
+  symbols, exposure suffixes and capitalisation survive byte for byte. A name
+  claiming a date that cannot exist (`2026-02-31`) is reported, never invented.
+- **Event folders.** A legacy `- 1. ######` placeholder becomes the
+  `__TO_SPLIT__` marker, the dated prefix gains the time of the folder's
+  earliest file, and the counts are rebuilt from what is on disk now with the
+  `e`/`s` audit markers above. `--skip-placeholders` turns this half off and
+  rewrites timestamps only.
+
+Only the *time* is taken from the earliest file. The date stays as
+folder-sorting wrote it, since a shot after midnight but before the day boundary
+belongs to the previous day's folder, and rewriting the date would move the day
+out from under its month folder too.
+
+A folder whose media has gone — the grouper moved the images out, `__EXIF`
+stayed put — is dated from its earliest **sidecar** instead. A `._exif` is named
+after the image it described, so it carries that image's capture time:
+
+```text
+2026-07-25_(Sat) - __TO_SPLIT__(e=7)   ->   2026-07-25_(Sat)__06.19.06 - __TO_SPLIT__(e=7)
+```
+
+Without that fallback such a folder keeps a bare date, and two of them on one
+day collide on a single name — which is the whole reason the time is there.
+Media always wins where there is any; the sidecars are only fallen back to.
+
+Two kinds of folder keep their bracket verbatim and only gain the time: one
+whose tail carries something a human wrote after the marker, and one that is
+empty — the emptied day folders parked in `__EMPTY_SUBFOLDERS` have their old
+count as the last thing they say about themselves. Labelled folders
+(`... - Lens tests`) are named by a human and are never touched at all.
+
+#### Reading the report
+
+Each rename prints as two lines whose prefixes are the same width, so the paths
+land in one column, closed by a faint rule. Everything the two paths share keeps
+the outcome's own colour; past the point where they part, the text going away is
+white and the text replacing it is red.
+
+```text
+        c:\__PHOTOS\2026\07. July\2026-07-01_(Wed)__13.07.11 - __TO_SPLIT__(i=129)
+    ->  c:\__PHOTOS\2026\07. July\2026-07-01_(Wed)__13.07.11 - __TO_SPLIT__(i=129_s=6)
+        --------------------------------------------------------------------------------
+```
+
+`--no-colour` drops the escape codes; `--quiet` drops the per-rename lines,
+leaving the summary.
+
+#### On a network target
+
+A mapped drive letter is a per-session alias that can be remapped between the
+moment a target is checked and the moment a file is renamed. The tool therefore
+resolves a mapped letter to its UNC once, up front, and works on the UNC
+(`--keep-drive-letter` opts out). It never follows reparse points — junctions,
+symlinks, mount points — and reports each one it refused; it re-checks that
+every directory it is about to scan is still inside the resolved root; it
+renames with `os.rename`, never `os.replace`, so an unexpected collision fails
+loudly instead of destroying the file it lands on; and it retries transient SMB
+failures instead of aborting a tree half-renamed. It handles no credentials of
+any kind — authenticating the share is the operating system's job.
 
 ## Safety Goals
 

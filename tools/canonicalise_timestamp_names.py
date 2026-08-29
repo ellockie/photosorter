@@ -22,14 +22,38 @@ both the time of their earliest file and the media counts::
     2026-07-15_(Wed) - 1. ######        ->  ..._(Wed)__09.12.53 - __TO_SPLIT__(i=111)
     2026-07-18_(Sat) - __TO_SPLIT__(i=6)  ->  ..._(Sat)__11.04.02 - __TO_SPLIT__(i=6)
 
+The time comes from the folder's earliest file, or -- when the grouper has
+moved the images out and left their "._exif" files behind -- from the earliest
+of those, since a sidecar is named after the image it described and carries its
+capture time.
+
 Only the *time* is taken from the earliest file; the date stays as
 folder-sorting wrote it, since a shot after midnight but before the day
 boundary belongs to the previous day's folder and rewriting the date would
-move the day out from under its month folder too. A folder already carrying
-the marker keeps its counts verbatim -- the grouper may be mid-review on it --
-and only gains the time. Labelled folders ("... - Lens tests") are already
-named by a human and are never touched. ``--skip-placeholders`` turns this
-half off and rewrites timestamps only.
+move the day out from under its month folder too. Labelled folders
+("... - Lens tests") are already named by a human and are never touched.
+``--skip-placeholders`` turns this half off and rewrites timestamps only.
+
+The counts of a folder already carrying the marker are rebuilt from what is on
+disk now, and gain two audit markers that say what the ``i``/``v`` counts do
+not account for::
+
+    ..._(Wed)__13.07.11 - __TO_SPLIT__(i=129)  ->  ..._(i=129_s=6)
+    2026-07-25_(Sat) - __TO_SPLIT__(i=7)       ->  ..._(Sat) - __TO_SPLIT__(e=7)
+
+``s`` counts the non-sidecar files below the top level -- videos routed into
+"__VIDEOS", RAWs, an already-split sub-event -- because the grouper GUI shows
+the top level only, so nothing down there is in front of the reviewer. ``e``
+counts the sidecars in the whole tree and is written only when that number
+does not match the media in the tree: one "._exif" per media file is the norm,
+and 7 sidecars beside 0 images means the day's photos left without them.
+
+Rebuilding a count means rewriting the whole tail, so it is done only for a
+tail of nothing but the marker and its bracket, and only for a folder that
+still holds something. Anything a human wrote after the marker, and the count
+on an emptied folder -- the last thing an "__EMPTY_SUBFOLDERS" record has to
+say about itself -- are left exactly as found, and those folders only gain the
+time.
 
 Neither grammar is redefined here. Both are loaded from the leaf modules that
 own them -- ``src/pipeline_stages/stamps.py`` and
@@ -76,6 +100,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -105,13 +130,67 @@ CHANGED, CONFLICT, FAILED, REFUSED, UNPARSEABLE = (
 COLOURS = {CHANGED: "\033[96m", CONFLICT: "\033[93m", FAILED: "\033[91m",
            REFUSED: "\033[93m", UNPARSEABLE: "\033[93m",
            "ok": "\033[92m", "warn": "\033[93m", "dim": "\033[90m",
+           # The halves of a rename that differ: what the name says now, and
+           # what will replace it.
+           "old": "\033[97m", "new": "\033[91m",
+           # Faint *and* grey: the rule between two renames has to be visible
+           # enough to group them and quiet enough to read straight past.
+           "rule": "\033[2;90m",
            "bold": "\033[1m", "off": "\033[0m"}
+
+# A rename prints as two lines carrying prefixes of equal width, so the old and
+# the new path land in one column and the eye can run straight down to the
+# character where they part.
+RENAME_FROM_PREFIX = "        "
+RENAME_TO_PREFIX = "    ->  "
+
+# Closing each pair with a rule is what keeps a long report legible: without
+# it, four adjacent paths are one block and the eye has to count to find which
+# two belong together. ASCII, because this prints to whatever console and code
+# page the machine happens to have.
+#
+# One width for every rule, rather than one that hugs each pair: a ragged right
+# edge down the report reads as content, and this is meant to read as nothing.
+# Resolved once, since the command is short-lived, and kept a column clear of
+# the edge so the rule cannot wrap into a line of its own.
+RENAME_RULE_CHAR = "-"
+RENAME_RULE_WIDTH = max(
+    20, shutil.get_terminal_size((100, 24)).columns - len(RENAME_FROM_PREFIX) - 1)
 
 
 def colourise(text, key, enabled):
-    if not enabled:
+    if not enabled or not text:
         return text
     return "%s%s%s" % (COLOURS.get(key, ""), text, COLOURS["off"])
+
+
+def rename_report(source, target, key, note, enabled):
+    """The two aligned lines of one rename, coloured at the point they part.
+
+    Everything the two paths share -- the whole folder above them, and however
+    much of the name survives -- keeps the outcome's own colour, so a wall of
+    renames still reads as CHANGED or CONFLICT at a glance. Past that point the
+    two lines disagree, and that is the only part worth reading: the text going
+    away is plain white, the text replacing it is red.
+
+    A faint rule closes the pair, so a long report reads as a list of renames
+    rather than a block of paths.
+    """
+    source, target = str(source), str(target)
+    shared = len(os.path.commonprefix([source, target]))
+
+    lines = [
+        RENAME_FROM_PREFIX + colourise(source[:shared], key, enabled)
+        + colourise(source[shared:], "old", enabled),
+        RENAME_TO_PREFIX + colourise(target[:shared], key, enabled)
+        + colourise(target[shared:], "new", enabled),
+    ]
+    if note:
+        lines[1] += "  " + colourise(note, key, enabled)
+
+    lines.append(RENAME_FROM_PREFIX + colourise(
+        RENAME_RULE_CHAR * RENAME_RULE_WIDTH, "rule", enabled))
+    return "\n".join(lines)
 
 
 def load_leaf_module(name, path):
@@ -176,9 +255,29 @@ class GroupingSettings:
     def __init__(self, config):
         self.placeholder = grouping.date_folder_suffix(config)
         self.image_exts, self.video_exts = grouping.extension_sets(config)
+        self.sidecar_exts = grouping.sidecar_extensions(config)
 
 
-def folder_media(folder, media_files, settings):
+def nested_files(folder):
+    """Every file below ``folder``'s top level, however deep.
+
+    ``os.walk`` rather than ``Path.rglob``, for the two reasons the rest of
+    this tool cares about: it takes the extended path, so a deep archive tree
+    does not silently come back short, and with ``followlinks=False`` it will
+    not descend a junction planted inside a day folder.
+    """
+    found = []
+    try:
+        walk = os.walk(extended_path(folder), followlinks=False)
+        next(walk, None)                      # the top level is the caller's
+        for directory, _subdirectories, names in walk:
+            found.extend(Path(directory) / name for name in names)
+    except OSError:
+        return []
+    return found
+
+
+def folder_media(top_level_files, nested, settings):
     """The media a day folder holds, preferring its top level.
 
     Top level first, because that is what the grouper GUI shows and therefore
@@ -190,41 +289,100 @@ def folder_media(folder, media_files, settings):
     Those are real days with real media, so fall back to the whole subtree
     rather than pretend the day is empty.
     """
-    media = grouping.select_media(media_files or (), settings.image_exts, settings.video_exts)
+    media = grouping.select_media(
+        top_level_files or (), settings.image_exts, settings.video_exts)
     if media:
         return media
-    try:
-        nested = [path for path in Path(folder).rglob("*") if path.is_file()]
-    except OSError:
-        return []
     return grouping.select_media(nested, settings.image_exts, settings.video_exts)
+
+
+def folder_audit(everything, nested, settings):
+    """``(sidecars, subfolder_files)`` for a day folder; ``None`` where silent.
+
+    Each is something the ``i``/``v`` counts do not account for, and each is
+    reported only when it has something to say:
+
+      * ``sidecars`` -- every "._exif" in the tree, but only when the count
+        does not match the media in that tree. One sidecar per media file is
+        the norm; any other number means a sidecar was orphaned when its image
+        moved, or an image arrived without one. ``e=0`` beside a folder full of
+        images is the loudest form of that, so zero is reported, not dropped.
+      * ``subfolder_files`` -- everything below the top level that is not a
+        sidecar, whenever there is any. The grouper GUI shows the top level
+        only, so nothing down there is in front of the reviewer.
+
+    An archive configured to keep no sidecars silences ``e`` outright: with no
+    extension to look for, a count of zero would be saying nothing.
+    """
+    media = grouping.select_media(everything, settings.image_exts, settings.video_exts)
+    sidecars = grouping.count_sidecars(everything, settings.sidecar_exts)
+    if not settings.sidecar_exts or sidecars == len(media):
+        sidecars = None
+
+    subfolder_files = sum(
+        1 for path in nested
+        if Path(path).suffix.lower() not in settings.sidecar_exts)
+
+    return sidecars, subfolder_files or None
+
+
+def _counts_may_be_rebuilt(tail, top_level_files, nested):
+    """Whether an existing ``__TO_SPLIT__`` tail may be recomputed.
+
+    It may not in two cases, and in both the folder keeps its tail verbatim
+    and only gains its time:
+
+      * the tail carries something besides the counts. Rebuilding rewrites the
+        whole tail, and would take a note somebody left there with it.
+      * the folder is empty. Then there is nothing to count and the rebuild
+        could only erase: the emptied day folders parked in
+        "__EMPTY_SUBFOLDERS" have their old count as the last thing they say
+        about themselves, and several of them share a date, so blanking the
+        counts would also collide four folders onto one name.
+    """
+    if not grouping.to_split_tail_is_only_counts(tail):
+        return False
+    return bool(top_level_files) or bool(nested)
 
 
 def canonical_placeholder_name(folder, name, media_files, settings):
     """Put a day folder onto the grouper's ``__TO_SPLIT__`` convention.
 
     Both halves of the name are brought up to date: the dated prefix gains the
-    time of the day's earliest file, and the legacy placeholder becomes the
-    marker with its media counts. The time itself comes from
-    ``grouping.with_earliest_time`` -- the same function the live
-    screenshot-grouping stage uses -- so this tool cannot drift from it.
+    time of the day's earliest file -- or, for a folder whose media has gone,
+    of the earliest sidecar left behind -- and the placeholder (or the marker
+    an earlier run left) becomes the marker with counts rebuilt from what is on
+    disk now, carrying whatever audit markers ``folder_audit`` found. The time
+    itself comes from ``grouping.with_earliest_time`` -- the same function the
+    live screenshot-grouping stage uses -- so this tool cannot drift from it.
     """
     base = grouping.strip_placeholder(name, settings.placeholder)
-    if base is not None:
-        media = folder_media(folder, media_files, settings)
-        images, videos = grouping.count_media(
-            media, settings.image_exts, settings.video_exts)
-        return grouping.to_split_name(grouping.with_earliest_time(base, media), images, videos)
-
-    existing = grouping.split_to_split_name(name)
-    if existing is not None:
-        # Already marked: give it the time, but leave the counts exactly as
-        # they are -- the grouper may be part-way through that folder.
+    tail = None
+    if base is None:
+        existing = grouping.split_to_split_name(name)
+        if existing is None:
+            return name                # labelled by a human, or not a day folder
         base, tail = existing
-        media = folder_media(folder, media_files, settings)
-        return grouping.with_earliest_time(base, media) + tail
 
-    return name
+    nested = nested_files(folder)
+    everything = list(media_files or ()) + nested
+    media = folder_media(media_files, nested, settings)
+
+    # Falling back to the sidecars is what dates a day the grouper has emptied
+    # of images: the "._exif" files stay behind, and each is named after the
+    # image it described, so it carries that image's capture time. Without
+    # this such a folder keeps a bare date, and two of them on one day collide
+    # on a single name -- which is the whole reason the time is there.
+    dated = grouping.with_earliest_time(
+        base, media or grouping.select_sidecars(everything, settings.sidecar_exts))
+
+    if tail is not None and not _counts_may_be_rebuilt(tail, media_files, nested):
+        return dated + tail
+
+    images, videos = grouping.count_media(
+        media, settings.image_exts, settings.video_exts)
+    sidecars, subfolder_files = folder_audit(everything, nested, settings)
+    return grouping.to_split_name(dated, images, videos, sidecars, subfolder_files)
 
 
 # --------------------------------------------------------------------------
@@ -438,24 +596,23 @@ def apply_plan(entries, apply_changes, attempts, delay_seconds, journal, report,
         if not differs_only_by_case(path.name, target.name):
             if os.path.lexists(extended_path(target)):
                 counters[CONFLICT] += 1
-                report(CONFLICT, "%s\n        -> %s already exists; left alone"
-                       % (path, target.name))
+                report(CONFLICT, path, target, "already exists; left alone")
                 continue
 
         if not apply_changes:
             counters[CHANGED] += 1
-            report(CHANGED, "%s\n        -> %s" % (path, target.name))
+            report(CHANGED, path, target)
             continue
 
         try:
             rename_path(path, target, attempts, delay_seconds)
         except OSError as error:
             counters[FAILED] += 1
-            report(FAILED, "%s\n        -> %s failed: %s" % (path, target.name, error))
+            report(FAILED, path, target, "failed: %s" % error)
             continue
 
         counters[CHANGED] += 1
-        report(CHANGED, "%s\n        -> %s" % (path, target.name))
+        report(CHANGED, path, target)
         if journal is not None:
             journal.write(json.dumps({"from": str(path), "to": str(target)}) + "\n")
             journal.flush()          # an interrupted network run must stay undoable
@@ -493,15 +650,15 @@ def run_undo(journal_path, apply_changes, attempts, delay_seconds, report):
             failures += 1
             continue
         if not apply_changes:
-            report(CHANGED, "%s\n        -> %s" % (source, Path(target).name))
+            report(CHANGED, source, target)
             continue
         try:
             rename_path(source, target, attempts, delay_seconds)
         except OSError as error:
             failures += 1
-            report(FAILED, "%s\n        -> %s failed: %s" % (source, target, error))
+            report(FAILED, source, target, "failed: %s" % error)
         else:
-            report(CHANGED, "%s\n        -> %s" % (source, Path(target).name))
+            report(CHANGED, source, target)
 
     report("bold", "%d rename(s) in journal, %d could not be reverted."
            % (len(moves), failures))
@@ -566,10 +723,14 @@ def main(argv=None):
     colour = not args.no_colour and sys.stdout.isatty()
     attempts, delay_seconds = configured_retry()
 
-    def report(key, message):
+    def report(key, message, target=None, note=""):
+        """One report line, or -- when ``target`` is given -- one rename pair."""
         if args.quiet and key not in ("warn", "bold"):
             return
-        print(colourise(message, key, colour))
+        if target is None:
+            print(colourise(message, key, colour))
+        else:
+            print(rename_report(message, target, key, note, colour))
 
     if args.undo:
         return run_undo(args.undo, args.apply, attempts, delay_seconds, report)
