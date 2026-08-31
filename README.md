@@ -4,18 +4,21 @@ Windows-only photo and video sorting pipeline for moving media out of Dropbox Ca
 
 The project is currently in a transition period. The default batch file still runs the legacy command-line sorter for safety, while a new pluggable pipeline and local dashboard are being introduced under the OpenSpec change `pluggable-pipeline-architecture`.
 
-## Archive Constitution
+## Archive Standard
 
-**[`ARCHIVE_CONSTITUTION.md`](ARCHIVE_CONSTITUTION.md) is the authority on the shape
-of the archive on disk** — the year/month/event path, the dated-folder and file
-naming grammars, the closed set of `__` subfolders allowed inside an event folder,
-and the rule that each of those has exactly one definition in the code. Read it
-before writing any stage or tool that creates, moves, renames or scans archive
-folders. The sections of this README below describe how the current code
-implements it; where the two disagree, the constitution is the intent and the code
-is the bug.
+**[`ARCHIVE_STANDARD.md`](ARCHIVE_STANDARD.md) defines the target shape of the
+archive on disk** — the year/month/event path, the dated-folder and file naming
+grammars, container marking, the closed set of `__` subfolders, and sidecar
+behaviour. It is written to be handed to third-party tools (group renamers,
+viewers, dedupers) as the contract they implement against: §8 is a machine-readable
+YAML block carrying every regex, folder name and marker.
 
-It is currently a **draft under review** and is not enforced anywhere.
+Read it before writing any stage or tool that creates, moves, renames or scans
+archive folders. The sections below describe what the current code does; where the
+two disagree, the standard is the intent and the code is the gap.
+
+Currently **v0.1, draft, not enforced anywhere** — and existing tools are not
+assumed compliant.
 
 ## Current Default Behaviour
 
@@ -58,8 +61,8 @@ c:\__PHOTOS\____TO_SORT\
 
 ## Naming Convention
 
-The rules are stated in [`ARCHIVE_CONSTITUTION.md`](ARCHIVE_CONSTITUTION.md)
-(Articles 2 and 6); what follows is how the current code writes them.
+The rules are stated in [`ARCHIVE_STANDARD.md`](ARCHIVE_STANDARD.md) §2 (folders)
+and §5 (files); what follows is how the current code writes them.
 
 Photos are renamed from EXIF metadata using the legacy format:
 
@@ -152,10 +155,14 @@ The intake folders will accept not only loose files but also folders containing 
 Final event folders use a standardized `__` prefix subfolder set (draft, under review): `__2_SHARE`, `__3D`, `___OTHER`, `__DUPLICATES`, `__EDITED`, `__EXIF`, `__EXPORTED`, `__EXTRACTED`, `__EXTRACTED_VIDEOS`, `__GEOLOCATIONS`, `__HASHES`, `__PANORAMAS`, `__PEOPLE`, `__RAW`, `__RESIZED`, `__SHARED`, `__VIDEOS`. The new pipeline writes `__EXIF`/`__RAW`; the `##   EXIFs   ##` / `##   RAWs   ##` names remain only in legacy CLI output.
 
 The set above is what `DEFAULT_TAXONOMY` holds today.
-[`ARCHIVE_CONSTITUTION.md`](ARCHIVE_CONSTITUTION.md) Article 4 is the list under
-review, and it differs — `__VIDEOS_TO_RENAME` is proposed, `__VIDEOS` and
-`__EXTRACTED` are absent from the proposal. The open questions are listed there;
-until they are settled the code keeps the set above.
+[`ARCHIVE_STANDARD.md`](ARCHIVE_STANDARD.md) §4 is the list under review, and it
+differs — `__VIDEOS_TO_RENAME` is proposed, `__VIDEOS` and `__EXTRACTED` are absent
+from the proposal. The open questions are listed there; until they are settled the
+code keeps the set above.
+
+The standard also proposes a `__CONTAINER__` marker (§3) on any dated folder that
+holds dated child folders, so a container is distinguishable from a leaf by regex.
+Nothing writes it yet.
 
 ## Dashboard Runner
 
@@ -370,6 +377,109 @@ renames with `os.rename`, never `os.replace`, so an unexpected collision fails
 loudly instead of destroying the file it lands on; and it retries transient SMB
 failures instead of aborting a tree half-renamed. It handles no credentials of
 any kind — authenticating the share is the operating system's job.
+
+### Restructuring an existing archive
+
+`_restructure_archive.bat` at the repo root — or `_restructure_archive.ps1`, the
+same thing for PowerShell — is the front door for restructuring work, over
+`tools/restructure_archive.py`. It runs the five steps that turn a
+tree written by an older Photosorter, an older grouper or a third-party tool
+into the shape [`ARCHIVE_STANDARD.md`](ARCHIVE_STANDARD.md) describes, in the one
+order that makes sense, over one target, under one set of safety rules:
+
+| Step | What it does |
+| --- | --- |
+| 1 | Canonicalise names (the tool above) |
+| 2 | Open the grouper GUI on every `__TO_SPLIT__` folder, one at a time |
+| 3 | Canonicalise names again |
+| 4 | Check compliance with the archive standard — **not implemented** |
+| 5 | Fix compliance with the archive standard — **not implemented** |
+
+```powershell
+_restructure_archive.bat                                        # dry run over <root_folder>\<year>
+_restructure_archive.bat --apply
+_restructure_archive.bat "d:\__PHOTOS_BACKUP" --year 2024 --apply
+_restructure_archive.bat "\\NAS\PhotoBackup" --year 2024 --apply
+_restructure_archive.bat --list-to-split                        # just the folders step 2 would open
+_restructure_archive.bat --steps 2 --apply                      # only the grouping pass
+```
+
+The `.ps1` takes the same arguments and returns the same exit codes, and adds
+`-NoPause`:
+
+```powershell
+.\_restructure_archive.ps1 "d:\__PHOTOS_BACKUP" --year 2024 --apply
+.\_restructure_archive.ps1 --steps 1,3 -NoPause
+```
+
+Two things it does that the `.bat` does not have to. PowerShell splits an
+unquoted `1,3` into an array *before* the script sees it, and splatting an array
+to a native command passes each element separately — so `--steps 1,3` would
+arrive as `--steps 1` plus a stray `3`, which argparse would quietly take for the
+target path. The script joins it back up, so both shells behave the same. And it
+pauses at the end only when there is a console to press a key at, so a scheduled
+or piped run cannot hang waiting for one.
+
+Double-clicking a `.ps1` opens it in an editor rather than running it, and an
+unsigned script is blocked under the default execution policy, so a shortcut
+wants the long form:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "<path>\_restructure_archive.ps1" --apply
+```
+
+**Nothing is changed without `--apply`.** Exit codes match the canonicaliser's:
+`0` nothing left to do, `1` changes pending or failures, `2` error. An applied
+run journals what each step did and which folders were opened; the canonicaliser
+writes its own rename journal per year tree, and `--undo` on *that* tool replays
+those renames backwards. Step 2 is not undoable — what the GUI does inside a
+folder is your own work.
+
+**Why canonicalise twice.** Step 1 is what makes step 2 possible: the grouper is
+opened on folders carrying the `__TO_SPLIT__` marker, and a legacy `- 1. ######`
+day does not carry it until the canonicaliser has rewritten the tail. Step 3 is
+what makes step 2 durable: the grouper writes on its own convention and rebuilds
+a count bracket from scratch every time it touches a folder, dropping the `e`/`s`
+audit markers and stamping new sub-event folders in whatever shape it favours.
+The second pass folds all of that back onto the canonical form.
+
+**Steps 4 and 5 are placeholders.** The standard is v0.1, a draft, enforced by
+nothing — its `S4` subfolder set and its `T8` "defined more than once" list carry
+open questions whose answers change what "compliant" means. Both steps announce
+themselves and do nothing; the plumbing is there so implementing them is a change
+to one function each, against "The fixing tool" in §7 and the machine-readable
+definitions in §8.
+
+#### Targets
+
+The default is the canonicaliser's: the year folder under `paths.root_folder`,
+chosen with `--year`. Beyond that, anything can be named — a local disk, a UNC
+path, a folder deep inside a tree. Naming an **archive root** (a folder holding
+year folders) restricts the run to those year trees, because `P1` and §0 put
+everything else at a root — `____INGEST_PIPELINE`, `____TO_SORT` — out of scope:
+a tool that walked into the ingest pipeline would be renaming files still in
+flight.
+
+A target that is neither a year folder, nor inside one, nor holds any is
+**refused**, so a mistyped path or a bare drive letter stops before the first
+rename rather than after it. `--force-target` overrides that, deliberately
+awkwardly.
+
+#### On a network target
+
+Everything the canonicaliser does (above), plus: the run asks for a typed
+confirmation before writing to a network location, and refuses to apply at all
+with no terminal to ask at unless `--yes` says the run is unattended. Every
+folder is re-checked immediately before the GUI is opened on it — still inside
+the resolved root, still not a reparse point, still under that name, since the
+previous window in the same batch may have split it away. Folder names reach the
+GUI as an argument vector, never through a shell.
+
+The grouper itself will **not be run off the network**: if either
+`screenshot_grouping.python` or `.project_path` sits on a share or a mapped
+drive the run stops, because an executable on a share is an executable somebody
+else can replace between one folder and the next. `--allow-network-tool`
+overrides it.
 
 ## Safety Goals
 

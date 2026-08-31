@@ -1,11 +1,11 @@
 # SRC — Application Source
 
-> **Archive layout is governed by `../ARCHIVE_CONSTITUTION.md`** (draft, under
-> review, not enforced). Any change to a stage that creates, moves, renames or
-> scans archive folders must be read against it — especially its Article 4 (the
-> closed set of `__` subfolders) and Article 8 (one definition per rule: the
-> taxonomy lives in `pipeline_stages/taxonomy.py`, the timestamp grammar in
-> `pipeline_stages/stamps.py`, the folder-tail grammar in
+> **Target archive layout is defined by `../ARCHIVE_STANDARD.md`** (v0.1, draft,
+> not enforced). Any change to a stage that creates, moves, renames or scans
+> archive folders must be read against it — especially §3 (`__CONTAINER__`
+> marking), §4 (the closed set of `__` subfolders) and T8 (one definition per
+> rule: the taxonomy lives in `pipeline_stages/taxonomy.py`, the timestamp grammar
+> in `pipeline_stages/stamps.py`, the folder-tail grammar in
 > `pipeline_stages/grouping_names.py`, and nowhere else).
 
 ## OVERVIEW

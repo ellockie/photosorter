@@ -4,21 +4,25 @@
 **Commit:** ba189bd
 **Branch:** master
 
-## READ FIRST — THE ARCHIVE CONSTITUTION
+## READ FIRST — THE ARCHIVE STANDARD
 
-**`ARCHIVE_CONSTITUTION.md` (repo root) is the authority on the shape of the photo
-+ video archive on disk.** Before writing or changing any code that creates, moves,
-renames or scans archive folders, read it. It defines:
+**`ARCHIVE_STANDARD.md` (repo root) defines the target shape of the photo + video
+archive on disk.** Read it before writing or changing any code that creates, moves,
+renames or scans archive folders. It defines:
 
-- the canonical path `ROOT/<YYYY>/<NN>. <Month>/<dated folder>/…` and what may sit
-  at each level
+- the path `ROOT/<YYYY>/<NN>. <Month>/<dated folder>/…` and what may sit at each level
 - the dated-folder and media-file naming grammars, and the historical forms still read
-- the **closed** set of `__`-prefixed subfolders allowed inside an event folder
-- nesting: a dated folder may contain further dated folders, to any depth
-- **one definition per rule** — taxonomy, regexes and constants each live in exactly
-  one module, listed in its Article 8. Never restate one in a stage.
+- `__CONTAINER__` marking on any dated folder holding dated children
+- the **closed** set of `__`-prefixed subfolders allowed inside a dated folder
+- sidecar naming and pairing
+- **one definition per rule** (T8) — taxonomy, regexes and constants each live in
+  exactly one module. Never restate one in a stage.
 
-It is currently a **draft under review** and is not enforced. Do not add
+Rules carry stable IDs (`P1`, `N3`, `C2`, `S1`, `F5`, `X4`, `T2`); cite the ID.
+§8 is the machine-readable YAML form — parse that, not the prose.
+
+It is **v0.1, draft, not enforced**, and it is also written to be handed to
+third-party tools, so it describes the target, not the current code. Do not add
 enforcement, and do not "fix" the archive or the taxonomy to match it, until the
 open questions in it are answered.
 
@@ -55,6 +59,9 @@ photosorter — Python 3.13 photo processing pipeline: rename, sort, and organis
 | Camera-upload separation | `src/move_other_images.py` | Uses pyexiftool wrapper |
 | Photo selection/copying | `src/photo_folder_copier.py` | Marker-based selective copy |
 | HDR cluster detection | `src/sortHDRfiles (cleaner).py` | Python 2 legacy, standalone |
+| Archive maintenance tools | `tools/` | Stdlib-only; run on a bare interpreter, load name grammars by file path |
+| Restructuring an archive | `tools/restructure_archive.py` | The five-step front door; `_restructure_archive.bat` / `.ps1` at the root |
+| Where the grouper GUI lives | `src/pipeline_stages/grouper_launch.py` | Leaf module: install detection + command line, one definition |
 | Tests | `tests/test_organise_date_folders.py` | Pytest, 6 cases |
 
 ## CONVENTIONS
@@ -82,6 +89,12 @@ photosorter — Python 3.13 photo processing pipeline: rename, sort, and organis
 ```bash
 # Launch full pipeline
 _photosorter.bat
+
+# Restructure an existing archive: canonicalise -> group -> canonicalise
+# -> check/fix against ARCHIVE_STANDARD.md (last two not implemented).
+# Dry run by default. _restructure_archive.ps1 is the same, for PowerShell.
+_restructure_archive.bat
+_restructure_archive.bat "d:\__PHOTOS_BACKUP" --year 2024 --apply
 
 # Run tests
 poetry run pytest
