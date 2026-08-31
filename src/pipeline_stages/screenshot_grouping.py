@@ -1,39 +1,16 @@
 import subprocess
 from pathlib import Path
 
-from src.core import \
-    PipelineContext, \
-    PipelineStage
+from src.core import     PipelineContext,     PipelineStage
 from src.pipeline_stages.legacy import date_folder_suffix
-from src.pipeline_stages.grouping_names import \
-    TO_SPLIT_MARKER as _TO_SPLIT_MARKER, \
-    count_media as _count_media, \
-    extension_sets as _extension_sets, \
-    select_media as _select_media, \
-    to_split_name as _to_split_name, \
-    with_earliest_time as _with_earliest_time
+from src.pipeline_stages.grouper_launch import     grouper_command as _grouper_command,     grouper_install,     run_grouper as _run_grouper,     stderr_tail as _stderr_tail
+from src.pipeline_stages.grouping_names import     TO_SPLIT_MARKER as _TO_SPLIT_MARKER,     count_media as _count_media,     extension_sets as _extension_sets,     select_media as _select_media,     to_split_name as _to_split_name,     with_earliest_time as _with_earliest_time
 
-
-def _stderr_tail(stderr: str | None, limit: int = 5) -> list[str]:
-    """The last few non-empty stderr lines, for the failure log."""
-    if not stderr:
-        return []
-    lines = [line.rstrip() for line in stderr.splitlines() if line.strip()]
-    return lines[-limit:]
-
-
-def grouper_install(settings: dict) -> tuple[Path, Path] | None:
-    """``(python_exe, project_path)`` of the external grouper, or None.
-
-    Module-level rather than a method because the dashboard offers the same
-    launch from the grouping-review prompt, and both must agree on what counts
-    as "installed".
-    """
-    python_exe = Path(settings.get("python", ""))
-    project_path = Path(settings.get("project_path", ""))
-    if not python_exe.is_file() or not (project_path / "main.py").is_file():
-        return None
-    return python_exe, project_path
+# grouper_install is re-exported: the dashboard (src/server.py) imports it
+# from here. Its definition, and the command line, moved to the leaf module
+# grouper_launch.py so tools/restructure_archive.py can load them by file path
+# without importing this package -- see that module's docstring.
+__all__ = ["ScreenshotGroupingStage", "grouper_install", "launch_grouper"]
 
 
 def launch_grouper(context: PipelineContext, folder: Path,
@@ -43,15 +20,9 @@ def launch_grouper(context: PipelineContext, folder: Path,
     Returns True when it exited cleanly; every failure is logged rather than
     raised, so one bad folder cannot take the rest of a batch down with it.
     """
-    command = [str(python_exe), str(project_path / "main.py"), str(folder)]
     context.log(f"Launching grouper GUI on {folder.name}")
     try:
-        result = subprocess.run(
-            command,
-            cwd=str(project_path),
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+        result = _run_grouper(python_exe, project_path, folder)
     except OSError as error:
         context.log(f"  ! could not launch grouper for {folder.name}: {error}")
         return False
@@ -62,7 +33,8 @@ def launch_grouper(context: PipelineContext, folder: Path,
         context.log(
             f"  ! grouper exited with code {result.returncode} for {folder.name}"
         )
-        context.log(f"    command: {subprocess.list2cmdline(command)}")
+        context.log("    command: %s" % subprocess.list2cmdline(
+            _grouper_command(python_exe, project_path, folder)))
         for line in _stderr_tail(result.stderr):
             context.log(f"    {line}")
         return False
