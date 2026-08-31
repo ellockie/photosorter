@@ -1,5 +1,11 @@
 # src/common — Shared Logic
 
+> **Archive layout is governed by `../../ARCHIVE_CONSTITUTION.md`** (draft, under
+> review, not enforced). `get_file_name()` and `create_date_folder()` here write
+> names the constitution describes (Articles 1, 2 and 6) — this is the legacy CLI
+> half of the pipeline, so its forms are the *historical* ones the constitution
+> still reads but no longer prescribes writing.
+
 ## OVERVIEW
 
 Core logic layer: EXIF extraction, file renaming, path building, folder creation, duplicate detection. Imported by all major modules. ~830 lines in `common.py`.

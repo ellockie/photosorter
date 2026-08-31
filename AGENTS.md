@@ -4,6 +4,24 @@
 **Commit:** ba189bd
 **Branch:** master
 
+## READ FIRST — THE ARCHIVE CONSTITUTION
+
+**`ARCHIVE_CONSTITUTION.md` (repo root) is the authority on the shape of the photo
++ video archive on disk.** Before writing or changing any code that creates, moves,
+renames or scans archive folders, read it. It defines:
+
+- the canonical path `ROOT/<YYYY>/<NN>. <Month>/<dated folder>/…` and what may sit
+  at each level
+- the dated-folder and media-file naming grammars, and the historical forms still read
+- the **closed** set of `__`-prefixed subfolders allowed inside an event folder
+- nesting: a dated folder may contain further dated folders, to any depth
+- **one definition per rule** — taxonomy, regexes and constants each live in exactly
+  one module, listed in its Article 8. Never restate one in a stage.
+
+It is currently a **draft under review** and is not enforced. Do not add
+enforcement, and do not "fix" the archive or the taxonomy to match it, until the
+open questions in it are answered.
+
 ## OVERVIEW
 
 photosorter — Python 3.13 photo processing pipeline: rename, sort, and organise digital photos by EXIF metadata. Uses exiftool for metadata extraction and Poetry for dependency management. Windows-only.

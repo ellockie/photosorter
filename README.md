@@ -4,6 +4,19 @@ Windows-only photo and video sorting pipeline for moving media out of Dropbox Ca
 
 The project is currently in a transition period. The default batch file still runs the legacy command-line sorter for safety, while a new pluggable pipeline and local dashboard are being introduced under the OpenSpec change `pluggable-pipeline-architecture`.
 
+## Archive Constitution
+
+**[`ARCHIVE_CONSTITUTION.md`](ARCHIVE_CONSTITUTION.md) is the authority on the shape
+of the archive on disk** — the year/month/event path, the dated-folder and file
+naming grammars, the closed set of `__` subfolders allowed inside an event folder,
+and the rule that each of those has exactly one definition in the code. Read it
+before writing any stage or tool that creates, moves, renames or scans archive
+folders. The sections of this README below describe how the current code
+implements it; where the two disagree, the constitution is the intent and the code
+is the bug.
+
+It is currently a **draft under review** and is not enforced anywhere.
+
 ## Current Default Behaviour
 
 Run:
@@ -44,6 +57,9 @@ c:\__PHOTOS\____TO_SORT\
 ```
 
 ## Naming Convention
+
+The rules are stated in [`ARCHIVE_CONSTITUTION.md`](ARCHIVE_CONSTITUTION.md)
+(Articles 2 and 6); what follows is how the current code writes them.
 
 Photos are renamed from EXIF metadata using the legacy format:
 
@@ -134,6 +150,12 @@ The intake folders will accept not only loose files but also folders containing 
 ### Planned: Event Folder Taxonomy
 
 Final event folders use a standardized `__` prefix subfolder set (draft, under review): `__2_SHARE`, `__3D`, `___OTHER`, `__DUPLICATES`, `__EDITED`, `__EXIF`, `__EXPORTED`, `__EXTRACTED`, `__EXTRACTED_VIDEOS`, `__GEOLOCATIONS`, `__HASHES`, `__PANORAMAS`, `__PEOPLE`, `__RAW`, `__RESIZED`, `__SHARED`, `__VIDEOS`. The new pipeline writes `__EXIF`/`__RAW`; the `##   EXIFs   ##` / `##   RAWs   ##` names remain only in legacy CLI output.
+
+The set above is what `DEFAULT_TAXONOMY` holds today.
+[`ARCHIVE_CONSTITUTION.md`](ARCHIVE_CONSTITUTION.md) Article 4 is the list under
+review, and it differs — `__VIDEOS_TO_RENAME` is proposed, `__VIDEOS` and
+`__EXTRACTED` are absent from the proposal. The open questions are listed there;
+until they are settled the code keeps the set above.
 
 ## Dashboard Runner
 
@@ -303,8 +325,22 @@ Media always wins where there is any; the sidecars are only fallen back to.
 Two kinds of folder keep their bracket verbatim and only gain the time: one
 whose tail carries something a human wrote after the marker, and one that is
 empty — the emptied day folders parked in `__EMPTY_SUBFOLDERS` have their old
-count as the last thing they say about themselves. Labelled folders
-(`... - Lens tests`) are named by a human and are never touched at all.
+count as the last thing they say about themselves.
+
+A folder somebody has named gets the same dated half and nothing else. The
+label is their writing and is kept verbatim — only the *first* ` - ` separates
+it, so `- Lens tests - flowers` survives whole — and it never gains counts, a
+bracket being the mark of a folder still awaiting review. The one thing it does
+shed is the legacy number folder-sorting left in front of it:
+
+```text
+2018-10-14_(Sun) - 1. Natsumi Kuroda in Burnham Beeches
+2018-10-14_(Sun)__17.28.25 - Natsumi Kuroda in Burnham Beeches
+```
+
+That `1.` never counted anything — it was hard-coded into the `- 1. ######`
+suffix, and a human naming the folder typed over the `######` and left it
+standing.
 
 #### Reading the report
 
