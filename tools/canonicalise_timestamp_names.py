@@ -30,9 +30,13 @@ capture time.
 Only the *time* is taken from the earliest file; the date stays as
 folder-sorting wrote it, since a shot after midnight but before the day
 boundary belongs to the previous day's folder and rewriting the date would
-move the day out from under its month folder too. Labelled folders
-("... - Lens tests") are already named by a human and are never touched.
-``--skip-placeholders`` turns this half off and rewrites timestamps only.
+move the day out from under its month folder too.
+
+A folder somebody has named ("... - Lens tests") gets the same dated half and
+nothing else: the label is their writing and is kept verbatim, bar the legacy
+number folder-sorting left in front of it ("- 1. Trip" becomes "- Trip"), and
+it gets no counts, a bracket being the mark of a folder still awaiting review.
+``--skip-placeholders`` turns this whole half off and rewrites timestamps only.
 
 The counts of a folder already carrying the marker are rebuilt from what is on
 disk now, and gain two audit markers that say what the ``i``/``v`` counts do
@@ -345,36 +349,58 @@ def _counts_may_be_rebuilt(tail, top_level_files, nested):
     return bool(top_level_files) or bool(nested)
 
 
-def canonical_placeholder_name(folder, name, media_files, settings):
-    """Put a day folder onto the grouper's ``__TO_SPLIT__`` convention.
+def dating_files(media, everything, settings):
+    """What a folder's time is read off: its media, else the sidecars.
 
-    Both halves of the name are brought up to date: the dated prefix gains the
-    time of the day's earliest file -- or, for a folder whose media has gone,
-    of the earliest sidecar left behind -- and the placeholder (or the marker
-    an earlier run left) becomes the marker with counts rebuilt from what is on
-    disk now, carrying whatever audit markers ``folder_audit`` found. The time
-    itself comes from ``grouping.with_earliest_time`` -- the same function the
-    live screenshot-grouping stage uses -- so this tool cannot drift from it.
+    Falling back to the sidecars is what dates a day the grouper has emptied of
+    images: the "._exif" files stay behind, and each is named after the image
+    it described, so it carries that image's capture time. Without this such a
+    folder keeps a bare date, and two of them on one day collide on a single
+    name -- which is the whole reason the time is there.
     """
+    return media or grouping.select_sidecars(everything, settings.sidecar_exts)
+
+
+def canonical_event_folder_name(folder, name, media_files, settings):
+    """The canonical name of one event folder, whatever shape it arrived in.
+
+    Every event folder gets the same dated half: the prefix gains the time of
+    its earliest file, or of the earliest sidecar left behind when the media
+    has gone. That time comes from ``grouping.with_earliest_time`` -- the same
+    function the live screenshot-grouping stage uses -- so this tool cannot
+    drift from it.
+
+    What follows the date depends on what the folder is:
+
+      * a legacy "- 1. ######" placeholder, or the marker an earlier run left,
+        becomes the ``__TO_SPLIT__`` marker with its counts rebuilt from what
+        is on disk now and whatever audit markers ``folder_audit`` found;
+      * a label somebody wrote is kept verbatim, bar the legacy number in front
+        of it, and gets no counts at all -- a bracket says a folder is still
+        waiting to be reviewed, and a named one is not;
+      * anything else -- a month folder, a folder with no date -- is returned
+        untouched.
+    """
+    tail = label = None
     base = grouping.strip_placeholder(name, settings.placeholder)
-    tail = None
     if base is None:
-        existing = grouping.split_to_split_name(name)
-        if existing is None:
-            return name                # labelled by a human, or not a day folder
-        base, tail = existing
+        marked = grouping.split_to_split_name(name)
+        if marked is not None:
+            base, tail = marked
+        else:
+            labelled = grouping.split_labelled_name(name)
+            if labelled is None:
+                return name
+            base, label = labelled
 
     nested = nested_files(folder)
     everything = list(media_files or ()) + nested
     media = folder_media(media_files, nested, settings)
-
-    # Falling back to the sidecars is what dates a day the grouper has emptied
-    # of images: the "._exif" files stay behind, and each is named after the
-    # image it described, so it carries that image's capture time. Without
-    # this such a folder keeps a bare date, and two of them on one day collide
-    # on a single name -- which is the whole reason the time is there.
     dated = grouping.with_earliest_time(
-        base, media or grouping.select_sidecars(everything, settings.sidecar_exts))
+        base, dating_files(media, everything, settings))
+
+    if label is not None:
+        return dated + grouping.LABEL_SEPARATOR + grouping.strip_label_numbering(label)
 
     if tail is not None and not _counts_may_be_rebuilt(tail, media_files, nested):
         return dated + tail
@@ -567,7 +593,7 @@ def plan_for(path, media_files=None, grouping_settings=None):
     name = Path(path).name
     wanted = canonical_name(name)
     if grouping_settings is not None and media_files is not None:
-        wanted = canonical_placeholder_name(path, wanted, media_files, grouping_settings)
+        wanted = canonical_event_folder_name(path, wanted, media_files, grouping_settings)
     if wanted == name:
         return None
     return Path(path).with_name(wanted)
@@ -708,8 +734,8 @@ def build_parser():
     parser.add_argument("--undo", default=None, metavar="JOURNAL",
                         help="revert the renames recorded in a journal")
     parser.add_argument("--skip-placeholders", action="store_true",
-                        help='rewrite timestamps only; leave " - 1. ######" '
-                             "event folders alone")
+                        help="rewrite timestamps only; leave event-folder "
+                             "names alone")
     parser.add_argument("--keep-drive-letter", action="store_true",
                         help="do not pin a mapped network drive to its UNC")
     parser.add_argument("--quiet", action="store_true",

@@ -297,7 +297,7 @@ def test_the_folder_date_survives_a_file_past_the_day_boundary(tmp_path):
     assert (year / "2026-05-31_(Sun)__00.49.28 - __TO_SPLIT__(i=1)").is_dir()
 
 
-def test_a_labelled_folder_is_never_touched(tmp_path):
+def test_a_labelled_folder_that_is_already_canonical_is_untouched(tmp_path):
     year = tmp_path / "2026"
     _placeholder_folder(year, "2026-07-24_(Fri)__18.34.56 - Lens tests",
                         [_stamped("2026-07-24_(Fri)", "18.34.56")])
@@ -305,6 +305,61 @@ def test_a_labelled_folder_is_never_touched(tmp_path):
     assert tool.main([str(year), "--apply", "--no-colour"]) == 0
 
     assert (year / "2026-07-24_(Fri)__18.34.56 - Lens tests").is_dir()
+
+
+def test_a_labelled_folder_gains_the_time_and_keeps_its_label(tmp_path):
+    # The dated half is the tool's business wherever it appears; the label is
+    # somebody's writing and survives byte for byte.
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-24_(Fri) - Lens tests - flowers",
+                        [_stamped("2026-07-24_(Fri)", "18.34.56"),
+                         _stamped("2026-07-24_(Fri)", "09.12.53")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    # Split on the first separator only, so a label carrying one survives whole.
+    assert (year / "2026-07-24_(Fri)__09.12.53 - Lens tests - flowers").is_dir()
+
+
+def test_a_labelled_folder_sheds_the_legacy_number(tmp_path):
+    # Folder-sorting wrote "- 1. ######" and a human typed over the "######",
+    # leaving the "1. " standing. It never counted anything.
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-24_(Fri) - 1. Natsumi in Burnham Beeches",
+                        [_stamped("2026-07-24_(Fri)", "17.28.25")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-24_(Fri)__17.28.25 - Natsumi in Burnham Beeches").is_dir()
+
+
+def test_a_labelled_folder_never_gets_counts(tmp_path):
+    # A bracket says a folder is still waiting to be reviewed. A named one is
+    # not, however much sits in its subfolders.
+    year = tmp_path / "2026"
+    folder = _placeholder_folder(year, "2026-07-24_(Fri) - Lens tests",
+                                 [_stamped("2026-07-24_(Fri)", "18.34.56")])
+    videos = folder / "__VIDEOS"
+    videos.mkdir()
+    (videos / _stamped("2026-07-24_(Fri)", "19.00.00", ".mp4")).write_text(
+        "x", encoding="utf-8")
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-24_(Fri)__18.34.56 - Lens tests").is_dir()
+
+
+def test_a_month_folder_is_not_mistaken_for_a_label(tmp_path):
+    # "10. October" has a number and no date, and must not be read as a name.
+    year = tmp_path / "2026"
+    month = year / "10. October"
+    _placeholder_folder(month, "2026-10-14_(Wed) - Kew Gardens",
+                        [_stamped("2026-10-14_(Wed)", "11.00.00")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert month.is_dir()
+    assert (month / "2026-10-14_(Wed)__11.00.00 - Kew Gardens").is_dir()
 
 
 def test_the_timestamp_and_the_placeholder_are_fixed_in_one_pass(tmp_path):
@@ -493,7 +548,7 @@ def test_the_tool_and_the_grouping_stage_build_the_same_name(tmp_path):
         # Unstamped names, so no time is added and the two must agree exactly.
         folder = _placeholder_folder(tmp_path / str(len(files) + images * 10),
                                      "2026-07-15_(Wed) - 1. ######", files)
-        assert tool.canonical_placeholder_name(
+        assert tool.canonical_event_folder_name(
             folder, folder.name, [folder / name for name in files], settings) == \
             to_split_name("2026-07-15_(Wed)", images, videos)
 

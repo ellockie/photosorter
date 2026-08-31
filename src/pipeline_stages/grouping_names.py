@@ -46,9 +46,11 @@ and a maintenance tool can load it by file path without dragging the whole
 pipeline -- exiftool, the dashboard, the converters -- in behind it. A regular
 ``from src.pipeline_stages.stamps import ...`` would defeat that: importing a
 submodule of ``src.pipeline_stages`` still runs that package's ``__init__``
-first, which imports every stage. So the one bit of ``stamps`` grammar this
-module needs -- recognising a *leading* timestamp -- is duplicated below
-rather than imported, same as ``DEFAULT_DATE_FOLDER_SUFFIX`` already was.
+first, which imports every stage. So the bits of ``stamps`` grammar this module
+needs -- recognising a *leading* timestamp, and a leading date -- are spelled
+out again below rather than imported, same as ``DEFAULT_DATE_FOLDER_SUFFIX``
+already was. They sit in one block with this module's own patterns, under the
+same fragment names ``stamps`` uses, so the two can be read side by side.
 """
 
 import datetime
@@ -56,6 +58,9 @@ import re
 from pathlib import Path
 
 TO_SPLIT_MARKER = "__TO_SPLIT__"
+
+# What stands between a folder's dated half and whatever it is called.
+LABEL_SEPARATOR = " - "
 
 # Matches config.json legacy.date_folder_suffix; repeated here so the module
 # stays loadable with no config in hand.
@@ -68,11 +73,38 @@ DEFAULT_SIDECAR_EXTENSIONS = ("._exif",)
 # the media the grouper shows; "e"/"s" are the audit markers described above.
 COUNT_LETTERS = ("i", "v", "e", "s")
 
-# Matches stamps.LEADING_STAMP_RE: a leading "YYYY-MM-DD[_(Ddd)]_HH.MM.SS".
-# Duplicated rather than imported -- see the module docstring.
-_LEADING_STAMP_RE = re.compile(
-    r"^(\d{4})-(\d{2})-(\d{2})(?:[ _]+\([A-Za-z]{3}\))?[ _]+(\d{2})\.(\d{2})\.(\d{2})"
+# Every pattern this module matches on, in one place and built from named
+# fragments, the way stamps.py builds its own.
+#
+# The first three mirror stamps.DATE_PATTERN, stamps.DATE_TIME_SEPARATOR_PATTERN
+# and stamps.STAMP_CAPTURE_PATTERN under the same names, and are spelled out
+# again rather than imported -- see the module docstring for why this module
+# imports nothing at all.
+_DATE_PATTERN = r"\d{4}-\d{2}-\d{2}"
+# Every separator ever written between the date and the time halves.
+_DATE_TIME_SEPARATOR_PATTERN = r"(?:[ _]+\([A-Za-z]{3}\))?[ _]+"
+# (year, month, day, hour, minute, second)
+_STAMP_CAPTURE_PATTERN = (
+    r"(\d{4})-(\d{2})-(\d{2})"
+    rf"{_DATE_TIME_SEPARATOR_PATTERN}"
+    r"(\d{2})\.(\d{2})\.(\d{2})"
 )
+
+# A leading "YYYY-MM-DD[_(Ddd)]_HH.MM.SS", captured part by part so the instant
+# can be read off it. Matches stamps.LEADING_STAMP_RE.
+_LEADING_STAMP_RE = re.compile(rf"^{_STAMP_CAPTURE_PATTERN}")
+
+# A leading date, whether or not a weekday and time follow: enough to tell a
+# dated folder from a month folder ("10. October"), which is all it is for.
+_DAY_PREFIX_RE = re.compile(rf"^{_DATE_PATTERN}")
+
+# The number folder-sorting wrote in front of every day folder: "1. ".
+_LABEL_NUMBERING_RE = re.compile(r"^\d+\.\s+")
+
+# A count bracket and nothing else: "(i=79_v=3)".
+_COUNT_PAIR_PATTERN = r"[%s]=\d+" % "".join(COUNT_LETTERS)
+_COUNT_BRACKET_RE = re.compile(
+    r"\(%s(?:_%s)*\)" % (_COUNT_PAIR_PATTERN, _COUNT_PAIR_PATTERN))
 
 
 def date_folder_suffix(config: dict) -> str:
@@ -227,6 +259,36 @@ def to_split_name(base: str, images: int, videos: int,
     return f"{base} - {TO_SPLIT_MARKER}{to_split_suffix(images, videos, sidecars, subfolder_files)}"
 
 
+def split_labelled_name(name: str) -> tuple[str, str] | None:
+    """``(dated_base, label)`` of a human-named event folder, else None.
+
+    A labelled folder is a dated prefix, the separator, and a name somebody
+    chose: "2026-07-24_(Fri)__18.34.56 - Lens tests". Only the first separator
+    counts, so a label carrying one of its own ("Lens tests - flowers") comes
+    back whole.
+    """
+    if not _DAY_PREFIX_RE.match(name):
+        return None
+    base, separator, label = name.partition(LABEL_SEPARATOR)
+    if not separator or not label:
+        return None
+    return base, label
+
+
+def strip_label_numbering(label: str) -> str:
+    """A label without the legacy number folder-sorting left in front of it.
+
+    Every day folder was written as " - 1. ######", and a human naming one
+    typed over the "######" and left the "1. " standing. The number is
+    machinery rather than part of the name -- it never counted anything, being
+    hard-coded into the suffix, and no folder named since carries one -- so a
+    label sheds it. A label that is nothing but a number keeps it: there is no
+    name underneath to uncover.
+    """
+    stripped = _LABEL_NUMBERING_RE.sub("", label, count=1)
+    return stripped or label
+
+
 def strip_placeholder(name: str, placeholder: str) -> str | None:
     """The dated base of a placeholder folder name, or None if it has no placeholder."""
     if not name.endswith(placeholder):
@@ -245,11 +307,6 @@ def split_to_split_name(name: str) -> tuple[str, str] | None:
     if index == -1:
         return None
     return name[:index], name[index:]
-
-
-# A tail of nothing but the marker and a well-formed count bracket.
-_COUNT_PAIR = r"[%s]=\d+" % "".join(COUNT_LETTERS)
-_COUNT_BRACKET_RE = re.compile(r"\(%s(?:_%s)*\)" % (_COUNT_PAIR, _COUNT_PAIR))
 
 
 def to_split_tail_is_only_counts(tail: str) -> bool:
