@@ -4,13 +4,26 @@ from pathlib import Path
 from src.core import     PipelineContext,     PipelineStage
 from src.pipeline_stages.legacy import date_folder_suffix
 from src.pipeline_stages.grouper_launch import     grouper_command as _grouper_command,     grouper_install,     run_grouper as _run_grouper,     stderr_tail as _stderr_tail
-from src.pipeline_stages.grouping_names import     TO_SPLIT_MARKER as _TO_SPLIT_MARKER,     count_media as _count_media,     extension_sets as _extension_sets,     select_media as _select_media,     to_split_name as _to_split_name,     with_earliest_time as _with_earliest_time
+from src.pipeline_stages.grouping_names import     EMPTY_SUBFOLDERS_FOLDER as _EMPTY_SUBFOLDERS_FOLDER,     TO_SPLIT_MARKER as _TO_SPLIT_MARKER,     count_media as _count_media,     extension_sets as _extension_sets,     select_media as _select_media,     to_split_name as _to_split_name,     with_earliest_time as _with_earliest_time
 
 # grouper_install is re-exported: the dashboard (src/server.py) imports it
 # from here. Its definition, and the command line, moved to the leaf module
 # grouper_launch.py so tools/restructure_archive.py can load them by file path
 # without importing this package -- see that module's docstring.
 __all__ = ["ScreenshotGroupingStage", "grouper_install", "launch_grouper"]
+
+
+def holds_no_files(folder: Path) -> bool:
+    """True when nothing anywhere below ``folder`` is a file.
+
+    Empty means empty all the way down. A day whose media was routed into
+    "__VIDEOS" is not empty -- it is a day the GUI happens not to show, which
+    is a different thing and handled separately.
+    """
+    try:
+        return not any(path.is_file() for path in folder.rglob("*"))
+    except OSError:
+        return False                  # unreadable: leave it exactly where it is
 
 
 def launch_grouper(context: PipelineContext, folder: Path,
@@ -138,14 +151,51 @@ class ScreenshotGroupingStage(PipelineStage):
         found.sort(key=lambda p: str(p).lower())
         return found
 
+    def _park_empty_folder(self, context: PipelineContext, folder: Path) -> None:
+        """Move an empty day folder into "__EMPTY_SUBFOLDERS" beside it.
+
+        Opening the grouper on a folder with nothing in it costs the reviewer a
+        window to read and close, and teaches them to click through the GUI
+        without looking -- the one habit this stage cannot afford. Parking it
+        keeps the month folder down to the days that still want work, while
+        keeping the folder itself: its name still records which day it was and
+        what it held before it was emptied.
+
+        The parking folder is a sibling of the folder being moved, so a day
+        leaves the working list without leaving its month. Created on first use.
+
+        Nothing is overwritten. A folder of that name already parked means an
+        earlier run put one there, and which of the two is which is not this
+        stage's guess to make -- it says so and leaves the folder alone.
+        """
+        parking = folder.parent / _EMPTY_SUBFOLDERS_FOLDER
+        destination = parking / folder.name
+        if destination.exists():
+            context.log(f"  ! {folder.name} is empty, but {_EMPTY_SUBFOLDERS_FOLDER}"
+                        f" already holds that name; left in place")
+            return
+        try:
+            parking.mkdir(exist_ok=True)
+            folder.rename(destination)
+        except OSError as error:
+            context.log(f"  ! could not park empty {folder.name}: {error}")
+            return
+        context.counters["screenshot_folders_parked_empty"] += 1
+        context.log(f"Parked empty {folder.name} in {_EMPTY_SUBFOLDERS_FOLDER}")
+
     def _prepare_folder(self, context: PipelineContext, folder: Path,
                         image_exts: set[str], video_exts: set[str]) -> Path | None:
         """Rename a placeholder folder to the __TO_SPLIT__ convention.
 
-        Returns the folder to open in the GUI, or None if it holds no
-        top-level media to group. Folders already carrying the __TO_SPLIT__
+        Returns the folder to open in the GUI, or None when there is nothing to
+        group: an empty folder, which is parked out of the way first, or one
+        holding no top-level media. Folders already carrying the __TO_SPLIT__
         marker are opened as-is.
         """
+        if holds_no_files(folder):
+            self._park_empty_folder(context, folder)
+            return None
+
         top_level_files = [path for path in folder.iterdir() if path.is_file()]
         media = _select_media(top_level_files, image_exts, video_exts)
         images, videos = _count_media(media, image_exts, video_exts)

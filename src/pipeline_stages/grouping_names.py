@@ -59,6 +59,13 @@ from pathlib import Path
 
 TO_SPLIT_MARKER = "__TO_SPLIT__"
 
+# Where a day folder holding no files is parked: a sibling of the folder
+# itself, so it leaves the month folder's working list without leaving the
+# month. Created on first use. Named here because the grouping stage moves
+# folders into it and the maintenance tool reasons about what it finds there,
+# and the two must not drift over the spelling.
+EMPTY_SUBFOLDERS_FOLDER = "__EMPTY_SUBFOLDERS"
+
 # What stands between a folder's dated half and whatever it is called.
 LABEL_SEPARATOR = " - "
 
@@ -69,9 +76,23 @@ DEFAULT_DATE_FOLDER_SUFFIX = " - 1. ######"
 # Matches config.json extensions.sidecars, for the same reason.
 DEFAULT_SIDECAR_EXTENSIONS = ("._exif",)
 
-# The letters of the count bracket, in the order they are written. "i"/"v" are
-# the media the grouper shows; "e"/"s" are the audit markers described above.
-COUNT_LETTERS = ("i", "v", "e", "s")
+# The letters of the count bracket, in the order they are written, matching
+# ARCHIVE_STANDARD.md 2. "d" (direct dated children) is recognised so a
+# container name can be read, but nothing here writes one yet.
+COUNT_LETTERS = ("d", "i", "v", "e", "s", "f")
+
+# A folder holding no files at all, however deep you look, says so instead of
+# counting: "(EMPTY)", or "(f=3_EMPTY)" when empty subfolders are all it has
+# left. The counts it used to carry go -- there is nothing there to count.
+EMPTY_MARKER = "EMPTY"
+
+# The time an emptied folder carries. It has no capture to be dated by, but a
+# dated prefix without a time is the one shape the convention only tolerates,
+# so midnight stands in -- unmistakable next to the EMPTY that explains it.
+EMPTY_TIME = "00.00.00"
+
+# What separates two emptied folders that would otherwise land on one name.
+DISCRIMINATOR_PATTERN = r"_\d+"
 
 # Every pattern this module matches on, in one place and built from named
 # fragments, the way stamps.py builds its own.
@@ -101,10 +122,16 @@ _DAY_PREFIX_RE = re.compile(rf"^{_DATE_PATTERN}")
 # The number folder-sorting wrote in front of every day folder: "1. ".
 _LABEL_NUMBERING_RE = re.compile(r"^\d+\.\s+")
 
-# A count bracket and nothing else: "(i=79_v=3)".
+# A count bracket and nothing else: "(i=79_v=3)", "(EMPTY)", "(f=3_EMPTY)" --
+# optionally followed by the discriminator that keeps two emptied folders apart.
 _COUNT_PAIR_PATTERN = r"[%s]=\d+" % "".join(COUNT_LETTERS)
+_COUNTS_PATTERN = r"%s(?:_%s)*" % (_COUNT_PAIR_PATTERN, _COUNT_PAIR_PATTERN)
+_EMPTY_COUNTS_PATTERN = r"(?:%s_)?%s" % (_COUNTS_PATTERN, EMPTY_MARKER)
 _COUNT_BRACKET_RE = re.compile(
-    r"\(%s(?:_%s)*\)" % (_COUNT_PAIR_PATTERN, _COUNT_PAIR_PATTERN))
+    r"\((?:%s|%s)\)(?:%s)?" % (_COUNTS_PATTERN, _EMPTY_COUNTS_PATTERN,
+                               DISCRIMINATOR_PATTERN))
+_EMPTY_BRACKET_RE = re.compile(
+    r"\(%s\)(?:%s)?$" % (_EMPTY_COUNTS_PATTERN, DISCRIMINATOR_PATTERN))
 
 
 def date_folder_suffix(config: dict) -> str:
@@ -246,6 +273,46 @@ def to_split_suffix(images: int, videos: int,
     return "(" + "_".join(parts) + ")" if parts else ""
 
 
+def empty_suffix(subfolders: int) -> str:
+    """The bracket of a folder holding no files: ``(EMPTY)`` or ``(f=3_EMPTY)``.
+
+    ``f`` is every subfolder in the subtree, not just the direct ones. They are
+    all empty by definition -- the folder holds no files anywhere -- so the
+    number says how much hollow structure is left standing.
+    """
+    parts = ([f"f={subfolders}"] if subfolders else []) + [EMPTY_MARKER]
+    return "(" + "_".join(parts) + ")"
+
+
+def with_empty_time(base: str) -> str:
+    """Give a dated prefix the placeholder time when it has none.
+
+    An emptied folder holds nothing to read a capture time off, and would
+    otherwise keep a bare date -- the one prefix shape the convention would
+    rather not see. ``00.00.00`` fills it: a real, sortable time that no camera
+    is likely to have produced, sitting next to the ``EMPTY`` that says why it
+    is there. A prefix that already carries a time keeps it; a real capture
+    time, even on a folder since emptied, beats a placeholder.
+    """
+    if _LEADING_STAMP_RE.match(base):
+        return base
+    return f"{base}__{EMPTY_TIME}"
+
+
+def empty_to_split_name(base: str, subfolders: int) -> str:
+    """The full name of an emptied ``__TO_SPLIT__`` folder.
+
+    The placeholder time is applied here rather than by the caller, so no route
+    to an empty name can leave one without it.
+    """
+    return f"{with_empty_time(base)} - {TO_SPLIT_MARKER}{empty_suffix(subfolders)}"
+
+
+def carries_empty_bracket(name: str) -> bool:
+    """True when ``name`` ends in an ``EMPTY`` bracket, discriminator or not."""
+    return bool(_EMPTY_BRACKET_RE.search(name))
+
+
 def to_split_name(base: str, images: int, videos: int,
                   sidecars: int | None = None,
                   subfolder_files: int | None = None) -> str:
@@ -315,7 +382,8 @@ def to_split_tail_is_only_counts(tail: str) -> bool:
     Recomputing a folder's counts means rewriting the whole tail, which would
     silently throw away anything a human added after the marker. So the rewrite
     is only offered for a tail this recognises: the bare marker, or the marker
-    followed by a bracket of nothing but ``letter=number`` pairs.
+    followed by a bracket of nothing but ``letter=number`` pairs, an ``EMPTY``,
+    or both -- with the discriminator that may trail an emptied folder's name.
     """
     remainder = tail[len(f" - {TO_SPLIT_MARKER}"):]
     return remainder == "" or bool(_COUNT_BRACKET_RE.fullmatch(remainder))

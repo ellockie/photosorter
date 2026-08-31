@@ -197,8 +197,11 @@ def test_top_level_media_wins_over_nested(tmp_path):
     tool.main([str(year), "--apply", "--no-colour"])
 
     # i=1: the nested image is not counted, because the grouper will not show
-    # it. s=1/e=1: it is still reported, for exactly the same reason.
-    assert (year / "2026-07-15_(Wed)__09.12.53 - __TO_SPLIT__(i=1_e=1_s=1)").is_dir()
+    # it. s=1/e=1: it is still reported, for exactly the same reason. And the
+    # time is 05.00.00, not 09.12.53 -- counts state the review job, which is
+    # the top level, while the time states when the day began, wherever the
+    # earliest file happens to sit.
+    assert (year / "2026-07-15_(Wed)__05.00.00 - __TO_SPLIT__(i=1_e=1_s=1)").is_dir()
 
 
 def test_a_video_only_day_is_counted_from_its_subfolders(tmp_path):
@@ -221,15 +224,30 @@ def test_a_video_only_day_is_counted_from_its_subfolders(tmp_path):
     assert (year / "2026-06-08_(Mon)__21.21.43 - __TO_SPLIT__(v=2_s=2)").is_dir()
 
 
-def test_a_completely_empty_day_folder_still_gets_the_marker(tmp_path):
-    # No media anywhere, so no counts and no time to take -- but the legacy
-    # placeholder still goes.
+def test_a_completely_empty_day_folder_says_so(tmp_path):
+    # No files anywhere, so no counts and no time to take.
     year = tmp_path / "2026"
     _placeholder_folder(year, "2026-06-09_(Tue) - 1. ######", [])
 
     assert tool.main([str(year), "--apply", "--no-colour"]) == 0
 
-    assert (year / "2026-06-09_(Tue) - __TO_SPLIT__").is_dir()
+    # Nothing to date it by, so midnight stands in: a dated prefix without a
+    # time is the one shape the convention would rather not see.
+    assert (year / "2026-06-09_(Tue)__00.00.00 - __TO_SPLIT__(EMPTY)").is_dir()
+
+
+def test_hollow_subfolders_are_counted_in_the_empty_bracket(tmp_path):
+    # The day's files have gone and left the structure standing. f counts
+    # every subfolder in the subtree, not just the direct ones.
+    year = tmp_path / "2026"
+    folder = _placeholder_folder(year, "2026-06-09_(Tue) - __TO_SPLIT__(i=8)", [])
+    (folder / "__EXIF").mkdir()
+    (folder / "__VIDEOS").mkdir()
+    (folder / "__VIDEOS" / "__EXTRACTED").mkdir()
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-06-09_(Tue)__00.00.00 - __TO_SPLIT__(f=3_EMPTY)").is_dir()
 
 
 def test_an_existing_marked_folder_is_recounted_from_what_is_on_disk(tmp_path):
@@ -386,10 +404,21 @@ def test_skip_placeholders_rewrites_timestamps_only(tmp_path):
     assert (year / "2014-05-08_(Thu) - 1. ######").is_dir()
 
 
-def test_an_emptied_folder_keeps_the_count_of_what_it_held(tmp_path):
+def test_an_emptied_folder_keeps_a_real_time_over_the_placeholder(tmp_path):
+    # Midnight stands in only where there is nothing to stand in for. A folder
+    # emptied after it was named still knows when its day began.
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-08-17_(Mon)__11.46.15 - __TO_SPLIT__(i=65)", [])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-08-17_(Mon)__11.46.15 - __TO_SPLIT__(EMPTY)").is_dir()
+
+
+def test_emptied_folders_sharing_a_date_are_numbered_apart(tmp_path):
     # "__EMPTY_SUBFOLDERS" parks day folders whose files have all moved on.
-    # The count is the last thing they say about themselves, and four of them
-    # can share a date -- blanking it would erase that and collide the names.
+    # Several can share a date, and dropping their counts for (EMPTY) drops
+    # the only thing telling them apart -- so the discriminator puts it back.
     year = tmp_path / "2026"
     archive = year / "__EMPTY_SUBFOLDERS"
     for count in ("12", "184", "198"):
@@ -397,8 +426,39 @@ def test_an_emptied_folder_keeps_the_count_of_what_it_held(tmp_path):
 
     assert tool.main([str(year), "--apply", "--no-colour"]) == 0
 
+    assert (archive / "2026-08-19_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)").is_dir()
+    assert (archive / "2026-08-19_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)_2").is_dir()
+    assert (archive / "2026-08-19_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)_3").is_dir()
+
+
+def test_the_numbering_settles_and_does_not_walk_on_a_second_run(tmp_path):
+    # Every folder recomputes to plain "(EMPTY)", so each has to recognise the
+    # number it already holds as its own rather than queue up behind the first.
+    year = tmp_path / "2026"
+    archive = year / "__EMPTY_SUBFOLDERS"
     for count in ("12", "184", "198"):
-        assert (archive / ("2026-08-19_(Wed) - __TO_SPLIT__(i=%s)" % count)).is_dir()
+        _placeholder_folder(archive, "2026-08-19_(Wed) - __TO_SPLIT__(i=%s)" % count, [])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+    settled = sorted(path.name for path in archive.iterdir())
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+    assert sorted(path.name for path in archive.iterdir()) == settled
+
+
+def test_a_dry_run_predicts_the_numbering_it_would_write(tmp_path, capsys):
+    # Nothing is renamed, so the filesystem cannot be what tells the second
+    # folder that "(EMPTY)" is taken. The run has to remember what it promised.
+    year = tmp_path / "2026"
+    archive = year / "__EMPTY_SUBFOLDERS"
+    for count in ("12", "184"):
+        _placeholder_folder(archive, "2026-08-19_(Wed) - __TO_SPLIT__(i=%s)" % count, [])
+
+    tool.main([str(year), "--no-colour"])
+
+    out = capsys.readouterr().out
+    assert "2026-08-19_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)\n" in out
+    assert "2026-08-19_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)_2\n" in out
 
 
 def test_a_folder_the_pipeline_left_in_order_carries_no_audit_markers(tmp_path):

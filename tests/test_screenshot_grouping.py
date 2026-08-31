@@ -226,6 +226,98 @@ def test_folder_without_media_is_skipped(tmp_path, monkeypatch, grouper_install)
     assert any("no top-level media" in line for line in context.logs)
 
 
+def test_an_empty_folder_is_parked_and_never_opened(tmp_path, monkeypatch, grouper_install):
+    # A window with nothing in it costs the reviewer a click and teaches them
+    # to stop looking, so the folder goes somewhere else entirely.
+    python, project = grouper_install
+    folder = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}")
+    month = folder.parent
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("should not launch"))
+    context = make_context(tmp_path, python=python, project=project)
+    affect(context, folder)
+
+    ScreenshotGroupingStage().execute(context)
+
+    assert not folder.exists()
+    assert (month / "__EMPTY_SUBFOLDERS" / f"2026-07-18_(Sat){PLACEHOLDER}").is_dir()
+    assert context.counters["screenshot_folders_parked_empty"] == 1
+    assert any("Parked empty" in line for line in context.logs)
+
+
+def test_parking_is_a_sibling_of_the_folder_it_takes(tmp_path, monkeypatch, grouper_install):
+    # "Same level" means beside the day folder, so a day leaves the month
+    # folder's working list without leaving the month.
+    python, project = grouper_install
+    folder = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}")
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("should not launch"))
+    context = make_context(tmp_path, python=python, project=project)
+    affect(context, folder)
+
+    ScreenshotGroupingStage().execute(context)
+
+    parked = folder.parent / "__EMPTY_SUBFOLDERS"
+    assert parked.parent == folder.parent
+    assert parked.parent.name == "07. July"
+
+
+def test_a_day_whose_media_is_all_in_subfolders_is_not_parked(tmp_path, monkeypatch,
+                                                              grouper_install):
+    # Empty means empty all the way down. A RAW in __RAW is still a day's work
+    # sitting there -- it is skipped for having no top-level media, not parked.
+    python, project = grouper_install
+    folder = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", with_raw_subdir=True)
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("should not launch"))
+    context = make_context(tmp_path, python=python, project=project)
+    affect(context, folder)
+
+    ScreenshotGroupingStage().execute(context)
+
+    assert folder.is_dir()
+    assert not (folder.parent / "__EMPTY_SUBFOLDERS").exists()
+    assert any("no top-level media" in line for line in context.logs)
+
+
+def test_parking_never_overwrites_a_folder_already_there(tmp_path, monkeypatch,
+                                                         grouper_install):
+    python, project = grouper_install
+    folder = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}")
+    occupied = folder.parent / "__EMPTY_SUBFOLDERS" / f"2026-07-18_(Sat){PLACEHOLDER}"
+    occupied.mkdir(parents=True)
+    (occupied / "keep.jpg").write_bytes(b"x")
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("should not launch"))
+    context = make_context(tmp_path, python=python, project=project)
+    affect(context, folder)
+
+    ScreenshotGroupingStage().execute(context)
+
+    assert folder.is_dir()                        # left exactly where it was
+    assert (occupied / "keep.jpg").exists()       # and nothing was trampled
+    assert any("already holds that name" in line for line in context.logs)
+
+
+def test_a_parked_folder_does_not_hold_up_the_grouping_review(tmp_path, monkeypatch,
+                                                              grouper_install):
+    # Parking is pointless if the review stage then blocks the run demanding a
+    # name for the same folder. It must not: "__EMPTY_SUBFOLDERS" carries no
+    # day prefix, so the scan neither matches it nor descends into it.
+    from src.pipeline_stages.grouping_review import pending_folders, review_scope
+
+    python, project = grouper_install
+    folder = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}")
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("should not launch"))
+    context = make_context(tmp_path, python=python, project=project)
+    affect(context, folder)
+
+    ScreenshotGroupingStage().execute(context)
+
+    assert pending_folders(context, review_scope(context)) == []
+
+
 def test_launch_failure_isolated_and_recorded(tmp_path, monkeypatch, grouper_install):
     python, project = grouper_install
     a = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=1)

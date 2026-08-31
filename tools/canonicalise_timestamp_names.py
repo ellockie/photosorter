@@ -262,23 +262,33 @@ class GroupingSettings:
         self.sidecar_exts = grouping.sidecar_extensions(config)
 
 
-def nested_files(folder):
-    """Every file below ``folder``'s top level, however deep.
+def nested_contents(folder):
+    """``(files, folders)`` below ``folder``'s top level, however deep.
+
+    Everything this tool asks about a folder -- when its earliest capture was,
+    how many files it holds, whether it holds any at all -- is asked of the
+    whole subtree, so it is all read off one walk.
 
     ``os.walk`` rather than ``Path.rglob``, for the two reasons the rest of
     this tool cares about: it takes the extended path, so a deep archive tree
     does not silently come back short, and with ``followlinks=False`` it will
     not descend a junction planted inside a day folder.
     """
-    found = []
+    files, folders = [], []
     try:
         walk = os.walk(extended_path(folder), followlinks=False)
-        next(walk, None)                      # the top level is the caller's
-        for directory, _subdirectories, names in walk:
-            found.extend(Path(directory) / name for name in names)
+        # The first step is the top level itself. Its *files* belong to the
+        # caller, who already has them -- but its subdirectories are the direct
+        # children, and they are listed here and nowhere else.
+        top = next(walk, None)
+        if top is not None:
+            folders.extend(Path(top[0]) / name for name in top[1])
+        for directory, subdirectories, names in walk:
+            files.extend(Path(directory) / name for name in names)
+            folders.extend(Path(directory) / name for name in subdirectories)
     except OSError:
-        return []
-    return found
+        return [], []
+    return files, folders
 
 
 def folder_media(top_level_files, nested, settings):
@@ -330,27 +340,15 @@ def folder_audit(everything, nested, settings):
     return sidecars, subfolder_files or None
 
 
-def _counts_may_be_rebuilt(tail, top_level_files, nested):
-    """Whether an existing ``__TO_SPLIT__`` tail may be recomputed.
-
-    It may not in two cases, and in both the folder keeps its tail verbatim
-    and only gains its time:
-
-      * the tail carries something besides the counts. Rebuilding rewrites the
-        whole tail, and would take a note somebody left there with it.
-      * the folder is empty. Then there is nothing to count and the rebuild
-        could only erase: the emptied day folders parked in
-        "__EMPTY_SUBFOLDERS" have their old count as the last thing they say
-        about themselves, and several of them share a date, so blanking the
-        counts would also collide four folders onto one name.
-    """
-    if not grouping.to_split_tail_is_only_counts(tail):
-        return False
-    return bool(top_level_files) or bool(nested)
-
-
-def dating_files(media, everything, settings):
+def dating_files(everything, settings):
     """What a folder's time is read off: its media, else the sidecars.
+
+    ``everything`` is the whole subtree, not the top level, because the time is
+    the folder's earliest capture wherever it sits -- a video routed into
+    "__VIDEOS" at 09.59 dates the day, even with nothing above it before noon.
+    That is what the counts and the time part ways over: ``i``/``v`` state the
+    review job the GUI will show, which is the top level alone, while the time
+    states when the day began.
 
     Falling back to the sidecars is what dates a day the grouper has emptied of
     images: the "._exif" files stay behind, and each is named after the image
@@ -358,6 +356,7 @@ def dating_files(media, everything, settings):
     folder keeps a bare date, and two of them on one day collide on a single
     name -- which is the whole reason the time is there.
     """
+    media = grouping.select_media(everything, settings.image_exts, settings.video_exts)
     return media or grouping.select_sidecars(everything, settings.sidecar_exts)
 
 
@@ -375,6 +374,8 @@ def canonical_event_folder_name(folder, name, media_files, settings):
       * a legacy "- 1. ######" placeholder, or the marker an earlier run left,
         becomes the ``__TO_SPLIT__`` marker with its counts rebuilt from what
         is on disk now and whatever audit markers ``folder_audit`` found;
+      * a folder holding no files anywhere says so -- ``(EMPTY)``, or
+        ``(f=3_EMPTY)`` when hollow subfolders are all that is left;
       * a label somebody wrote is kept verbatim, bar the legacy number in front
         of it, and gets no counts at all -- a bracket says a folder is still
         waiting to be reviewed, and a named one is not;
@@ -393,18 +394,25 @@ def canonical_event_folder_name(folder, name, media_files, settings):
                 return name
             base, label = labelled
 
-    nested = nested_files(folder)
+    nested, nested_folders = nested_contents(folder)
     everything = list(media_files or ()) + nested
-    media = folder_media(media_files, nested, settings)
-    dated = grouping.with_earliest_time(
-        base, dating_files(media, everything, settings))
+    dated = grouping.with_earliest_time(base, dating_files(everything, settings))
 
     if label is not None:
         return dated + grouping.LABEL_SEPARATOR + grouping.strip_label_numbering(label)
 
-    if tail is not None and not _counts_may_be_rebuilt(tail, media_files, nested):
+    if tail is not None and not grouping.to_split_tail_is_only_counts(tail):
+        # Somebody wrote something after the marker. Rebuilding the tail would
+        # take that with it, so this folder gains the time and nothing else.
         return dated + tail
 
+    if not everything:
+        # Nothing to count anywhere in the subtree. Whatever the bracket used
+        # to claim, the folder holds none of it now, and the number of hollow
+        # subfolders left standing is the only thing still worth stating.
+        return grouping.empty_to_split_name(dated, len(nested_folders))
+
+    media = folder_media(media_files, nested, settings)
     images, videos = grouping.count_media(
         media, settings.image_exts, settings.video_exts)
     sidecars, subfolder_files = folder_audit(everything, nested, settings)
@@ -599,14 +607,45 @@ def plan_for(path, media_files=None, grouping_settings=None):
     return Path(path).with_name(wanted)
 
 
+def free_name(source, target, claimed):
+    """``target``, numbered if something else already holds that name.
+
+    Only an ``EMPTY`` bracket is ever numbered. It is the one rewrite that
+    deliberately discards what told two folders apart -- six days parked in
+    "__EMPTY_SUBFOLDERS" all become "(EMPTY)" -- so the discriminator puts back
+    just enough to keep them distinct, which the archive standard requires of
+    any two folders in one month folder. Anywhere else a collision means two
+    folders really are claiming one name, which is an anomaly worth reporting
+    rather than papering over.
+
+    ``claimed`` carries the names handed out earlier in this run, so a dry run
+    predicts the same numbering an ``--apply`` run would write. Numbering
+    follows the walk, which sorts by name, so a folder keeps its number across
+    runs -- and a folder already holding a candidate keeps it rather than
+    stepping over itself.
+    """
+    if not grouping.carries_empty_bracket(target.name):
+        return target
+
+    candidate, index = target, 1
+    while path_key(candidate) != path_key(source) and (
+            path_key(candidate) in claimed
+            or os.path.lexists(extended_path(candidate))):
+        index += 1
+        candidate = target.with_name("%s_%d" % (target.name, index))
+    claimed.add(path_key(candidate))
+    return candidate
+
+
 def apply_plan(entries, apply_changes, attempts, delay_seconds, journal, report,
-               grouping_settings=None):
+               grouping_settings=None, claimed=None):
     """Walk the planned renames, reporting each outcome. Returns counters.
 
     ``entries`` pairs each path with the top-level files of the folder it *is*
     (None for a file), which is what the placeholder rewrite counts.
     """
     counters = {CHANGED: 0, CONFLICT: 0, FAILED: 0, UNPARSEABLE: 0}
+    claimed = set() if claimed is None else claimed
 
     for path, media_files in entries:
         if carries_impossible_stamp(path.name):
@@ -617,6 +656,9 @@ def apply_plan(entries, apply_changes, attempts, delay_seconds, journal, report,
         target = plan_for(path, media_files, grouping_settings)
         if target is None:
             continue
+        target = free_name(path, target, claimed)
+        if path_key(target) == path_key(path):
+            continue                  # numbering landed back on its own name
 
         # A case-only change targets the same file, so lexists() is meaningless.
         if not differs_only_by_case(path.name, target.name):
@@ -814,6 +856,11 @@ def main(argv=None):
             return 2
 
     totals = {CHANGED: 0, CONFLICT: 0, FAILED: 0, UNPARSEABLE: 0}
+    # Sibling folders arrive from the walk one call apart, so the names handed
+    # out to emptied ones are tracked across the whole run rather than per
+    # directory -- which is also what lets a dry run predict the numbering an
+    # --apply run would write, having renamed nothing to look at.
+    claimed = set()
     try:
         for directory, files in walk_bottom_up(target, root_key, refused, skip_keys):
             # Files first, then the directory itself: renaming the directory
@@ -822,7 +869,7 @@ def main(argv=None):
             if path_key(directory) != root_key:
                 entries.append((directory, files))
             counters = apply_plan(entries, args.apply, attempts, delay_seconds,
-                                  journal_handle, report, grouping_settings)
+                                  journal_handle, report, grouping_settings, claimed)
             for key, value in counters.items():
                 totals[key] += value
     finally:

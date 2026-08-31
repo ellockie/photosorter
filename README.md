@@ -228,6 +228,30 @@ Explorer shows, so it is always obvious which folder the GUI is on and which are
 still to come. With `screenshot_grouping.max_folders` set, the cap keeps the
 first N in that order.
 
+### Empty folders are parked, not grouped
+
+Opening the grouper on a folder with nothing in it costs the reviewer a window
+to read and close, and teaches them to click through the GUI without looking —
+the one habit this stage cannot afford. So before anything is opened, a day
+folder holding **no files anywhere in its subtree** is moved into
+`__EMPTY_SUBFOLDERS`, a sibling created on first use:
+
+```text
+2026  07. July    __EMPTY_SUBFOLDERS        2026-07-19_(Sun) - 1. ######
+    2026-07-20_(Mon) - __TO_SPLIT__(i=42)
+```
+
+The day leaves the month folder's working list without leaving the month, and
+the folder itself is kept — its name still records which day it was and what it
+held. `__EMPTY_SUBFOLDERS` carries no day prefix, so the grouping review neither
+matches it nor descends into it, and a parked folder cannot hold up a run.
+
+Empty means empty *all the way down*. A day whose media was routed into
+`__VIDEOS` or `__RAW` is not empty — it is a day the GUI happens not to show,
+which is a different thing and is skipped where it stands. Nothing is ever
+overwritten: a name already parked means an earlier run put one there, so the
+folder is left in place and the clash is logged.
+
 ### Dated-name convention
 
 One canonical form is written everywhere — note the **double** underscore before
@@ -257,6 +281,7 @@ grouper is opened:
 | `v` | top-level videos | there are any |
 | `e` | `._exif` sidecars in the whole folder | the count does not match the media in that folder |
 | `s` | non-sidecar files below the top level | there are any |
+| `f` | subfolders in the whole subtree | the folder is `EMPTY` and has any |
 
 `i` and `v` are the review job. The grouper GUI shows the top level only, so
 they state exactly what it will put in front of you. A day whose every file was
@@ -275,6 +300,29 @@ One `._exif` per media file is the norm, so `e` appears only when that breaks:
 `e=7` beside no images means the day's photos left without their sidecars, and
 `e=0` beside a folder full of images means the sidecars are gone. `s` means the
 grouper will not show you everything the folder holds.
+
+A folder holding **no files at all**, however deep you look, says so instead of
+counting — there is nothing there to count:
+
+```text
+2026-07-19_(Sun)__00.00.00 - __TO_SPLIT__(EMPTY)        nothing left
+2026-06-09_(Tue)__00.00.00 - __TO_SPLIT__(f=3_EMPTY)    three hollow subfolders
+2026-08-17_(Mon)__11.46.15 - __TO_SPLIT__(EMPTY)        emptied after it was named
+```
+
+`f` is every subfolder in the subtree, not just the direct ones; they are all
+empty by definition.
+
+An emptied folder holds nothing to read a capture time off, and a dated prefix
+without a time is the one shape the convention would rather not see — so
+`00.00.00` stands in. It is a real, sortable time that no camera is likely to
+have produced, sitting next to the `EMPTY` that says why it is there. A folder
+emptied *after* it was named keeps its real time: a genuine capture beats a
+placeholder. Dropping the counts is what makes two emptied folders on
+one day land on the same name, so the second and later take `_2`, `_3` … in the
+order Explorer sorts them. That numbering is the only place this tool resolves
+a collision rather than reporting one — everywhere else, two folders claiming
+one name is a real anomaly.
 
 The grammar lives in `src/pipeline_stages/grouping_names.py` and nowhere else.
 The live grouping stage writes `i`/`v` alone; so does the screenshot grouper,
@@ -329,10 +377,18 @@ Without that fallback such a folder keeps a bare date, and two of them on one
 day collide on a single name — which is the whole reason the time is there.
 Media always wins where there is any; the sidecars are only fallen back to.
 
-Two kinds of folder keep their bracket verbatim and only gain the time: one
-whose tail carries something a human wrote after the marker, and one that is
-empty — the emptied day folders parked in `__EMPTY_SUBFOLDERS` have their old
-count as the last thing they say about themselves.
+**Every question is asked of the whole subtree.** The earliest capture, the
+file and folder counts, whether a folder is empty at all — none of them stop at
+the top level. This is where the time and the counts part ways: `i`/`v` state
+the review job, which is the top level alone, while the time states when the
+day began, wherever the earliest file happens to sit. A video routed into
+`__VIDEOS` at 09.59 dates the day even with nothing above it before noon.
+
+An existing time is still never revised — a prefix that already carries one is
+left as found rather than second-guessed. Only a folder with no time gets one.
+
+A folder whose tail carries something a human wrote after the marker keeps that
+tail verbatim and only gains the time.
 
 A folder somebody has named gets the same dated half and nothing else. The
 label is their writing and is kept verbatim — only the *first* ` - ` separates

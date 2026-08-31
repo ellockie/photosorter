@@ -65,6 +65,8 @@ prefix:  YYYY-MM-DD_(Ddd)__HH.MM.SS      canonical — DOUBLE underscore before 
 | N8 | ` - <description>` | Named by a human. **Finished** — no tool rewrites the tail. |
 | N9 | ` - __CONTAINER__[(d=N)][ - <description>]` | Holds dated child folders. See §3. |
 | N10 | ` - __TO_SPLIT__(<counts>)` | Day still to be split into sub-events. |
+| N10a | ` - __TO_SPLIT__([f=N_]EMPTY)[_<n>]` | Holds no files anywhere in its subtree. The counts it carried go — there is nothing left to count. `f` states how many hollow subfolders still stand. |
+| N10b | An `EMPTY` folder with no time takes `00.00.00`, so it still satisfies the full prefix of N1 rather than falling back to date-only. A folder emptied after it was named keeps its real time — N6 still forbids revising one. |
 | N11 | ` - __TO_LABEL__` | Day still to be described. |
 | N12 | ` - 1. ######` | Legacy placeholder. Read and converted to N10; never newly written. |
 
@@ -77,9 +79,16 @@ prefix:  YYYY-MM-DD_(Ddd)__HH.MM.SS      canonical — DOUBLE underscore before 
 | `v` | top-level videos | there are any |
 | `e` | `._exif` in the whole subtree | the count ≠ media count in that subtree |
 | `s` | non-sidecar files below the top level | there are any |
+| `f` | subfolders in the whole subtree | the folder is `EMPTY` and has any |
 
 `i`/`v` are the review job — they state what a grouper GUI will show. `e`/`s` are
 audit markers: something the folder holds that `i`/`v` do not account for.
+
+**Discriminator.** `EMPTY` discards what told two emptied folders on one day
+apart, so the second and later carry `_2`, `_3` … appended after the bracket, in
+name order. This is the only place a conforming tool may resolve a name clash by
+renaming rather than reporting it; N4 still holds, and everywhere else two
+folders claiming one name is an anomaly to surface, not to paper over.
 
 ---
 
@@ -160,9 +169,15 @@ The table is the reviewer's list, transcribed. `DEFAULT_TAXONOMY` in
    replacement for `__VIDEOS`?
 4. **`__2_SHARE` vs `__SHARED`** — read here as *queued to share* vs *already
    shared*. Confirm; the names invite being conflated.
-5. **`__EMPTY_SUBFOLDERS`** — referenced in `canonicalise_timestamp_names.py` as
-   where emptied day folders are parked. Not a taxonomy folder; looks like a
-   holding area. Where does it live, and which section covers it?
+5. **`__EMPTY_SUBFOLDERS`** — a holding area, not a taxonomy folder. It sits
+   beside the day folders it takes, inside the month folder, and is created on
+   first use. A dated folder holding no files anywhere in its subtree is moved
+   there rather than offered to a grouper; it carries no day prefix, so a scan
+   looking for dated folders neither matches it nor descends into it. Written
+   by the grouping stage (`screenshot_grouping.py`); the maintenance tool
+   renames what it finds there per N10a/N10b. Still open: which section should
+   own it, and whether a tool other than the grouping stage may move folders
+   into it.
 
 ---
 
@@ -301,17 +316,21 @@ stamp:
 folder_tail:
   named:      ' - (?P<description>.+)$'
   container:  ' - __CONTAINER__(?:\((?P<counts>[divse]=\d+(?:_[divse]=\d+)*)\))?(?: - (?P<description>.+))?$'
-  to_split:   ' - __TO_SPLIT__\((?P<counts>[divse]=\d+(?:_[divse]=\d+)*)\)$'
+  to_split:   ' - __TO_SPLIT__\((?:(?P<counts>[divsef]=\d+(?:_[divsef]=\d+)*)|(?:(?P<empty_counts>[divsef]=\d+(?:_[divsef]=\d+)*)_)?(?P<empty>EMPTY))\)(?:_(?P<discriminator>\d+))?$'
   to_label:   ' - __TO_LABEL__$'
   legacy_placeholder: ' - 1\. ######$'
   markers: ["__CONTAINER__", "__TO_SPLIT__", "__TO_LABEL__"]
-  count_letters: [d, i, v, e, s]    # fixed order, joined by "_"
+  count_letters: [d, i, v, e, s, f] # fixed order, joined by "_"
   count_meaning:
     d: direct dated child folders
     i: top-level images
     v: top-level videos
     e: sidecars in subtree, written only when != media count in subtree
     s: non-sidecar files below the top level
+    f: subfolders in subtree, written only alongside EMPTY
+  empty_marker: EMPTY               # holds no files anywhere; replaces the counts
+  empty_time: "00.00.00"            # stands in when an EMPTY folder has no time
+  discriminator: '_<n>'             # _2, _3 ... only on EMPTY names, only to keep N4
 
 container:
   required_when: has_dated_child
