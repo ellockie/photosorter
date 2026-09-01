@@ -144,7 +144,7 @@ The system SHALL use a standardized `__` prefix subdirectory taxonomy inside eve
 
 #### Scenario: Place extracted alternates
 - **WHEN** a RAW extraction produces alternate or batch-extracted JPEGs that do not become the root representative image
-- **THEN** those files are moved under `__EXTRACTED`.
+- **THEN** those files are moved under `__RAW_EXTRACTED_JPGS`.
 
 #### Scenario: Place final exports
 - **WHEN** a full-resolution JPEG export is produced for print/archive/export use
@@ -163,6 +163,27 @@ The system SHALL use a standardized `__` prefix subdirectory taxonomy inside eve
 - **THEN** related `._exif` sidecars and JSON camera logs are moved under `__EXIF`
 - **AND** GPX track files and other geodata associated with the event are stored under `__GEOLOCATIONS`.
 
+#### Scenario: Place a sidecar beside its subject
+- **WHEN** a sidecar is routed for a file that was itself placed in a subdirectory
+- **THEN** it is moved under an `__EXIF` directly inside **that** subdirectory, not the event folder's own
+- **AND** a RAW original in `__RAW` therefore keeps its sidecar in `__RAW/__EXIF`
+- **AND** the event folder's own `__EXIF` holds the sidecars of its top-level representatives only.
+
+#### Scenario: Share one sidecar directory per folder level
+- **WHEN** stills and videos sit together at the top level of an event folder
+- **THEN** their sidecars share that folder's single `__EXIF`
+- **AND** no sidecar directory is segregated by media kind.
+
+#### Scenario: Keep a companion's depth when it follows a representative
+- **WHEN** companion reconciliation moves a companion into the sub-event folder that received its representative
+- **THEN** the companion's path relative to the event folder is preserved
+- **AND** a sidecar from `__RAW/__EXIF` arrives in the sub-event's `__RAW/__EXIF`, not flattened into its `__EXIF`.
+
+#### Scenario: Allow a sidecar directory to nest, and nothing else
+- **WHEN** a directory holding media is checked for structural compliance
+- **THEN** an `__EXIF` or `__PREVIEWS` inside it is valid
+- **AND** any other taxonomy subdirectory nested inside another is a violation.
+
 #### Scenario: Treat taxonomy as configuration
 - **WHEN** a stage routes an artifact into an event-folder subdirectory
 - **THEN** the subdirectory name comes from the central taxonomy configuration
@@ -179,34 +200,67 @@ The system SHALL keep only shot-level representative images directly inside the 
 #### Scenario: Use extracted representative for RAW-only shot
 - **WHEN** a shot has RAW input but no straight-from-camera representative image
 - **THEN** one selected RAW extraction MAY live directly in the event/date folder as the representative
-- **AND** non-representative extracted alternatives SHALL live under `__EXTRACTED`.
+- **AND** non-representative extracted alternatives SHALL live under `__RAW_EXTRACTED_JPGS`.
 
 #### Scenario: Avoid multiple root representatives
 - **WHEN** multiple files represent the same shot
 - **THEN** at most one representative image SHALL live directly in the event/date folder
 - **AND** all other versions SHALL be routed to the correct standardized subfolder.
 
+#### Scenario: Keep a dated video at the root
+- **WHEN** a video carries a usable capture time of its own
+- **THEN** it is a representative and SHALL live directly in the event/date folder beside the stills
+- **AND** it SHALL NOT be routed into a video subdirectory.
+
+#### Scenario: Read retired video subdirectories without writing them
+- **WHEN** an event folder written by an earlier version holds `__VIDEOS` or `__EXTRACTED_VIDEOS`
+- **THEN** those directories are recognized as taxonomy subdirectories, so the folder is not reported as malformed and its companions can still be reconciled
+- **AND** no stage SHALL create either directory.
+
 ### Requirement: Representative Filename Suffix Semantics
-The system SHALL append semantic suffixes to root-level representative image filenames so users can see whether RAW, extracted, or edited/master assets exist without opening subfolders.
+The system SHALL append semantic suffixes to root-level representative image filenames so users can see, without opening a subfolder, how a shot was taken and whether a RAW, edited, or master asset exists. A `_HAS_*` suffix names a sibling that exists elsewhere; a `_FROM_*` suffix names the file's own provenance.
 
-#### Scenario: Mark representative with RAW original
-- **WHEN** a representative image has a related RAW original under `__RAW`
-- **THEN** the representative filename SHALL include `_RAW`
-- **AND** `_RAW` SHALL be the first semantic suffix immediately after the base legacy filename stem.
+#### Scenario: Leave a JPEG-only shot unmarked
+- **WHEN** a shot produced a camera JPEG and no RAW
+- **THEN** the representative filename SHALL carry no semantic suffix.
 
-#### Scenario: Mark representative extracted from RAW
+#### Scenario: Mark a camera JPEG that has a RAW original
+- **WHEN** a straight-from-camera representative image has a related RAW original under `__RAW`
+- **THEN** the representative filename SHALL include `_HAS_RAW`
+- **AND** it SHALL NOT include `_FROM_RAW`, because the file was not derived from the RAW.
+
+#### Scenario: Mark a representative extracted from RAW
 - **WHEN** a root-level representative image was extracted or derived from RAW rather than captured straight from the camera
-- **THEN** the representative filename SHALL include `_EXT`.
+- **THEN** the representative filename SHALL include `_FROM_RAW`
+- **AND** it SHALL NOT also include `_HAS_RAW`, which `_FROM_RAW` already implies.
 
 #### Scenario: Mark representative with better edited version
 - **WHEN** a better edited/master version exists under `__EDITED`
-- **THEN** the representative filename SHALL include `_EDT`
-- **AND** `_EDT` SHALL be the final semantic suffix before the file extension.
+- **THEN** the representative filename SHALL include `_HAS_EDIT`
+- **AND** `_HAS_EDIT` SHALL be the final semantic suffix before the file extension.
 
 #### Scenario: Apply deterministic suffix ordering
 - **WHEN** more than one representative suffix applies
-- **THEN** suffixes SHALL be ordered as `_RAW`, then `_EXT`, then `_EDT`
+- **THEN** the RAW suffix (`_HAS_RAW` or `_FROM_RAW`) SHALL precede `_HAS_EDIT`
 - **AND** the original file extension SHALL remain after all semantic suffixes.
+
+#### Scenario: Read the retired suffix vocabulary
+- **WHEN** a filename written by an earlier version carries `_RAW`, `_EXT`, or `_EDT`
+- **THEN** those suffixes SHALL still be recognized when matching a representative to its companions
+- **AND** no stage SHALL newly write them.
+
+### Requirement: Extracted JPEG Sidecars
+The system SHALL generate a sidecar for every JPEG extracted from a RAW, rather than letting it share the RAW's sidecar, so that each media file has exactly one sidecar describing that file.
+
+#### Scenario: Generate a sidecar for an extracted JPEG
+- **WHEN** a converter has produced a JPEG from a RAW and that JPEG has no sidecar
+- **THEN** the extracted JPEG is passed through ExifTool after the last converter stage and before folder sorting
+- **AND** the resulting sidecar travels with the extracted JPEG into the `__EXIF` beside wherever it lands.
+
+#### Scenario: Report a RAW-only shot
+- **WHEN** a RAW arrives with no straight-from-camera JPEG for the same shot
+- **THEN** the run reports the count of RAW-only shots and how many had an extraction promoted to representative
+- **AND** a RAW-only shot with no extraction at all is reported as having no representative image.
 
 ### Requirement: Legacy Problematic Folder Taxonomy
 The system SHALL preserve legacy problematic subfolders for unsupported files, zero-byte files, insufficient metadata, duplicate names, and stale EXIF files.

@@ -30,7 +30,7 @@ from src.core import \
     PipelineStage
 from src.pipeline_stages.legacy import date_folder_suffix
 from src.pipeline_stages.stamps import day_prefix
-from src.pipeline_stages.taxonomy import DEFAULT_TAXONOMY
+from src.pipeline_stages.taxonomy import taxonomy_dir_names
 
 # Names the grouper leaves on a folder it could not name for the user.
 UNNAMED_MARKERS = ("__TO_SPLIT__", "__TO_LABEL__")
@@ -40,12 +40,6 @@ UNNAMED_MARKERS = ("__TO_SPLIT__", "__TO_LABEL__")
 # on the neighbouring date. One day either side covers that without dragging in
 # unrelated history.
 _DAY_SPAN = 1
-
-
-def _taxonomy_dir_names(config: dict) -> set[str]:
-    names = set(DEFAULT_TAXONOMY.values())
-    names.update((config.get("taxonomy") or {}).values())
-    return names
 
 
 def _neighbouring_days(date_text: str) -> set[str]:
@@ -114,7 +108,7 @@ def reconcilable_folders(context: PipelineContext, scope: dict[Path, set[str]]) 
     sidecars for good. Scanning live also picks up the folder the grouper
     renamed out from under the path recorded before it ran.
     """
-    tax_names = _taxonomy_dir_names(context.config)
+    tax_names = taxonomy_dir_names(context.config)
     found: list[Path] = []
     for parent, days in scope.items():
         if not parent.is_dir():

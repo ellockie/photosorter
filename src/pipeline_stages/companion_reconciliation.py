@@ -4,7 +4,7 @@ When the grouper GUI splits a sorted event folder (e.g.
 "2026-07-18_(Sat) - __TO_SPLIT__(…)") into named sub-event folders, only the
 top-level representative images move; each shot's RAW original, EXIF sidecar,
 video, etc. stay behind in the event folder's taxonomy subdirs (__RAW, __EXIF,
-__VIDEOS, …). This stage reunites them: for every companion file it finds the
+a legacy __VIDEOS, …). This stage reunites them: for every companion it finds the
 sub-event folder that received the matching representative image (matched by the
 leading date+time in the filename) and moves the companion into the same-named
 taxonomy subdir there. Nothing is ever deleted; companions with no located
@@ -30,7 +30,10 @@ from src.core import \
 from src.pipeline_stages.stamps import \
     leading_stamp_key, \
     stamp_keys
-from src.pipeline_stages.taxonomy import DEFAULT_TAXONOMY
+from src.pipeline_stages.taxonomy import \
+    sidecar_dir_names, \
+    strip_representative_suffixes, \
+    taxonomy_dir_names
 from src.pipeline_stages.grouping_names import TO_SPLIT_MARKER as _TO_SPLIT_MARKER
 
 # Per-folder, per-kind cap on individual filenames written to the log, so one
@@ -57,12 +60,6 @@ def representative_keys(name: str) -> list[str]:
     matchable — without it exactly those companions are stranded.
     """
     return stamp_keys(name)
-
-
-def taxonomy_dir_names(config: dict) -> set[str]:
-    names = set(DEFAULT_TAXONOMY.values())
-    names.update((config.get("taxonomy") or {}).values())
-    return names
 
 
 @dataclass
@@ -176,12 +173,6 @@ def _common_prefix_len(left: str, right: str) -> int:
     return index
 
 
-# The "_RAW"/"_EXT"/"_EDT" markers apply_representative_suffixes() appends to a
-# representative's stem; stripped so a representative and its RAW original
-# tokenize alike.
-_REPRESENTATIVE_SUFFIXES = re.compile(r"(?:_(?:RAW|EXT|EDT))+$")
-
-
 def _name_tokens(name: str) -> set[str]:
     """The "__"-separated parts of a filename, normalized for comparison.
 
@@ -193,7 +184,7 @@ def _name_tokens(name: str) -> set[str]:
     """
     stem = Path(name).stem
     return {
-        _REPRESENTATIVE_SUFFIXES.sub("", part)
+        strip_representative_suffixes(part)
         for part in stem.split("__")
         if part
     }
@@ -293,16 +284,28 @@ def reconcile_folder(event_folder: Path, config: dict,
         report.errors = reporter.error_count
         return report
 
-    # Index every companion by its shot key: key -> [(taxonomy_dir_name, path)].
+    # Index every companion by its shot key: key -> [(relative_dir, path)].
+    # The relative dir is what the companion is re-created under at the
+    # destination, so a sidecar in "__RAW/__EXIF" arrives in the sub-event's
+    # "__RAW/__EXIF" rather than being flattened into its "__EXIF" (X10).
+    sidecar_names = sidecar_dir_names(config)
     companions: dict[str, list[tuple[str, Path]]] = {}
-    for tax_dir in tax_dirs:
-        for entry in _list_dir(tax_dir, reporter):
+
+    def collect(directory: Path, relative: str, descend: bool) -> None:
+        for entry in _list_dir(directory, reporter):
             path = Path(entry.path)
             if not _is_file(entry, reporter):
-                if _is_dir(entry, reporter):
+                if not _is_dir(entry, reporter):
+                    continue
+                # A sidecar folder inside a media folder is the one legal nest
+                # (X11): "__RAW/__EXIF" holds the RAWs' sidecars. Anything else
+                # nested here is unexpected and is left alone, as before.
+                if descend and entry.name in sidecar_names:
+                    collect(path, f"{relative}/{entry.name}", descend=False)
+                else:
                     reporter.note(
                         "nested",
-                        f"- skipping nested folder {tax_dir.name}/{entry.name} "
+                        f"- skipping nested folder {relative}/{entry.name} "
                         "(companions are expected to be files)",
                     )
                 continue
@@ -311,10 +314,15 @@ def reconcile_folder(event_folder: Path, config: dict,
                 report.unkeyed += 1
                 reporter.note(
                     "unkeyed",
-                    f"- left {tax_dir.name}/{entry.name}: no date+time in the filename",
+                    f"- left {relative}/{entry.name}: no date+time in the filename",
                 )
                 continue
-            companions.setdefault(key, []).append((tax_dir.name, path))
+            companions.setdefault(key, []).append((relative, path))
+
+    for tax_dir in tax_dirs:
+        # Only a media folder can hold a sidecar folder; __EXIF holds nothing
+        # but sidecars (X12), so there is never a second level to descend into.
+        collect(tax_dir, tax_dir.name, descend=tax_dir.name not in sidecar_names)
     if not companions:
         _prune_empty_taxonomy_dirs(tax_dirs, reporter)
         report.errors = reporter.error_count
@@ -326,30 +334,30 @@ def reconcile_folder(event_folder: Path, config: dict,
         candidates = dest_by_key.get(key)
         if not candidates:
             report.unmatched += len(items)
-            for tax_name, path in items:
+            for relative, path in items:
                 reporter.note(
                     "unmatched",
-                    f"- left {tax_name}/{path.name}: no representative image "
+                    f"- left {relative}/{path.name}: no representative image "
                     "found in this or any sibling folder",
                 )
             continue
 
-        for tax_name, path in items:
+        for relative, path in items:
             dest = _pick_destination(path.name, candidates, reporter)
             if dest == event_folder:
                 # The representative never left (the user kept this group here),
                 # so the companion is already where it belongs.
                 report.in_place += 1
                 continue
-            target = dest / tax_name / path.name
+            target = dest.joinpath(*relative.split("/")) / path.name
             if target.exists():
                 # Idempotent re-run or genuine clash: leave the original in place
                 # rather than risk overwriting, but never silently.
                 report.already_present += 1
                 reporter.note(
                     "already-present",
-                    f"- left {tax_name}/{path.name}: already present in "
-                    f"{dest.name}/{tax_name}",
+                    f"- left {relative}/{path.name}: already present in "
+                    f"{dest.name}/{relative}",
                 )
                 continue
             try:
@@ -358,7 +366,7 @@ def reconcile_folder(event_folder: Path, config: dict,
                 # Broad on purpose: one unmovable file (locked by Dropbox, path
                 # too long, shutil.Error) must not strand the rest of the folder.
                 reporter.error(
-                    f"could not move {tax_name}/{path.name} to {dest.name}/{tax_name}: {error}")
+                    f"could not move {relative}/{path.name} to {dest.name}/{relative}: {error}")
                 continue
             report.moved += 1
 
@@ -368,12 +376,21 @@ def reconcile_folder(event_folder: Path, config: dict,
 
 
 def _prune_empty_taxonomy_dirs(tax_dirs: list[Path], reporter: _Reporter) -> None:
+    # Deepest first, so emptying "__RAW/__EXIF" lets "__RAW" go in the same pass
+    # rather than leaving a folder that is empty but for an empty child.
     for tax_dir in tax_dirs:
+        nested = []
         try:
-            if tax_dir.is_dir() and not any(tax_dir.iterdir()):
-                tax_dir.rmdir()
+            nested = [child for child in tax_dir.iterdir() if child.is_dir()] \
+                if tax_dir.is_dir() else []
         except OSError as error:
-            reporter.error(f"could not remove empty {tax_dir.name}: {error}")
+            reporter.error(f"could not read {tax_dir.name}: {error}")
+        for child in nested + [tax_dir]:
+            try:
+                if child.is_dir() and not any(child.iterdir()):
+                    child.rmdir()
+            except OSError as error:
+                reporter.error(f"could not remove empty {child.name}: {error}")
 
 
 class CompanionReconciliationStage(PipelineStage):

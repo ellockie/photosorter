@@ -16,7 +16,9 @@ STEM = "2026-07-18_(Sat)_17.04.53"
 
 def make_config(enabled=True):
     return {
-        "taxonomy": {"raw": "__RAW", "exif": "__EXIF", "videos": "__VIDEOS"},
+        # No "videos" key: __VIDEOS is gone from the taxonomy and is recognised
+        # only as a legacy name, which is exactly what the tests below rely on.
+        "taxonomy": {"raw": "__RAW", "exif": "__EXIF"},
         "companion_reconciliation": {"enabled": enabled},
     }
 
@@ -337,3 +339,55 @@ def test_stage_in_default_pipeline_after_grouping():
     assert "companion-reconciliation" in ids
     stage = stages[ids.index("companion-reconciliation")]
     assert stage.dependencies == ("grouping-review",)
+
+
+def test_nested_sidecar_folder_keeps_its_relative_path(tmp_path):
+    """X10/X11: a RAW's sidecar lives in __RAW\__EXIF, and must arrive in the
+    sub-event's __RAW\__EXIF — not be flattened into its top-level __EXIF.
+
+    Flattening would put a RAW's sidecar beside the representative's, which is
+    the arrangement X10 exists to replace: the two are then indistinguishable
+    and moving __RAW again strands its sidecar a second time."""
+    month = tmp_path / "2026" / "07. July"
+    to_split = month / "2026-07-18_(Sat) - __TO_SPLIT__(i=1)"
+    raw_dir = to_split / "__RAW"
+    (raw_dir / "__EXIF").mkdir(parents=True)
+    (to_split / "__EXIF").mkdir(parents=True)
+    raw_name = f"{STEM}__RAW__f8.0__6D.CR2"
+    (raw_dir / raw_name).write_bytes(b"raw")
+    (raw_dir / "__EXIF" / f"{raw_name}._exif").write_bytes(b"raw-exif")
+    (to_split / "__EXIF" / f"{STEM}__f8.0__6D_RAW.JPG._exif").write_bytes(b"jpg-exif")
+
+    sub_event = month / "2026-07-18__17.04.53 - Morning hike"
+    sub_event.mkdir(parents=True)
+    (sub_event / f"{STEM}__f8.0__6D_RAW.JPG").write_bytes(b"jpg")
+
+    logs = []
+    report = reconcile_folder(to_split, make_config(), logs.append)
+
+    assert report.moved == 3, collect(logs)
+    assert (sub_event / "__RAW" / raw_name).is_file()
+    # The nested sidecar kept its depth...
+    assert (sub_event / "__RAW" / "__EXIF" / f"{raw_name}._exif").is_file()
+    # ...and did not land beside the representative's sidecar.
+    assert not (sub_event / "__EXIF" / f"{raw_name}._exif").exists()
+    assert (sub_event / "__EXIF" / f"{STEM}__f8.0__6D_RAW.JPG._exif").is_file()
+    # The emptied nest is pruned innermost-first, so __RAW goes too.
+    assert not raw_dir.exists()
+
+
+def test_unexpected_nested_folder_is_still_left_alone(tmp_path):
+    """Only sidecar folders may nest (X12). Anything else stays put and is
+    named in the log rather than being walked into."""
+    month = tmp_path / "2026" / "07. July"
+    to_split = month / "2026-07-18_(Sat) - __TO_SPLIT__(i=1)"
+    stray = to_split / "__RAW" / "__EDITED"
+    stray.mkdir(parents=True)
+    (stray / f"{STEM}__f8.0__6D.psd").write_bytes(b"psd")
+
+    logs = []
+    report = reconcile_folder(to_split, make_config(), logs.append)
+
+    assert report.moved == 0
+    assert (stray / f"{STEM}__f8.0__6D.psd").is_file()
+    assert "__EDITED" in collect(logs)

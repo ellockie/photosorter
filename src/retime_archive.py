@@ -36,15 +36,41 @@ from src.pipeline_stages.legacy import (
     date_folder_suffix,
     parse_legacy_exif_sidecar,
 )
-from src.pipeline_stages.stamps import LEADING_STAMP_RE, format_day_prefix
+from src.pipeline_stages.stamps import LEADING_STAMP_RE, format_day_prefix, split_dated_folder
 from src.pipeline_stages.taxonomy import taxonomy_folder
 from src.pipeline_stages.timezone_engine import correct, format_stamp
 
-# Event folder: ``2026-04-12_(Sun)`` optionally followed by `` - <description>``.
-_EVENT_FOLDER = re.compile(r"^(\d{4}-\d{2}-\d{2})_\(([A-Za-z]{3})\)(?: - (.*))?$")
 # Accepts every historical separator; see ``stamps``.
 _LEADING_STAMP = LEADING_STAMP_RE
 _PLACEHOLDER = re.compile(r"######")
+
+
+def _event_description(name: str) -> str | None | bool:
+    """The description of a dated event folder, or False when not one.
+
+    ``None`` is a real answer (a folder with a bare dated prefix and no tail),
+    so "not an event folder" has to be a third value.
+
+    The prefix is parsed by ``stamps`` rather than by a regex of this module's
+    own. That regex required the weekday and then either `` - <description>``
+    or the end of the name, so every folder carrying the canonical time --
+    ``2026-07-15_(Wed)__08.14.02 - Sopot`` -- silently failed to match and was
+    skipped. Since the canonicaliser has been putting the archive *onto* that
+    form, this tool had gone blind to most of it.
+
+    The tail must still be empty or open with `` - ``: that is the folder-name
+    grammar (N8-N12), and it keeps an unrelated ``2026-04-12_(Sun)_backup``
+    from being taken for an event folder and renamed.
+    """
+    split = split_dated_folder(name)
+    if split is None:
+        return False
+    tail = split.tail
+    if not tail:
+        return None
+    if not tail.startswith(" - "):
+        return False
+    return tail[3:]
 
 
 def _media_extensions(config: dict) -> set[str]:
@@ -58,7 +84,7 @@ def _media_extensions(config: dict) -> set[str]:
 def _event_folders(parent: Path) -> list[Path]:
     return sorted(
         path for path in parent.rglob("*")
-        if path.is_dir() and _EVENT_FOLDER.match(path.name)
+        if path.is_dir() and _event_description(path.name) is not False
     )
 
 
@@ -88,8 +114,7 @@ def retime_archive(folder, from_date, to_date, config: dict, dry_run: bool = Fal
     summary = {"retimed": 0, "refolded": 0, "skipped": [], "unchanged": 0, "moves": []}
 
     for event_folder in _event_folders(parent):
-        match = _EVENT_FOLDER.match(event_folder.name)
-        description = match.group(3)
+        description = _event_description(event_folder.name)
         for image in sorted(event_folder.iterdir()):
             if not image.is_file() or image.suffix.lower() not in media_extensions:
                 continue

@@ -151,7 +151,11 @@ def test_e2e_fixture_matrix_full_default_dag(tmp_path, monkeypatch, no_legacy_up
     may_folder = root / "2026" / "05. May" / "2026-05-01_(Fri) - 1. ######"
     raw_name = "2026-05-01_(Fri)__14.30.00__RAW__f2.8__T1_500__L50.0__I200__C6D.CR2"
     assert (may_folder / "__RAW" / raw_name).exists()
-    assert (may_folder / "__EXIF" / f"{raw_name}._exif").exists()
+    # X10: a sidecar lives in the __EXIF of the folder holding its subject. The
+    # RAW is in __RAW, so its sidecar is in __RAW\__EXIF — not the event
+    # folder's own __EXIF, which serves the top level.
+    assert (may_folder / "__RAW" / "__EXIF" / f"{raw_name}._exif").exists()
+    assert not (may_folder / "__EXIF" / f"{raw_name}._exif").exists()
 
     # test3 was an exact duplicate of test1: merged away with a safety exception.
     all_jpgs = list(root.rglob("*.jpg"))
@@ -257,11 +261,17 @@ def test_folder_sorting_demotes_existing_occupant_on_name_collision(tmp_path):
 def test_representative_suffix_ordering():
     from src.pipeline_stages.taxonomy import apply_representative_suffixes
 
-    assert apply_representative_suffixes("a.jpg", has_raw=True) == "a_RAW.jpg"
-    assert apply_representative_suffixes("a.jpg", has_raw=True, extracted_from_raw=True) == "a_RAW_EXT.jpg"
+    # Straight from the camera, RAW alongside it.
+    assert apply_representative_suffixes("a.jpg", has_raw=True) == "a_HAS_RAW.jpg"
+    # Extracted from the RAW. F3a: _FROM_RAW already implies the RAW exists, so
+    # the two are never combined.
     assert apply_representative_suffixes(
-        "a.jpg", has_raw=True, extracted_from_raw=True, has_edited=True) == "a_RAW_EXT_EDT.jpg"
-    assert apply_representative_suffixes("a.jpg", has_edited=True) == "a_EDT.jpg"
+        "a.jpg", has_raw=True, extracted_from_raw=True) == "a_FROM_RAW.jpg"
+    assert apply_representative_suffixes("a.jpg", extracted_from_raw=True) == "a_FROM_RAW.jpg"
+    assert apply_representative_suffixes(
+        "a.jpg", has_raw=True, extracted_from_raw=True, has_edited=True) == "a_FROM_RAW_HAS_EDIT.jpg"
+    assert apply_representative_suffixes("a.jpg", has_edited=True) == "a_HAS_EDIT.jpg"
+    # A JPG-only shot carries nothing.
     assert apply_representative_suffixes("a.jpg") == "a.jpg"
 
 
@@ -293,10 +303,16 @@ def test_folder_sorting_taxonomy_routing(tmp_path):
 
     event_folder = final_event_folder(captured, config)
     assert (event_folder / "__RAW" / "shot.cr2").exists()
-    assert (event_folder / "__VIDEOS" / "clip.mp4").exists()
-    # RAW-only shot: the extracted JPEG is promoted to representative with
-    # _RAW (original exists) and _EXT (derived from RAW) suffixes.
-    assert (event_folder / "shot_extracted_RAW_EXT.jpg").exists()
+    # A dated video is a representative and sits at the top level beside the
+    # stills (ARCHIVE_STANDARD.md V1) — there is no __VIDEOS subfolder.
+    assert (event_folder / "clip.mp4").exists()
+    assert not (event_folder / "__VIDEOS").exists()
+    # RAW-only shot: the extracted JPEG is promoted to representative and marked
+    # _FROM_RAW — its own provenance, distinct from a camera JPG's _HAS_RAW.
+    assert (event_folder / "shot_extracted_FROM_RAW.jpg").exists()
+    # Promotion means the extraction is the representative, so nothing is left
+    # over in __RAW_EXTRACTED_JPGS.
+    assert not (event_folder / "__RAW_EXTRACTED_JPGS").exists()
 
 
 def test_folder_sorting_marks_camera_image_with_raw_pair(tmp_path):
@@ -324,7 +340,101 @@ def test_folder_sorting_marks_camera_image_with_raw_pair(tmp_path):
     FolderSortingStage().execute(context)
 
     event_folder = final_event_folder(captured, config)
-    assert (event_folder / "pair_RAW.jpg").exists()
+    # Straight from the camera, and a RAW exists: _HAS_RAW, never _FROM_RAW.
+    assert (event_folder / "pair_HAS_RAW.jpg").exists()
     assert (event_folder / "__RAW" / "pair.cr2").exists()
     root_files = [path for path in event_folder.iterdir() if path.is_file()]
     assert len(root_files) == 1
+
+
+def test_three_shooting_modes_are_distinguishable_at_the_top_level(tmp_path):
+    """a) JPG-only, b) JPG+RAW, c) RAW-only — each says so in its own name.
+
+    The point of the vocabulary: looking at the top level alone tells you how a
+    shot was taken and whether there is a RAW worth developing instead.
+    """
+    config = build_config(tmp_path)
+    inbox = Path(config["paths"]["inbox_folder"])
+    inbox.mkdir(parents=True)
+    captured = datetime.datetime(2026, 5, 14, 10, 30, 0)
+
+    def make(name, content, **extra):
+        path = inbox / name
+        path.write_text(content, encoding="utf-8")
+        asset = MediaAsset(path, extra.pop("sidecars", None) or {})
+        asset.metadata.update({
+            "captured_at": captured,
+            "image_datetime": extra["stamp"],
+            "camera_symbol": "C6D",
+        })
+        return asset
+
+    # a) JPG-only
+    alone = make("alone.jpg", "solo", stamp="2026-05-14_(Thu)_10.30.00")
+    # b) JPG + RAW, same shot key
+    paired_jpg = make("paired.jpg", "cam-jpg", stamp="2026-05-14_(Thu)_10.31.00")
+    paired_raw = make("paired.cr2", "raw-bytes", stamp="2026-05-14_(Thu)_10.31.00")
+    # c) RAW-only, with an extraction and that extraction's own sidecar
+    extracted = inbox / "lonely_extracted.jpg"
+    extracted.write_text("from-raw", encoding="utf-8")
+    extracted_exif = inbox / "lonely_extracted.jpg._exif"
+    extracted_exif.write_text("File Name : lonely_extracted.jpg", encoding="utf-8")
+    raw_only = make("lonely.cr2", "raw-only-bytes", stamp="2026-05-14_(Thu)_10.32.00",
+                    sidecars={"converted_jpg": extracted,
+                              "converted_jpg_exif": extracted_exif})
+
+    context = PipelineContext(config=config)
+    context.assets = [alone, paired_jpg, paired_raw, raw_only]
+    FolderSortingStage().execute(context)
+
+    event = final_event_folder(captured, config)
+    top_level = sorted(p.name for p in event.iterdir() if p.is_file())
+    assert top_level == [
+        "alone.jpg",                       # a) nothing to say
+        "lonely_extracted_FROM_RAW.jpg",   # c) this file came out of a RAW
+        "paired_HAS_RAW.jpg",              # b) camera JPG, a RAW exists
+    ]
+    # The RAWs are below, not at the top level.
+    assert (event / "__RAW" / "paired.cr2").is_file()
+    assert (event / "__RAW" / "lonely.cr2").is_file()
+    # X4/V: the promoted extraction has a sidecar of its own, named after it and
+    # sitting in the __EXIF beside it — not borrowing the RAW's.
+    assert (event / "__EXIF" / "lonely_extracted_FROM_RAW.jpg._exif").is_file()
+    # RAW-only shots are reported, not silently absorbed.
+    assert context.counters["raw_only_shots"] == 1
+    assert context.counters["raw_only_promoted"] == 1
+
+
+def test_extraction_beside_a_camera_jpg_goes_to_raw_extracted_jpgs(tmp_path):
+    """The one case an extraction is *not* the representative: the shot already
+    has a straight-from-camera JPG, so the extraction is an alternate."""
+    config = build_config(tmp_path)
+    inbox = Path(config["paths"]["inbox_folder"])
+    inbox.mkdir(parents=True)
+    captured = datetime.datetime(2026, 5, 14, 10, 30, 0)
+    shared = {"captured_at": captured, "image_datetime": "2026-05-14_(Thu)_10.30.00",
+              "camera_symbol": "C6D"}
+
+    jpg = inbox / "pair.jpg"
+    jpg.write_text("cam-jpg", encoding="utf-8")
+    camera = MediaAsset(jpg)
+    camera.metadata.update(shared)
+
+    raw = inbox / "pair.cr2"
+    raw.write_text("raw-bytes", encoding="utf-8")
+    extracted = inbox / "pair_extracted.jpg"
+    extracted.write_text("from-raw", encoding="utf-8")
+    raw_asset = MediaAsset(raw, {"converted_jpg": extracted})
+    raw_asset.metadata.update(shared)
+
+    context = PipelineContext(config=config)
+    context.assets = [camera, raw_asset]
+    FolderSortingStage().execute(context)
+
+    event = final_event_folder(captured, config)
+    assert (event / "pair_HAS_RAW.jpg").is_file()
+    assert (event / "__RAW_EXTRACTED_JPGS" / "pair_extracted.jpg").is_file()
+    # Exactly one representative at the top level (F5).
+    assert [p.name for p in event.iterdir() if p.is_file()] == ["pair_HAS_RAW.jpg"]
+    # Not a RAW-only shot, so nothing is reported as one.
+    assert context.counters["raw_only_shots"] == 0

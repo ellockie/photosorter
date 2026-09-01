@@ -3,25 +3,12 @@ from pathlib import Path
 
 from src.constants.constants import \
     KNOWN_CAMERAS_SYMBOLS
+from src.constants.months import MONTH_FOLDERS
 from src.pipeline_stages.stamps import \
     format_day_prefix, \
     format_stamp
 
 
-MONTH_FOLDERS = {
-    "01": "01. January",
-    "02": "02. February",
-    "03": "03. March",
-    "04": "04. April",
-    "05": "05. May",
-    "06": "06. June",
-    "07": "07. July",
-    "08": "08. August",
-    "09": "09. September",
-    "10": "10. October",
-    "11": "11. November",
-    "12": "12. December",
-}
 
 
 def legacy_settings(config: dict) -> dict:
@@ -32,8 +19,20 @@ def raw_marker(config: dict) -> str:
     return legacy_settings(config).get("raw_marker", "RAW__")
 
 
+DEFAULT_DAY_BOUNDARY_TIME = "04.44.44"
+
+
 def day_boundary(config: dict) -> datetime.time:
-    value = legacy_settings(config).get("day_boundary_time", "04.44.44")
+    """The time before which a capture belongs to the previous day (N7).
+
+    Top level first: this is a live rule the whole pipeline depends on, not a
+    compatibility shim, so it does not belong in the "legacy" block beside the
+    "##   RAWs   ##" folder names. That block is still read, so a config file
+    written before the key moved keeps working.
+    """
+    value = config.get("day_boundary_time")
+    if value is None:
+        value = legacy_settings(config).get("day_boundary_time", DEFAULT_DAY_BOUNDARY_TIME)
     hour, minute, second = [int(part) for part in value.split(".")]
     return datetime.time(hour, minute, second)
 
@@ -67,6 +66,22 @@ def format_extension(extension: str, config: dict) -> str:
     return extension.upper() if is_raw_extension(extension, config) else extension.lower()
 
 
+AUTHOR_MARKER_PREFIX = "@"
+
+
+def author_part(metadata: dict) -> str:
+    """The trailing ``__@<AUTHOR>`` token, or "" for the archive owner.
+
+    Written last, after the camera symbol, because the two together are the
+    file's provenance and reading them side by side is the point. The "@" sigil
+    makes the token self-identifying: a tool can tell an author from a camera
+    symbol without consulting a table, which matters for a convention other
+    people's tools have to implement.
+    """
+    symbol = metadata.get("author_symbol") or ""
+    return f"__{AUTHOR_MARKER_PREFIX}{symbol}" if symbol else ""
+
+
 def legacy_filename(metadata: dict, extension: str, config: dict) -> str:
     is_raw = is_raw_extension(extension, config)
     marker = raw_marker(config) if is_raw else ""
@@ -86,6 +101,7 @@ def legacy_filename(metadata: dict, extension: str, config: dict) -> str:
         + metadata.get("iso", "INA")
         + "__"
         + metadata.get("camera_symbol", "NOID")
+        + author_part(metadata)
     )
     return stem + format_extension(extension, config)
 
@@ -128,6 +144,36 @@ def camera_symbol_for_model(camera_name: str, config: dict) -> str:
     return configured.get("", "NOID")
 
 
+# The archive owner's own media carries no author marker: absent means "mine".
+# Anything else would rename every file already in the archive to say what its
+# absence already said.
+OWNER_AUTHOR_SYMBOL = ""
+
+
+def author_symbol_for_name(author_name: str | None, config: dict) -> str | None:
+    """The short symbol for a person, or None when the name is unknown.
+
+    The mirror of ``camera_symbol_for_model``, and deliberately shaped the same
+    way -- a small table in config, short symbols, one lookup -- because it
+    answers the neighbouring question. The camera symbol says which *device*
+    took a shot; two people shooting the same model are indistinguishable by it,
+    which is exactly the case an author symbol exists for (standard G4/F8).
+
+    There is no built-in table to match ``KNOWN_CAMERAS_SYMBOLS``: camera models
+    are universal, the people in one person's archive are not.
+
+    ``None`` for an unknown name rather than a silent fallback -- dropping the
+    attribution would file someone else's photo as the owner's, which is the one
+    outcome the marker exists to prevent.
+    """
+    configured = config.get("author_symbols", {})
+    if not author_name:
+        return configured.get("", OWNER_AUTHOR_SYMBOL)
+    if author_name in configured:
+        return configured[author_name]
+    return None
+
+
 def parse_legacy_exif_sidecar(path: Path, config: dict) -> dict:
     metadata = {}
     unformatted_datetime = None
@@ -141,6 +187,14 @@ def parse_legacy_exif_sidecar(path: Path, config: dict) -> dict:
             if key.startswith("Camera Model Name"):
                 metadata["camera_model"] = value
                 metadata["camera_symbol"] = camera_symbol_for_model(value, config)
+            elif key.startswith("Artist"):
+                # Some cameras carry the photographer's name. It is the one
+                # source of authorship a file can supply about itself; anything
+                # else has to come from where the batch was ingested from.
+                # An unmapped name resolves to None and is left for a person
+                # rather than silently filed as the owner's (G4/F8).
+                metadata["author_name"] = value
+                metadata["author_symbol"] = author_symbol_for_name(value, config)
             elif key.startswith("File Modification Date/Time"):
                 unformatted_datetime = value
             elif key.startswith("Date/Time Original"):

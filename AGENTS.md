@@ -21,7 +21,7 @@ renames or scans archive folders. It defines:
 Rules carry stable IDs (`P1`, `N3`, `C2`, `S1`, `F5`, `X4`, `T2`); cite the ID.
 §8 is the machine-readable YAML form — parse that, not the prose.
 
-It is **v0.1, draft, not enforced**, and it is also written to be handed to
+It is **v0.8, draft, not enforced**, and it is also written to be handed to
 third-party tools, so it describes the target, not the current code. Do not add
 enforcement, and do not "fix" the archive or the taxonomy to match it, until the
 open questions in it are answered.

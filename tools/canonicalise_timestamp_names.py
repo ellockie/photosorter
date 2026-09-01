@@ -46,7 +46,7 @@ not account for::
     2026-07-25_(Sat) - __TO_SPLIT__(i=7)       ->  ..._(Sat) - __TO_SPLIT__(e=7)
 
 ``s`` counts the non-sidecar files below the top level -- videos routed into
-"__VIDEOS", RAWs, an already-split sub-event -- because the grouper GUI shows
+RAWs, a legacy "__VIDEOS", an already-split sub-event -- the grouper GUI shows
 the top level only, so nothing down there is in front of the reviewer. ``e``
 counts the sidecars in the whole tree and is written only when that number
 does not match the media in the tree: one "._exif" per media file is the norm,
@@ -299,7 +299,7 @@ def folder_media(top_level_files, nested, settings):
     name, this tool writes the same one.
 
     A day whose every file was routed into a subfolder (a video-only day: all
-    of "__VIDEOS", sidecars in "__EXIF") has nothing at the top level at all.
+    of a legacy "__VIDEOS", sidecars in "__EXIF") has nothing at the top level.
     Those are real days with real media, so fall back to the whole subtree
     rather than pretend the day is empty.
     """
@@ -345,7 +345,7 @@ def dating_files(everything, settings):
 
     ``everything`` is the whole subtree, not the top level, because the time is
     the folder's earliest capture wherever it sits -- a video routed into
-    "__VIDEOS" at 09.59 dates the day, even with nothing above it before noon.
+    a subfolder at 09.59 dates the day, even with nothing above it before noon.
     That is what the counts and the time part ways over: ``i``/``v`` state the
     review job the GUI will show, which is the top level alone, while the time
     states when the day began.

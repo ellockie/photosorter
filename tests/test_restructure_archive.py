@@ -242,6 +242,135 @@ def test_list_to_split_prints_and_stops(tmp_path, config, capsys):
 
 
 # --------------------------------------------------------------------------
+# Is there a point in opening this folder at all?
+# --------------------------------------------------------------------------
+
+def test_top_level_media_counts_only_the_top_level(tmp_path, config):
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=1)", images=2)
+    (folder / "clip.mp4").write_bytes(b"x")
+    # Neither of these is in front of the reviewer.
+    (folder / "__RAW").mkdir()
+    (folder / "__RAW" / "orig.cr2").write_bytes(b"x")
+    (folder / "shot._exif").write_text("", encoding="utf-8")
+    settings = make_run(root, config).grouping_settings
+    assert tool.top_level_media(folder, settings) == (2, 1)
+
+
+def test_a_folder_emptied_into_subfolders_is_not_worth_opening(tmp_path, config):
+    """The video-only day: named "(v=3)" from the subtree, showing nothing."""
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(v=3)", images=0)
+    videos = folder / "__VIDEOS"
+    videos.mkdir()
+    for index in range(3):
+        (videos / ("clip_%d.mp4" % index)).write_bytes(b"x")
+    run_object = make_run(root, config)
+    counted, passed_over = tool.partition_groupable([folder], run_object)
+    assert counted == []
+    assert [path for path, _reason in passed_over] == [folder]
+    assert "top level" in passed_over[0][1]
+
+
+def test_a_top_level_video_is_worth_opening(tmp_path, config):
+    """The grouper's grid is "every image and video", so v-only is real work."""
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(v=2)", images=0)
+    for index in range(2):
+        (folder / ("clip_%d.mp4" % index)).write_bytes(b"x")
+    counted, passed_over = tool.partition_groupable([folder], make_run(root, config))
+    assert counted == [(folder, 0, 2)]
+    assert passed_over == []
+
+
+def test_an_empty_marked_folder_is_not_worth_opening(tmp_path, config):
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)",
+                        images=0)
+    counted, passed_over = tool.partition_groupable([folder], make_run(root, config))
+    assert counted == []
+    assert len(passed_over) == 1
+
+
+def test_sidecars_alone_are_not_worth_opening(tmp_path, config):
+    """A day whose photos left without their sidecars: "._exif" is not media."""
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__06.19.06 - __TO_SPLIT__(e=2)",
+                        images=0)
+    for index in range(2):
+        (folder / ("shot_%d.jpg._exif" % index)).write_text("", encoding="utf-8")
+    counted, passed_over = tool.partition_groupable([folder], make_run(root, config))
+    assert counted == []
+    assert len(passed_over) == 1
+
+
+def test_open_all_overrides_the_check(tmp_path, config):
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)",
+                        images=0)
+    run_object = make_run(root, config, argv=["--open-all"])
+    counted, passed_over = tool.partition_groupable([folder], run_object)
+    assert counted == [(folder, 0, 0)]
+    assert passed_over == []
+
+
+def test_showless_folders_are_never_opened(tmp_path, config, fake_grouper, capsys):
+    root = make_archive(tmp_path)
+    worth = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=1)")
+    empty = make_event(root, "2026-07-18_(Sat)__00.00.00 - __TO_SPLIT__(EMPTY)",
+                       images=0)
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+    assert opened_folders(fake_grouper) == [worth]
+    out = capsys.readouterr().out
+    assert "nothing for the grouper to show" in out
+    assert empty.name in out                  # said out loud, not dropped
+
+
+def test_every_marked_folder_showless_is_success_and_opens_nothing(
+        tmp_path, config, fake_grouper, capsys):
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)", images=0)
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+    assert opened_folders(fake_grouper) == []
+    assert "all 1 marked folder(s) have an empty top level" in capsys.readouterr().out
+
+
+def test_a_folder_an_earlier_window_emptied_is_skipped(tmp_path, config,
+                                                       fake_grouper, capsys):
+    """Splitting a day moves its files down; the batch must notice mid-run."""
+    root = make_archive(tmp_path)
+    first = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=1)")
+    second = make_event(root, "2026-07-18_(Sat)__09.00.00 - __TO_SPLIT__(i=1)")
+    real_run_grouper = tool.grouper.run_grouper
+
+    def empty_the_second(python_exe, project_path, folder):
+        if folder == first:
+            sub = second / "2026-07-18_(Sat)__09.00.00 - Pier"
+            sub.mkdir()
+            for path in [p for p in second.iterdir() if p.is_file()]:
+                path.rename(sub / path.name)
+        return real_run_grouper(python_exe, project_path, folder)
+
+    tool.grouper.run_grouper = empty_the_second
+    try:
+        assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+    finally:
+        tool.grouper.run_grouper = real_run_grouper
+    assert opened_folders(fake_grouper) == [first]
+    assert "nothing left at its top level" in capsys.readouterr().out
+
+
+def test_list_to_split_separates_the_two(tmp_path, config, capsys):
+    root = make_archive(tmp_path)
+    worth = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=1)")
+    make_event(root, "2026-07-18_(Sat)__00.00.00 - __TO_SPLIT__(EMPTY)", images=0)
+    assert run(str(root), "--list-to-split") == 1
+    out = capsys.readouterr().out
+    assert ("%s  [i=1 v=0]" % worth) in out
+    assert "2 folder(s) carry the __TO_SPLIT__ marker; 1 worth opening." in out
+
+
+# --------------------------------------------------------------------------
 # Step 2 -- launching the grouper
 # --------------------------------------------------------------------------
 

@@ -17,7 +17,7 @@ Read it before writing any stage or tool that creates, moves, renames or scans
 archive folders. The sections below describe what the current code does; where the
 two disagree, the standard is the intent and the code is the gap.
 
-Currently **v0.1, draft, not enforced anywhere** — and existing tools are not
+Currently **v0.8, draft, not enforced anywhere** — and existing tools are not
 assumed compliant.
 
 ## Current Default Behaviour
@@ -152,17 +152,92 @@ The intake folders will accept not only loose files but also folders containing 
 
 ### Planned: Event Folder Taxonomy
 
-Final event folders use a standardized `__` prefix subfolder set (draft, under review): `__2_SHARE`, `__3D`, `___OTHER`, `__DUPLICATES`, `__EDITED`, `__EXIF`, `__EXPORTED`, `__EXTRACTED`, `__EXTRACTED_VIDEOS`, `__GEOLOCATIONS`, `__HASHES`, `__PANORAMAS`, `__PEOPLE`, `__RAW`, `__RESIZED`, `__SHARED`, `__VIDEOS`. The new pipeline writes `__EXIF`/`__RAW`; the `##   EXIFs   ##` / `##   RAWs   ##` names remain only in legacy CLI output.
+Final event folders use a standardized `__` prefix subfolder set: `__TO_SHARE`,
+`__3D`, `___OTHER`, `__DUPLICATES`, `__EDITED`, `__EXIF`, `__EXPORTED`,
+`__GEOLOCATIONS`, `__HASHES`, `__PANORAMAS`, `__PEOPLE`, `__PREVIEWS`, `__RAW`,
+`__RAW_EXTRACTED_JPGS`, `__RESIZED`, `__SHARED`, `__VIDEOS_EXTRACTED`,
+`__VIDEOS_TO_RENAME`. The new pipeline writes `__EXIF`/`__RAW`; the
+`##   EXIFs   ##` / `##   RAWs   ##` names remain only in legacy CLI output.
 
-The set above is what `DEFAULT_TAXONOMY` holds today.
-[`ARCHIVE_STANDARD.md`](ARCHIVE_STANDARD.md) §4 is the list under review, and it
-differs — `__VIDEOS_TO_RENAME` is proposed, `__VIDEOS` and `__EXTRACTED` are absent
-from the proposal. The open questions are listed there; until they are settled the
-code keeps the set above.
+**The set has exactly one definition** — `DEFAULT_TAXONOMY` in
+[`src/pipeline_stages/taxonomy.py`](src/pipeline_stages/taxonomy.py), matching
+[`ARCHIVE_STANDARD.md`](ARCHIVE_STANDARD.md) §4. `default_config()` deliberately
+writes no `taxonomy` block, so there is no second copy to keep in step and
+`save_config()` cannot bake a stale one into a config file; a config may still
+override an individual key. `tests/test_taxonomy_single_source.py` holds the code
+and the standard equal, and fails if any stage hardcodes a folder name.
 
-The standard also proposes a `__CONTAINER__` marker (§3) on any dated folder that
-holds dated child folders, so a container is distinguishable from a leaf by regex.
-Nothing writes it yet.
+**Videos are not in the taxonomy.** A video that can be dated from its own
+metadata is a representative and sits at the top level of the event folder beside
+the stills (§5.1 V1), its sidecar in the same `__EXIF`. `__VIDEOS` and
+`__EXTRACTED_VIDEOS` (and `__EXTRACTED`, now `__RAW_EXTRACTED_JPGS`) were the
+earlier arrangement: they live on in
+`LEGACY_TAXONOMY`, recognised when read so an existing archive is not reported as
+malformed and companion reconciliation can still drain them, and written by
+nothing (S5).
+
+The standard proposes more that no code writes yet:
+
+- a `__CONTAINER__` marker (§3) on any dated folder that holds dated child
+  folders, so a container is distinguishable from a leaf by regex;
+- **undatable videos** (V4–V11) — one with no usable capture time gets a stamp
+  interpolated from the stills around it, marked `__EST__`; one that cannot even
+  be ordered is tagged `__TO_RENAME__<original name>` **and** moved to
+  `__VIDEOS_TO_RENAME`, with its companions alongside, and the folder carries a
+  `w=N` count for an interactive cleanup tool to pick up later;
+- **`__PREVIEWS`** (X6–X9) for camera thumbnails and proxies. `.thm` and `.lrv`
+  are already classified as previews rather than media, so a thumbnail no longer
+  counts as an image or can be picked as a representative — but nothing routes
+  them into the folder yet.
+
+### Shooting modes
+
+Three ways a shot arrives, each announced by the representative's own name, so
+the top level alone tells you whether there is a RAW worth developing instead:
+
+| Mode | Top level | Meaning |
+| --- | --- | --- |
+| JPG only | `…__SG23U.jpg` | no suffix — what the camera wrote is all there is |
+| JPG + RAW | `…__6D_HAS_RAW.jpg` | straight from the camera; a RAW sits in `__RAW` |
+| RAW only | `…__6D_FROM_RAW.jpg` | extracted from the RAW, which had no camera JPG |
+
+### Author markers
+
+The camera symbol says *what* took a shot. When the archive holds media from more
+than one person — a partner's camera at the same event — the name also says *who*:
+
+```text
+…__I200__C6D.jpg        the archive owner's — no marker, so nothing already filed changes
+…__I200__C6D__@AK.jpg   someone else's
+```
+
+The mechanism mirrors camera symbols: a `author_symbols` table in `config.json`
+maps a person's name to a short symbol, and the same table serves both sources of
+authorship — which folder a batch was merged from, and EXIF `Artist` where the
+camera recorded it. There is no built-in table, since camera models are universal
+and the people in one archive are not. A name the table does not know writes **no
+marker at all** and is reported, rather than falling back to the owner and filing
+someone else's photo as yours. The `@` sigil makes the token self-identifying, so
+a third-party tool can tell an author from a camera symbol without the table.
+
+`_HAS_*` names a sibling elsewhere, `_FROM_*` names this file's own provenance,
+and the two RAW suffixes never combine — `_FROM_RAW` already implies a RAW.
+A better edit under `__EDITED` adds `_HAS_EDIT` last. The earlier `_RAW`, `_EXT`
+and `_EDT` are still read but never written: `_RAW` on a camera JPG read as *this
+is a RAW*, the sense `RAW__` carries inside a filename, when it meant *a RAW
+exists*.
+
+**JPGs are not extracted when the camera already wrote one.** The camera JPG is
+the better representative and the RAW is preserved untouched; an automatic twin
+would double the JPEG count for the commonest mode while adding nothing the RAW
+does not already hold. An extraction that does show up beside a camera JPG — from
+a converter run — is an alternate and goes to `__RAW_EXTRACTED_JPGS`.
+
+Every extracted JPEG gets **its own** `._exif` (the `Extracted Sidecars` stage,
+between the last converter and folder sorting) rather than sharing the RAW's,
+which describes the RAW's dimensions and type. RAW-only shots are counted and
+reported at the end of folder sorting, including any with no extraction at all —
+those have no representative image.
 
 ## Dashboard Runner
 
@@ -491,6 +566,33 @@ writes its own rename journal per year tree, and `--undo` on *that* tool replays
 those renames backwards. Step 2 is not undoable — what the GUI does inside a
 folder is your own work.
 
+**Only the folders worth opening.** Step 2 opens a marked folder only when it has
+an image or a video **at its top level**, which is the whole of what the grouper's
+thumbnail grid shows. A folder can carry the marker and have nothing for it to do
+— an earlier pass already split the day into sub-events, the day's files all sit
+in `__VIDEOS` or `__RAW`, or it is one of the hollow folders parked in
+`__EMPTY_SUBFOLDERS` that the canonicaliser marks `(EMPTY)`. Opening one of those
+puts an empty grid in front of you and waits for you to close it; on a batch of
+ninety that is the difference between a job and an afternoon. They are listed
+with the reason rather than dropped silently, and `--open-all` opens them anyway.
+
+The count comes off the disk, never off the folder's own name — the canonicaliser
+counts the whole subtree when a top level is bare, so a day whose every video was
+routed into `__VIDEOS` is named `__TO_SPLIT__(v=3)` while having nothing to show:
+
+```text
+2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=3)   [i=3 v=0]   opened
+2026-07-17_(Fri)__10.00.00 - __TO_SPLIT__(v=2)   [i=0 v=2]   opened — videos count
+2026-07-16_(Thu)__09.00.00 - __TO_SPLIT__(v=3)               passed over — all in __VIDEOS
+2026-07-18_(Sat)__00.00.00 - __TO_SPLIT__(f=2_EMPTY)         passed over — nothing anywhere
+2026-07-19_(Sun)__06.19.06 - __TO_SPLIT__(e=2)               passed over — sidecars only
+```
+
+The same question is asked again immediately before each window opens, because
+splitting a day moves its files down into the new sub-event folders: a folder
+that had a gridful when the batch was planned can have an empty top level by the
+time the batch reaches it.
+
 **Why canonicalise twice.** Step 1 is what makes step 2 possible: the grouper is
 opened on folders carrying the `__TO_SPLIT__` marker, and a legacy `- 1. ######`
 day does not carry it until the canonicaliser has rewritten the tail. Step 3 is
@@ -499,7 +601,7 @@ a count bracket from scratch every time it touches a folder, dropping the `e`/`s
 audit markers and stamping new sub-event folders in whatever shape it favours.
 The second pass folds all of that back onto the canonical form.
 
-**Steps 4 and 5 are placeholders.** The standard is v0.1, a draft, enforced by
+**Steps 4 and 5 are placeholders.** The standard is v0.8, a draft, enforced by
 nothing — its `S4` subfolder set and its `T8` "defined more than once" list carry
 open questions whose answers change what "compliant" means. Both steps announce
 themselves and do nothing; the plumbing is there so implementing them is a change

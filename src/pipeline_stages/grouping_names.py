@@ -31,7 +31,7 @@ only when it does not match the number of media files in that tree -- one
 sidecar per media file is the norm, and any other number means a sidecar was
 orphaned when its image moved, or an image arrived without one. ``s`` is the
 number of non-sidecar files below the top level, written whenever there are
-any: videos routed into "__VIDEOS", RAWs, an already-split sub-event. Both are
+any: RAWs, a legacy "__VIDEOS", an already-split sub-event. Both are
 written by the maintenance tool (``tools/canonicalise_timestamp_names.py``);
 the live grouping stage writes ``i``/``v`` alone.
 

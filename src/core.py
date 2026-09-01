@@ -135,11 +135,16 @@ def default_config() -> dict:
             "temp_root": str(working_folder / ".TMP"),
         },
         "extensions": {
-            "lossy_images": [".jpg", ".jpeg", ".thm"],
+            "lossy_images": [".jpg", ".jpeg"],
             "other_images": [".png", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".heic", ".heif"],
             "raw_images": [".arw", ".cr2", ".crw", ".dng", ".mpo", ".rw2"],
             "videos": [".mp4", ".mov", ".avi"],
             "sidecars": ["._exif"],
+            # Camera thumbnails and low-res proxies. Sidecars, not media
+            # (ARCHIVE_STANDARD.md X6): a ".thm" counted as a lossy image
+            # inflates a folder's image count and can be picked as a shot's
+            # representative in place of the picture it is a thumbnail of.
+            "previews": [".thm", ".lrv"],
         },
         "external_tools": {
             "exiftool": "exiftool",
@@ -150,13 +155,27 @@ def default_config() -> dict:
         "camera_symbols": {
             "": "NOID",
         },
+        # Who took the shot, as opposed to what took it. Same shape as
+        # camera_symbols: name -> short symbol. The empty key is the
+        # archive owner and maps to no symbol, so the owner's own media
+        # carries no marker and nothing already in the archive is renamed.
+        # There is no built-in table -- camera models are universal, the
+        # people in one person's archive are not.
+        "author_symbols": {
+            "": "",
+        },
         "collision": {
             "significantly_smaller_ratio": DEFAULT_COLLISION_THRESHOLD,
             "duplicate_suffix": "_DUPE",
             "low_res_suffix": "_LOWRES",
         },
+        # A capture at or before this time belongs to the previous day's folder
+        # (ARCHIVE_STANDARD.md N7) -- a night that runs past midnight is one
+        # event. Top level, not in "legacy": every stage depends on it, and the
+        # legacy block is for compatibility shims. day_boundary() still reads
+        # the old location so an existing config.json keeps working.
+        "day_boundary_time": "04.44.44",
         "legacy": {
-            "day_boundary_time": "04.44.44",
             "date_folder_suffix": " - 1. ######",
             "raw_marker": "RAW__",
             "subfolders": {
@@ -169,25 +188,12 @@ def default_config() -> dict:
                 "old_exif": "old_EXIF"
             }
         },
-        "taxonomy": {
-            "to_share": "__2_SHARE",
-            "stereo_3d": "__3D",
-            "other": "___OTHER",
-            "duplicates": "__DUPLICATES",
-            "edited": "__EDITED",
-            "exif": "__EXIF",
-            "exported": "__EXPORTED",
-            "extracted": "__EXTRACTED",
-            "extracted_videos": "__EXTRACTED_VIDEOS",
-            "geolocations": "__GEOLOCATIONS",
-            "hashes": "__HASHES",
-            "panoramas": "__PANORAMAS",
-            "people": "__PEOPLE",
-            "raw": "__RAW",
-            "resized": "__RESIZED",
-            "shared": "__SHARED",
-            "videos": "__VIDEOS",
-        },
+        # No "taxonomy" block on purpose. The subfolder names live in exactly
+        # one place -- src/pipeline_stages/taxonomy.py, per ARCHIVE_STANDARD.md
+        # rule T8 -- and taxonomy_folder() falls through to DEFAULT_TAXONOMY
+        # there. Restating them here would be a second list to keep in step, and
+        # save_config() would then bake a stale copy into every config.json.
+        # A config file may still override an individual key.
         "provenance": {
             "dont_move_folder": "__DONT_MOVE",
             "journal_folder": ".JOURNAL",

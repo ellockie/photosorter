@@ -17,7 +17,8 @@ def holds_no_files(folder: Path) -> bool:
     """True when nothing anywhere below ``folder`` is a file.
 
     Empty means empty all the way down. A day whose media was routed into
-    "__VIDEOS" is not empty -- it is a day the GUI happens not to show, which
+    a legacy "__VIDEOS" is not empty -- it is a day the GUI happens not to show,
+    which
     is a different thing and handled separately.
     """
     try:

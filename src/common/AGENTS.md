@@ -1,6 +1,6 @@
 # src/common — Shared Logic
 
-> **Target archive layout is defined by `../../ARCHIVE_STANDARD.md`** (v0.1, draft,
+> **Target archive layout is defined by `../../ARCHIVE_STANDARD.md`** (v0.8, draft,
 > not enforced). `get_file_name()` and `create_date_folder()` here write names the
 > standard describes (§1, §2, §5) — this is the legacy CLI half of the pipeline, so
 > its forms are the *historical* ones the standard still reads (N5) but no longer

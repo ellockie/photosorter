@@ -9,6 +9,7 @@ from src.pipeline_stages.companion_reconciliation import CompanionReconciliation
 from src.pipeline_stages.folder_intake import FolderIntakeStage
 from src.pipeline_stages.display_extra_messages import DisplayExtraMessagesStage
 from src.pipeline_stages.empty_file_quarantine import EmptyFileQuarantineStage
+from src.pipeline_stages.extracted_sidecars import ExtractedSidecarsStage
 from src.pipeline_stages.folder_sorting import FolderSortingStage
 from src.pipeline_stages.grouping_review import GroupingReviewStage
 from src.pipeline_stages.initialization import InitializationStage
@@ -45,6 +46,9 @@ def build_default_stages() -> list[PipelineStage]:
         ConvertCrwsStage(),
         LaunchDpviewerStage(),
         RawStagedConversionStage(),
+        # After the last converter has produced its JPEGs, before folder
+        # sorting places them — so each extraction's sidecar travels with it.
+        ExtractedSidecarsStage(),
         MoveResultsStage(),
         FolderSortingStage(),
         ScreenshotGroupingStage(),

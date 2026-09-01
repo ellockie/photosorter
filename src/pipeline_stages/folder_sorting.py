@@ -19,6 +19,7 @@ from src.pipeline_stages.provenance import \
     rewrite_sidecar_path_fields
 from src.pipeline_stages.taxonomy import \
     apply_representative_suffixes, \
+    sidecar_subdir, \
     taxonomy_subdir
 
 
@@ -44,6 +45,28 @@ def _unique_target(folder: Path, file_name: str, source: Path) -> Path:
         target = folder / f"{Path(file_name).stem}_DUPE_{md5}_{index}{Path(file_name).suffix}"
         index += 1
     return target
+
+
+def _place_extracted_sidecar(asset, sidecar: Path | None, subject: Path, config: dict) -> None:
+    """Move an extracted JPEG's own ``._exif`` to sit beside it (X10, X4).
+
+    The extracted image is a media file like any other, so it gets a sidecar of
+    its own rather than borrowing the RAW's — a sidecar describes exactly one
+    file, and the RAW's carries the RAW's dimensions and type. Without this a
+    RAW-only shot leaves a bare representative at the top level and trips the
+    ``e`` audit marker on every such folder.
+    """
+    if sidecar is None or not sidecar.exists():
+        return
+    exif_folder = sidecar_subdir(subject.parent, config)
+    exif_folder.mkdir(parents=True, exist_ok=True)
+    target = exif_folder / f"{subject.name}._exif"
+    if target.exists():
+        safe_delete(sidecar)
+        return
+    safe_move(sidecar, target)
+    asset.sidecars["converted_jpg_exif"] = target
+    rewrite_sidecar_path_fields(target, subject.name, str(subject.parent))
 
 
 def _demote_existing_occupant(context: PipelineContext, folder: Path, file_name: str, current_path: Path) -> None:
@@ -109,6 +132,14 @@ class FolderSortingStage(PipelineStage):
 
         moved = 0
         undated = 0
+        # RAW-only shots: a RAW arrived with no straight-from-camera JPEG, so an
+        # extraction stands in as the representative. Counted and reported —
+        # it is the mode where the archive holds no picture the camera itself
+        # produced, and that is worth knowing without auditing the tree.
+        raw_only_promoted = 0
+        raw_only_unconverted = sorted(
+            key for key in raw_shot_keys if key not in camera_image_shot_keys
+        )
         sorted_by_label: dict[str, list] = {}
         located_folders: dict[Path, dict] = {}
 
@@ -134,7 +165,12 @@ class FolderSortingStage(PipelineStage):
                 primary_folder = taxonomy_subdir(event_folder, config, "raw")
                 primary_name = asset.primary_path.name
             elif is_video:
-                primary_folder = taxonomy_subdir(event_folder, config, "videos")
+                # A video that reached this point carries a capture time, so it
+                # is a representative and sits at the top level beside the
+                # stills (ARCHIVE_STANDARD.md V1). It takes no representative
+                # suffix: _RAW/_EXT/_EDT describe a still's relationship to its
+                # own subfolders, and a video has none of those.
+                primary_folder = event_folder
                 primary_name = asset.primary_path.name
             else:
                 primary_folder = event_folder
@@ -150,24 +186,41 @@ class FolderSortingStage(PipelineStage):
             safe_move(asset.primary_path, primary_target)
             asset.primary_path = primary_target
 
+            # Handled with the extracted JPEG itself: it is named after that
+            # file, not after this asset's RAW primary, so the generic renaming
+            # below would give it the wrong name.
+            extracted_exif = asset.sidecars.pop("converted_jpg_exif", None)
+
             for name, sidecar_path in list(asset.sidecars.items()):
                 if not sidecar_path.exists():
                     continue
                 if name == "converted_jpg" and is_raw:
                     # Extracted image from RAW: promote to representative when
-                    # the shot has no straight-from-camera image, otherwise
-                    # keep it as an alternate under __EXTRACTED.
+                    # the shot has no straight-from-camera image, otherwise keep
+                    # it as an alternate under __RAW_EXTRACTED_JPGS.
                     if shot_key is not None and shot_key not in camera_image_shot_keys:
                         extracted_folder = event_folder
                         extracted_name = apply_representative_suffixes(
-                            sidecar_path.name, has_raw=True, extracted_from_raw=True)
+                            sidecar_path.name, extracted_from_raw=True)
+                        raw_only_promoted += 1
                     else:
-                        extracted_folder = taxonomy_subdir(event_folder, config, "extracted")
+                        extracted_folder = taxonomy_subdir(
+                            event_folder, config, "raw_extracted_jpgs")
                         extracted_name = sidecar_path.name
                     extracted_folder.mkdir(parents=True, exist_ok=True)
                     sidecar_target = _unique_target(extracted_folder, extracted_name, sidecar_path)
+                    safe_move(sidecar_path, sidecar_target)
+                    asset.sidecars[name] = sidecar_target
+                    _place_extracted_sidecar(
+                        asset, extracted_exif, sidecar_target, config)
+                    continue
                 else:
-                    exif_folder = taxonomy_subdir(event_folder, config, "exif")
+                    # X10: the sidecar goes in the __EXIF of the folder holding
+                    # its subject, not the event folder's. A still or video at
+                    # the top level therefore lands in the event folder's own
+                    # __EXIF; a RAW that was routed into __RAW lands in
+                    # __RAW\__EXIF, so moving __RAW carries its sidecars along.
+                    exif_folder = sidecar_subdir(primary_target.parent, config)
                     exif_folder.mkdir(parents=True, exist_ok=True)
                     sidecar_name = renamed_sidecar_path(
                         sidecar_path, old_primary_name, primary_target.name).name
@@ -200,10 +253,25 @@ class FolderSortingStage(PipelineStage):
         self._route_geodata(context, sorted_by_label)
 
         context.counters["sorted_assets"] = moved
+        context.counters["raw_only_shots"] = len(raw_only_unconverted)
+        context.counters["raw_only_promoted"] = raw_only_promoted
         context.set_stage_stats(self.stage_id, inputs=moved, outputs=moved, errors=undated)
         context.log(f"Sorted {moved} assets into event folders")
         if undated:
             context.log(f"Routed {undated} assets without a capture date to READY")
+        if raw_only_unconverted:
+            # Every RAW-only shot is named, not just counted: a shot with no
+            # extraction has no representative at all, so the folder shows a
+            # RAW and nothing to look at.
+            context.log(
+                f"{len(raw_only_unconverted)} RAW-only shot(s) (no straight-from-camera JPEG); "
+                f"{raw_only_promoted} had an extraction promoted to representative"
+            )
+            missing = len(raw_only_unconverted) - raw_only_promoted
+            if missing > 0:
+                context.log(
+                    f"  {missing} of them have no extracted JPEG — no representative image"
+                )
         return context
 
     def _route_geodata(self, context: PipelineContext, sorted_by_label: dict[str, list]) -> None:

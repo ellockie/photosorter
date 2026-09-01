@@ -1,6 +1,6 @@
 # SRC — Application Source
 
-> **Target archive layout is defined by `../ARCHIVE_STANDARD.md`** (v0.1, draft,
+> **Target archive layout is defined by `../ARCHIVE_STANDARD.md`** (v0.8, draft,
 > not enforced). Any change to a stage that creates, moves, renames or scans
 > archive folders must be read against it — especially §3 (`__CONTAINER__`
 > marking), §4 (the closed set of `__` subfolders) and T8 (one definition per

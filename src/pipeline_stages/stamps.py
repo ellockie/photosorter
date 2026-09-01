@@ -20,6 +20,7 @@ writing "2026-08-14_(pt)__15.32.01" and every regex here would stop matching.
 
 import datetime
 import re
+from typing import NamedTuple
 
 WEEKDAY_ABBR = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
@@ -92,3 +93,61 @@ def day_prefix(name: str) -> str | None:
     """The ``YYYY-MM-DD`` a folder or file name opens with, or None."""
     match = DAY_PREFIX_RE.match(name)
     return match.group(1) if match else None
+
+
+# The end of a multi-day span, written as the shortest tail of a date that
+# still says which day it is: "#22" (same year and month), "#09-11" (same year)
+# or "#2027-01-03". The number of fields disambiguates, so nothing is guessed.
+RANGE_END_PATTERN = r"#(?:(?:(\d{4})-)?(\d{2})-)?(\d{2})"
+
+# A dated folder's whole prefix: the date, the decorative weekday, the canonical
+# time when the folder carries one, and the span end when it covers more than a
+# day. Everything after it is the tail, whose grammar belongs to
+# ``grouping_names``, not here.
+DATED_FOLDER_RE = re.compile(
+    rf"^({DATE_PATTERN})(?:[ _]+\([A-Za-z]{{3}}\))?(?:[ _]+({TIME_PATTERN}))?"
+    rf"(?:({RANGE_END_PATTERN}))?"
+)
+
+
+class DatedFolder(NamedTuple):
+    """The parsed prefix of a dated folder name."""
+
+    date: str                 # YYYY-MM-DD, always the *start* of the span
+    time: str | None          # HH.MM.SS, or None for a date-only prefix
+    range_end: str | None     # the raw "#..." span end, or None for one day
+    tail: str                 # everything after the prefix, unparsed
+
+
+def split_dated_folder(name: str) -> DatedFolder | None:
+    """The prefix of a dated folder name, or None if it is not one.
+
+    The time and the span end are optional, and the tail is returned unparsed:
+    a caller that cares which *kind* of tail it is asks ``grouping_names``.
+    Splitting here rather than in each caller is what keeps a folder written in
+    the canonical timed form (``2026-07-15_(Wed)__08.14.02 - Sopot``) readable
+    by tools that predate the time — or the span — being there.
+    """
+    match = DATED_FOLDER_RE.match(name)
+    if not match:
+        return None
+    return DatedFolder(match.group(1), match.group(2), match.group(3),
+                       name[match.end():])
+
+
+def resolve_range_end(start_date: str, range_end: str | None) -> str | None:
+    """Expand a ``#`` span end against its start date, or None.
+
+    ``2026-08-20`` + ``#22`` -> ``2026-08-22``; ``#09-11`` -> ``2026-09-11``;
+    ``#2027-01-03`` -> itself. Fields the end omits are taken from the start,
+    which is the whole point of the short forms: the common case is a few days
+    in one month and repeating the year and month there would only add noise.
+    """
+    if not range_end:
+        return None
+    match = re.fullmatch(RANGE_END_PATTERN, range_end)
+    if not match:
+        return None
+    year, month, day = match.groups()
+    start_year, start_month, _ = start_date.split("-")
+    return f"{year or start_year}-{month or start_month}-{day}"

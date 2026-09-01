@@ -21,7 +21,7 @@ def get_photo_monthly_folder_path(date_str):
 def validate_date_format(date_str):
     import re
     assert type(date_str) == str, "date is not a string: %r" % date_str
-    assert re.compile("^\d{4}(-\d{2}){2}$").match(date_str), "date string should match the pattern ^\d{4}(-\d{2}){2}$ , but was: %r" % date_str
+    assert re.compile(r"^\d{4}(-\d{2}){2}$").match(date_str), r"date string should match the pattern ^\d{4}(-\d{2}){2}$ , but was: %r" % date_str
 
 def get_matching_folders(parent_folder):
     matching_date_folders = []

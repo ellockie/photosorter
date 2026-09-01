@@ -11,6 +11,24 @@ sense, over one target, with one set of safety rules.
     4. Check compliance with the archive standard      [not implemented]
     5. Fix compliance with the archive standard        [not implemented]
 
+Only the folders worth opening
+------------------------------
+Step 2 opens a marked folder only when it has an image or a video **at its top
+level**, which is the whole of what the grouper's thumbnail grid shows. A
+folder can carry the marker and still have nothing for it to do: an earlier
+pass already split the day into sub-events, the day's files all sit in
+"__RAW" or a legacy "__VIDEOS", or it is one of the hollow folders parked in
+"__EMPTY_SUBFOLDERS" that the canonicaliser marks "(EMPTY)". Opening one of
+those puts an empty grid in front of the reviewer and waits for them to close
+it, and on a batch of ninety that is the difference between a job and an
+afternoon. They are listed, with the reason, rather than dropped silently;
+"--open-all" opens them anyway.
+
+The count is taken off the disk, never off the folder's own name: the
+canonicaliser counts the whole subtree when a top level is bare, so a day
+whose every file sits in a subfolder is still named "__TO_SPLIT__(v=3)"
+while having nothing to show.
+
 Why twice
 ---------
 Step 1 is what makes step 2 possible: the grouper is opened on folders
@@ -366,6 +384,83 @@ def find_to_split_folders(run):
     return found
 
 
+def top_level_media(folder, settings):
+    """``(images, videos)`` sitting directly in ``folder``; None if unreadable.
+
+    Read off the top level and nowhere else, because that is exactly what the
+    grouper GUI puts in front of the reviewer -- a thumbnail grid of the
+    folder's own images and videos. It deliberately does **not** trust the
+    ``i``/``v`` in the folder's name: the canonicaliser's ``folder_media``
+    falls back to counting the whole subtree when the top level is bare, so a
+    day whose every file sits in a subfolder is named
+    ``__TO_SPLIT__(v=3)`` while having nothing to show at all.
+
+    Subfolders are skipped rather than descended for the same reason, and a
+    reparse point is skipped rather than followed.
+    """
+    names = []
+    try:
+        with os.scandir(extended_path(folder)) as scan:
+            for entry in scan:
+                if canonicalise.is_reparse_point(entry):
+                    continue
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        continue
+                except OSError:
+                    continue
+                names.append(entry.name)
+    except OSError:
+        return None
+    return canonicalise.grouping.count_media(
+        names, settings.image_exts, settings.video_exts)
+
+
+def partition_groupable(folders, run):
+    """Split marked folders into the ones worth opening and the ones that are not.
+
+    Returns ``(groupable, passed_over)`` -- ``[(folder, images, videos)]`` and
+    ``[(folder, reason)]``.
+
+    A folder can carry the marker and still have nothing for the GUI to do.
+    The grouper was emptied into sub-events on an earlier pass; the day's
+    files all sit in "__RAW" or a legacy "__VIDEOS"; the folder is one of the hollow
+    ones parked in "__EMPTY_SUBFOLDERS" that the canonicaliser marks
+    ``(EMPTY)``. Opening any of those puts an empty grid in front of the
+    reviewer and waits for them to close it, which on a batch of ninety is the
+    difference between a job and an afternoon.
+
+    **Images and videos both count.** The grouper's own README describes its
+    grid as "every image and video as a thumbnail", and the ``v`` half of the
+    count bracket exists because videos are part of the review job -- so a
+    video-only day at the top level is real work, not an empty window.
+    """
+    groupable, passed_over = [], []
+    for folder in folders:
+        counts = top_level_media(folder, run.grouping_settings)
+        if counts is None:
+            passed_over.append((folder, "cannot be listed"))
+            continue
+        images, videos = counts
+        if images == 0 and videos == 0 and not run.open_all:
+            passed_over.append((folder, "no image or video at its top level"))
+            continue
+        groupable.append((folder, images, videos))
+    return groupable, passed_over
+
+
+def report_passed_over(run, passed_over):
+    """Say what was left unopened, and why, rather than dropping it silently."""
+    if not passed_over:
+        return
+    run.report("warn", "%d marked folder(s) have nothing for the grouper to show:"
+               % len(passed_over))
+    for folder, reason in passed_over:
+        run.report("dim", "    %s  (%s)" % (folder.name, reason))
+    run.report("dim", "    The GUI shows a folder's top level only. "
+                      "Pass --open-all to open these anyway.")
+
+
 def grouper_paths(run):
     """``(python_exe, project_path)``, or None with the reason reported."""
     settings = canonicalise._config().get("screenshot_grouping", {})
@@ -405,6 +500,12 @@ def still_safe_to_open(folder, run):
         return "no longer under that name (renamed or split by an earlier window)"
     if path_is_reparse_point(folder):
         return "reparse point (junction/symlink) not followed"
+    # Asked again here, not just when the batch was planned: splitting a day
+    # moves its files down into the sub-event folders, so a folder that had a
+    # gridful when it was counted can have an empty top level by the time the
+    # batch reaches it.
+    if not run.open_all and top_level_media(folder, run.grouping_settings) == (0, 0):
+        return "nothing left at its top level for the grouper to show"
     return None
 
 
@@ -414,11 +515,25 @@ def step_group(run):
     A folder the GUI failed on is counted and the batch carries on: one bad
     folder must not cost the reviewer the other ninety.
     """
-    folders = find_to_split_folders(run)
-    if not folders:
+    marked = find_to_split_folders(run)
+    if not marked:
         run.report("ok", "No folder carries the %s marker; nothing to group."
                    % TO_SPLIT_MARKER)
         return 0
+
+    counted, passed_over = partition_groupable(marked, run)
+    report_passed_over(run, passed_over)
+    for folder, reason in passed_over:
+        run.journal.write("group_passed_over", folder=str(folder), reason=reason)
+
+    if not counted:
+        run.report("ok", "\nNothing to group: all %d marked folder(s) have an "
+                         "empty top level." % len(marked))
+        return 0
+
+    folders = [folder for folder, _images, _videos in counted]
+    top_level = {path_key(folder): (images, videos)
+                 for folder, images, videos in counted}
 
     if run.max_folders and len(folders) > run.max_folders:
         run.report("warn", "%d folder(s) carry the marker; limiting this run "
@@ -428,9 +543,11 @@ def step_group(run):
                    % (len(folders), run.max_folders))
         folders = folders[:run.max_folders]
 
-    run.report("bold", "%d folder(s) to group:" % len(folders))
+    run.report("bold", "\n%d folder(s) to group:" % len(folders))
     for folder in folders:
-        run.report("dim", "    %s" % folder)
+        images, videos = top_level[path_key(folder)]
+        run.report("dim", "    %s  [%d image(s), %d video(s) at the top level]"
+                   % (folder, images, videos))
 
     if not run.apply:
         run.report("ok", "\nDry run: the grouper was not opened. "
@@ -542,6 +659,10 @@ class Run:
         self.assume_yes = args.yes
         self.allow_network_tool = args.allow_network_tool
         self.max_folders = args.max_folders
+        self.open_all = args.open_all
+        # The extension sets that say what counts as an image or a video, read
+        # once from the same config the pipeline uses.
+        self.grouping_settings = canonicalise.GroupingSettings(canonicalise._config())
         self.journal = Journal(None)
 
     def report(self, key, message):
@@ -609,6 +730,10 @@ def build_parser():
                              % len(STEPS))
     parser.add_argument("--list-to-split", action="store_true",
                         help="list the folders step 2 would open, and stop")
+    parser.add_argument("--open-all", action="store_true",
+                        help="open every marked folder, including those with "
+                             "no image or video at their top level for the "
+                             "grouper to show")
     parser.add_argument("--max-folders", type=int, default=None,
                         help="open the grouper on at most this many folders "
                              "(default: screenshot_grouping.max_folders, "
@@ -665,12 +790,15 @@ def main(argv=None):
     run = Run(args, target, trees, colour)
 
     if args.list_to_split:
-        folders = find_to_split_folders(run)
-        for folder in folders:
-            print(folder)
-        print(colourise("\n%d folder(s) carry the %s marker."
-                        % (len(folders), TO_SPLIT_MARKER), "bold", colour))
-        return 1 if folders else 0
+        marked = find_to_split_folders(run)
+        counted, passed_over = partition_groupable(marked, run)
+        for folder, images, videos in counted:
+            print("%s  [i=%d v=%d]" % (folder, images, videos))
+        print(colourise("\n%d folder(s) carry the %s marker; %d worth opening."
+                        % (len(marked), TO_SPLIT_MARKER, len(counted)),
+                        "bold", colour))
+        report_passed_over(run, passed_over)
+        return 1 if counted else 0
 
     report("bold", "%s %s" % ("Restructuring" if args.apply else "Dry run over",
                               target))
