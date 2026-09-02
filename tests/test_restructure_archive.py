@@ -615,12 +615,16 @@ def test_dated_folders_skips_month_and_taxonomy_folders(tmp_path, config):
 
 def test_reconcile_runs_before_and_after_grouping(tmp_path, config, fake_grouper):
     """Steps 2 and 4 are the same engine, on either side of the GUI."""
-    numbers = [number for number, _title, _action in tool.STEPS]
-    titles = {number: title for number, title, _action in tool.STEPS}
+    numbers = [number for number, _title, _action, _repeats in tool.STEPS]
+    titles = {number: title for number, title, _a, _r in tool.STEPS}
+    repeats = {number: repeated for number, _t, _a, repeated in tool.STEPS}
     assert numbers == [1, 2, 3, 4, 5, 6, 7]
     assert "companions" in titles[2].lower()
     assert "companions" in titles[4].lower()
     assert TO_SPLIT_IN_TITLE in titles[3]
+    # 4 repeats 2 and 5 repeats 1, which is what a dry run skips.
+    assert repeats[4] == 2 and repeats[5] == 1
+    assert repeats[1] is None and repeats[2] is None and repeats[3] is None
 
 
 TO_SPLIT_IN_TITLE = "__TO_SPLIT__"
@@ -634,6 +638,106 @@ def test_the_engine_is_the_pipelines_own(tmp_path, config):
         companion_matching.reconcile_folder.__doc__
     assert tool.matching.place_companions.__doc__ == \
         companion_matching.place_companions.__doc__
+
+
+# --------------------------------------------------------------------------
+# A dry run does not call the same tool twice
+# --------------------------------------------------------------------------
+
+def test_a_dry_run_skips_the_repeat_passes(tmp_path, config, capsys):
+    """Nothing changed between them, so the second would repeat the first."""
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed) - 1. ######")
+
+    assert run(str(root)) == 1
+
+    out = capsys.readouterr().out
+    assert "STEP 4" in out and "STEP 5" in out
+    assert out.count("skipped, a dry run leaves nothing") == 2
+    assert "step 2 already reported it" in out
+    assert "step 1 already reported it" in out
+
+
+def test_an_applied_run_still_makes_both_passes(tmp_path, config, fake_grouper,
+                                                capsys):
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed) - 1. ######")
+
+    assert run(str(root), "--apply", "--yes") == 0
+
+    out = capsys.readouterr().out
+    assert "skipped, a dry run leaves nothing" not in out
+    assert "Canonicalising (again)" in out
+    assert "Reconciling (again)" in out
+
+
+def test_a_repeat_asked_for_on_its_own_still_runs(tmp_path, config, capsys):
+    """--steps 5 means step 5, dry run or not: nothing came before it."""
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed) - 1. ######")
+
+    assert run(str(root), "--steps", "5") == 1
+
+    out = capsys.readouterr().out
+    assert "Canonicalising (again)" in out
+    assert "skipped, a dry run leaves nothing" not in out
+
+
+# --------------------------------------------------------------------------
+# Non-compliant folders, gathered and shown at the end
+# --------------------------------------------------------------------------
+
+def test_non_compliant_folders_are_reported_at_the_end(tmp_path, config, capsys):
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - Lens tests")
+    junk = root / "2026" / "07. July" / "Random Junk Folder"
+    junk.mkdir()
+
+    assert run(str(root), "--steps", "2") in (0, 1)
+
+    out = capsys.readouterr().out
+    assert "NON-COMPLIANT FOLDERS  (1)" in out
+    assert str(junk) in out
+    # After the summary, which is the whole point of gathering them.
+    assert out.index("SUMMARY") < out.index("NON-COMPLIANT FOLDERS")
+
+
+def test_nothing_to_report_prints_no_section(tmp_path, config, capsys):
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - Lens tests")
+
+    assert run(str(root), "--steps", "2") in (0, 1)
+
+    assert "NON-COMPLIANT" not in capsys.readouterr().out
+
+
+def test_a_legacy_container_with_no_equivalent_is_reported(tmp_path, config,
+                                                           capsys):
+    root = make_archive(tmp_path)
+    event = make_event(root, "2026-07-15_(Wed)__08.14.02 - Lens tests")
+    unsupported = event / "##   UNSUPPORTED EXTENSIONS   ##"
+    unsupported.mkdir()
+    (unsupported / "weird.xyz").write_bytes(b"x")
+
+    assert run(str(root), "--steps", "2") in (0, 1)
+
+    out = capsys.readouterr().out
+    assert "NON-COMPLIANT FOLDERS" in out
+    assert "no modern equivalent" in out
+    assert (unsupported / "weird.xyz").is_file()
+
+
+def test_legacy_containers_migrate_through_the_tool(tmp_path, config):
+    root = make_archive(tmp_path)
+    event = make_event(root, "2026-07-15_(Wed)__08.14.02 - Lens tests")
+    legacy = event / "##   RAWs   ##"
+    legacy.mkdir()
+    (legacy / "2026-07-15_(Wed)__08.14.02__RAW__f1.7.CR2").write_bytes(b"raw")
+
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+
+    assert (event / "__RAW" / "2026-07-15_(Wed)__08.14.02__RAW__f1.7.CR2").is_file()
+    assert not legacy.exists()
 
 
 # --------------------------------------------------------------------------

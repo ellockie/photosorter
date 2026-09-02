@@ -629,30 +629,42 @@ splitting a day moves its files down into the new sub-event folders: a folder
 that had a gridful when the batch was planned can have an empty top level by the
 time the batch reaches it.
 
-**Reuniting companions and sidecars (steps 2 and 4).** Two passes over every
-dated folder, in this order:
+**Reuniting companions and sidecars (steps 2 and 4).** Three passes, in this
+order and no other:
 
+- **`migrate_legacy_containers`** — `##   EXIFs   ##` becomes `__EXIF` and
+  `##   RAWs   ##` becomes `__RAW`. Renamed outright where nothing of that name
+  is there yet (one atomic operation that cannot half-finish); where one is,
+  each file moves across individually and a collision is settled by checksum. An
+  emptied container is parked in the `__EMPTY_SUBFOLDERS` beside it, numbered
+  `_2`, `_3` … when that name is taken. One with no modern equivalent —
+  `old_EXIF`, the three `FILES` holders — is **reported and never touched**.
 - **`reconcile_folder`** — a companion left behind in an event folder's taxonomy
   subdir follows the representative the grouper moved into a sibling sub-event.
   Matched on capture time, because the representative has been renamed since.
-- **`place_companions`** — **X10 and X13**, over the whole tree. Gather every
-  subject and every companion first, then distribute: a sidecar goes into the
-  `__EXIF` *directly inside* the folder that holds its subject, a preview into
-  that folder's `__PREVIEWS`. Matched on **name**, because a companion carries
-  its subject's full name (X1), which makes it exact rather than careful.
+- **`place_companions`** — **X10 and X13**: a companion goes into the folder
+  *directly inside* the one that holds its subject — an `._exif` into `__EXIF`,
+  a `.thm`/`.lrv` into `__PREVIEWS`. Matched on **name** (X1).
 
-Companions first, because that pass moves *subjects*: a RAW still sitting in the
-wrong event folder has no business having its sidecar placed beside it yet.
+The order is the dependency order. Migration first, so everything after it reads
+one set of folder names instead of two. Reconciliation next, because it moves
+*subjects*: a RAW still in the wrong event folder has no business having its
+sidecar placed beside it yet. Placement last.
 
-Gathering the whole index before moving anything is what lets a sidecar stranded
-in a different event folder entirely find its subject, and what makes an
-ambiguous name visible instead of guessed at — neither is answerable while
-walking one folder at a time. Cross-folder moves are counted and reported
-separately so they are reviewable.
+**A sidecar is looked for anywhere in the target** — at any depth, and across
+year trees. Placement indexes every tree of the run at once before it moves
+anything, so one stranded in a different event folder, or a different year,
+still finds its subject. Cross-folder moves are counted and reported separately.
+
+**Only a dated folder holds subjects.** A media file outside one is not a
+candidate however plausible its name: the archive's shape is what says which
+files are the archive's, and a stray JPG in a working folder must not become the
+answer to some sidecar's search. The date format is read **loosely**, as N1
+allows — a leading `YYYY-MM-DD` is enough, with or without the weekday and the
+time. A day folder that never gained a time is still a day folder.
 
 ```text
 2026-07-18_(Sat)__17.04.53 - Dive    2026-07-18…__f2.8__GP.mp4
-    2026-07-18…__f8.0__6D.jpg
     __EXIF\        …__f2.8__GP.mp4._exif        stays — subject is here
     __PREVIEWS\    …__f2.8__GP.mp4.lrv          was "…__f2.8__GP.LRV" beside it
     __RAW\         …__RAW__f8.0__6D.CR2
@@ -660,16 +672,11 @@ separately so they are reviewable.
 ```
 
 **Previews arrive in camera form** — the subject's *stem* plus its own extension,
-`GX010042.LRV` beside `GX010042.MP4` — because nothing has ever renamed one. X6
-requires previews to follow X1, and once a preview is in `__PREVIEWS` the stem is
-all that would be left to pair it by, so a camera-form preview is **renamed onto
-X1 as it moves**: `GX010042.LRV` becomes `GX010042.MP4.lrv`, extension
-lower-cased. A stem shared by two subjects is not knowable from the name, so that
-preview is left where it is and reported.
-
-The stem form is accepted for previews only. An `._exif` is written by this
-pipeline and is always in X1 form already, so allowing a stem match there would
-add a way to get it wrong and no way to get it right.
+`GX010042.LRV` beside `GX010042.MP4` — because nothing has ever renamed one. They
+are matched by stem and **renamed onto X1 as they move**: `GX010042.MP4.lrv`,
+extension lower-cased. A stem shared by two subjects is not knowable, so that
+preview is left where it is. The stem form is accepted for previews only; an
+`._exif` is always in X1 form already.
 
 #### When something already holds the destination name
 
@@ -678,26 +685,41 @@ The two files are compared by **MD5** rather than one being picked:
 | | |
 | --- | --- |
 | **identical** | the incoming copy is redundant — parked as `<name>_DUPE_<md5>_<n>` (F4) |
-| **different** | one of them is wrong and which is not knowable here — parked as `<name>_DIFFERS_<md5>_<n>` and counted separately |
+| **different** | one is wrong and which is not knowable here — parked as `<name>_DIFFERS_<md5>_<n>` and counted separately |
 
-Both land in `<year>\__DUPLICATES`, one per year tree, so a whole year's collision
-losers are in a single place to review. **Nothing is overwritten and nothing is
-deleted** (T1, T2) — the file already at the destination is left exactly as it
-was, and the parking folder is excluded from the next run's index so its contents
-are not re-reported as orphans.
+Both land in `<year>\__DUPLICATES`, one per year tree, chosen from the *subject's*
+tree so a multi-year run does not pool them. **Nothing is overwritten and nothing
+is deleted** (T1, T2), and the parking folder is excluded from the next run's
+index so its contents are not re-reported as orphans.
 
-> `__DUPLICATES` under a *year* is a deliberate extension of §4, which places it
-> inside a dated folder. Worth an amendment before the standard leaves draft.
+> `__DUPLICATES` under a *year*, and an emptied `##   EXIFs   ##` inside an
+> `__EMPTY_SUBFOLDERS`, are both deliberate extensions of §4/§4.1. Both are
+> listed under that document's open questions.
 
-A companion whose subject is nowhere in the tree is **left exactly where it is**
-and reported. It is the only surviving record that the subject existed (X3), and
-moving it on a guess would lose the one thing it still says — which is what `e`
-reports (X4).
+A companion whose subject is nowhere in the target is **left exactly where it
+is** and reported (X3). The pass also counts the media that have **no sidecar at
+all** (X4).
 
-The pass also carries the other half of the audit: how many media files the tree
-holds, and how many of them have **no sidecar at all** (X4). Those, the
-`_DIFFERS` parkings, the orphans and the ambiguous names are gathered into one
-"things that want a look" line at the end of the step.
+**Folders that fit no shape are reported at the end, in red.** Anything that is
+neither a dated folder, nor an allowed subfolder, nor a holding area, nor a
+recognised legacy container is gathered as the run goes and printed after the
+summary. A structural problem noticed halfway through a rename report scrolls
+past; these are the one part of the output somebody has to act on by hand.
+Reported, never fixed.
+
+```text
+NON-COMPLIANT FOLDERS  (2) -- reported, not touched
+  …6. July\Random Junk Folder
+      below a month folder but carries no date (N1) and is not a subfolder
+  …6-07-15_(Wed)__09.12.53 - Lens tests\##   UNSUPPORTED EXTENSIONS   ##
+      legacy container with no modern equivalent; its contents are a decision for a person
+```
+
+**A dry run does each thing once.** Steps 4 and 5 repeat 2 and 1 to clean up
+after the grouper; in a dry run the grouper never opens, so nothing has changed
+between the passes and the second would print the first's report word for word.
+Those are skipped, with a line saying why. Asked for on their own (`--steps 5`)
+they still run.
 
 **Why canonicalise twice.** Step 1 is what makes step 3 possible: the grouper is
 opened on folders carrying the `__TO_SPLIT__` marker, and a legacy `- 1. ######`

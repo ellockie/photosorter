@@ -54,6 +54,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.pipeline_stages.grouping_names import \
+    EMPTY_SUBFOLDERS_FOLDER, \
     extension_sets, \
     preview_extensions, \
     sidecar_extensions, \
@@ -65,6 +66,9 @@ from src.pipeline_stages.stamps import \
 from src.pipeline_stages.taxonomy import \
     differing_name, \
     duplicate_name, \
+    legacy_container_names, \
+    legacy_container_targets, \
+    taxonomy_subdir, \
     sidecar_dir_names, \
     sidecar_subdir, \
     strip_representative_suffixes, \
@@ -518,6 +522,17 @@ class PlacementReport:
     media: int = 0
     media_without_sidecar: int = 0
 
+    # What the walk saw on its way past and did not act on: folders that fit
+    # none of the shapes the standard allows, and legacy containers still to be
+    # migrated. Lists, not counts, because the point is to name them.
+    non_compliant: list = None           # [(path, reason)]
+    legacy_containers: list = None       # [(path, taxonomy_key or None)]
+
+    def __post_init__(self):
+        self.non_compliant = [] if self.non_compliant is None else self.non_compliant
+        self.legacy_containers = (
+            [] if self.legacy_containers is None else self.legacy_containers)
+
     @property
     def seen(self) -> int:
         return (self.moved + self.in_place + self.parked_duplicate
@@ -552,6 +567,8 @@ class PlacementReport:
                       "parked_duplicate", "parked_differing", "orphaned",
                       "ambiguous", "errors", "media", "media_without_sidecar"):
             setattr(self, field, getattr(self, field) + getattr(other, field))
+        self.non_compliant.extend(other.non_compliant)
+        self.legacy_containers.extend(other.legacy_containers)
 
 
 def companion_kinds(config: dict) -> list[tuple[str, set[str]]]:
@@ -570,44 +587,94 @@ def _companion_kind(name: str, kinds: list[tuple[str, set[str]]]):
 
 @dataclass
 class _Index:
-    """Everything one pass over the tree found."""
+    """Everything one pass over the trees found."""
 
     # A subject is any file that is not itself a companion: media, but also the
     # ".psd" in __EDITED and the ".xmp" beside it, which have sidecars too.
+    # Only files inside a dated folder are indexed -- see ``index_trees``.
     subjects_by_name: dict = None        # name.lower() -> [folder, ...]
     subjects_by_stem: dict = None        # stem.lower() -> [(name, folder), ...]
     # The media half, for the X4 audit: the files that *ought* to have a sidecar.
     media: list = None                   # [(name, folder), ...]
     companions: list = None              # [(path, folder, key, subject, ext)]
+    # Folders that fit none of the shapes the standard allows, and the legacy
+    # containers still waiting to be migrated. Reported, never acted on here.
+    non_compliant: list = None           # [(path, reason)]
+    legacy_containers: list = None       # [(path, taxonomy_key or None)]
 
     def __post_init__(self):
-        self.subjects_by_name = {} if self.subjects_by_name is None else self.subjects_by_name
-        self.subjects_by_stem = {} if self.subjects_by_stem is None else self.subjects_by_stem
-        self.media = [] if self.media is None else self.media
-        self.companions = [] if self.companions is None else self.companions
+        for field in ("subjects_by_name", "subjects_by_stem"):
+            if getattr(self, field) is None:
+                setattr(self, field, {})
+        for field in ("media", "companions", "non_compliant", "legacy_containers"):
+            if getattr(self, field) is None:
+                setattr(self, field, [])
 
 
-def index_tree(root: Path, config: dict, reporter: "_Reporter",
-               skip: Path | None = None) -> _Index:
-    """One walk over ``root``, sorting every file into subject or companion.
+def _folder_problem(name: str, inside_dated: bool, depth: int,
+                    tax_names: set[str], sidecar_names: set[str],
+                    legacy_names: set[str]) -> str | None:
+    """Why ``name`` does not belong where it is, or None if it does.
 
-    ``skip`` is left out of the walk entirely -- it is the parking folder, and
-    what is in there has already been dealt with. Without this the run after a
+    Deliberately shallow and forgiving. It answers "does this folder have one
+    of the shapes the standard allows here", not "is this archive correct" --
+    that is the fixing tool's job (section 7), and this is what a placement run
+    happens to see on its way past.
+    """
+    if day_prefix(name):
+        return None                       # a dated folder is legal at any level
+    if name == EMPTY_SUBFOLDERS_FOLDER:
+        return None                       # a holding area (H2)
+    if name in legacy_names:
+        return None                       # reported separately, as a migration
+    if inside_dated:
+        if name in tax_names or name in sidecar_names:
+            return None                   # S2/X11 allow the nesting
+        return "not a dated folder and not one of the allowed subfolders (S1)"
+    if depth <= 0:
+        # A child of the tree root: month folders live here, and so does the
+        # year-level __DUPLICATES a run parks collision losers in. ``depth`` is
+        # the *parent's* depth, so 0 means "directly under the root" -- one
+        # deeper and we are under a month folder, where a name with no date is
+        # the thing worth reporting.
+        return None
+    return "below a month folder but carries no date (N1) and is not a subfolder"
+
+
+def index_trees(roots, config: dict, reporter: "_Reporter",
+                skip_keys=()) -> _Index:
+    """One walk over every root, sorting what it finds.
+
+    **Only a dated folder holds source images.** A media file outside one is
+    not indexed as a subject, however plausible its name: the archive's shape
+    is what says which files are the archive's, and a stray JPG in a working
+    folder must not become the answer to some sidecar's search. Such a folder
+    is reported instead (see ``_folder_problem``).
+
+    The format is read loosely, as the standard does: a leading `YYYY-MM-DD` is
+    enough, with or without the weekday and the time. A day folder that never
+    gained a time is still a day folder.
+
+    ``skip_keys`` are left out of the walk entirely -- the parking folders,
+    whose contents have already been dealt with. Without this the run after a
     parking run would find those files, fail to match the ``_DUPE_``-suffixed
     names against any subject, and report every one of them as orphaned.
 
-    Reparse points are refused rather than followed (T4): this walk covers a
-    whole year tree, so a junction planted anywhere under it would otherwise
+    Reparse points are refused rather than followed (T4): this walk covers
+    whole year trees, so a junction planted anywhere under one would otherwise
     take the index -- and then the moves -- somewhere else entirely.
     """
-    skip_key = os.path.normcase(os.path.abspath(str(skip))) if skip else None
     kinds = [(key, extensions) for key, extensions in companion_kinds(config)
              if extensions]
     image_exts, video_exts = extension_sets(config)
     media_exts = image_exts | video_exts
+    tax_names = taxonomy_dir_names(config)
+    sidecar_names = sidecar_dir_names(config)
+    legacy_names = legacy_container_names(config)
+    legacy_targets = legacy_container_targets(config)
     index = _Index()
 
-    def walk(folder: Path) -> None:
+    def walk(folder: Path, inside_dated: bool, depth: int) -> None:
         for entry in _list_dir(folder, reporter):
             path = Path(entry.path)
             try:
@@ -620,22 +687,39 @@ def index_tree(root: Path, config: dict, reporter: "_Reporter",
                 reporter.error(f"could not stat {path}: {error}")
                 continue
             try:
-                if entry.is_dir(follow_symlinks=False):
-                    if skip_key is None or os.path.normcase(
-                            os.path.abspath(str(path))) != skip_key:
-                        walk(path)
-                    continue
+                is_directory = entry.is_dir(follow_symlinks=False)
             except OSError as error:
                 reporter.error(f"could not stat {path}: {error}")
                 continue
+
+            if is_directory:
+                if os.path.normcase(os.path.abspath(str(path))) in skip_keys:
+                    continue
+                problem = _folder_problem(entry.name, inside_dated, depth,
+                                          tax_names, sidecar_names, legacy_names)
+                if problem is not None:
+                    index.non_compliant.append((path, problem))
+                if entry.name in legacy_names:
+                    index.legacy_containers.append(
+                        (path, legacy_targets.get(entry.name)))
+                walk(path, inside_dated or bool(day_prefix(entry.name)), depth + 1)
+                continue
+
             if not _is_file(entry, reporter):
                 continue
 
             found = _companion_kind(entry.name, kinds)
             if found is not None:
+                # A sidecar is indexed wherever it lies. Being in the wrong
+                # place is the condition this pass exists to repair, so
+                # refusing to look outside a dated folder would hide exactly
+                # the files it is looking for.
                 key, subject, extension = found
                 index.companions.append((path, folder, key, subject, extension))
                 continue
+
+            if not inside_dated:
+                continue                  # only a dated folder holds subjects
 
             index.subjects_by_name.setdefault(entry.name.lower(), []).append(folder)
             index.subjects_by_stem.setdefault(
@@ -643,8 +727,20 @@ def index_tree(root: Path, config: dict, reporter: "_Reporter",
             if Path(entry.name).suffix.lower() in media_exts:
                 index.media.append((entry.name, folder))
 
-    walk(root)
+    for root in roots:
+        root = Path(root)
+        walk(root, bool(day_prefix(root.name)), 0)
     return index
+
+
+def survey_trees(roots, config: dict, log=lambda _msg: None) -> _Index:
+    """Walk the trees and report what is there, moving nothing.
+
+    The public face of ``index_trees``, for a caller that wants the survey
+    before it decides anything -- which legacy containers are waiting, which
+    folders fit no allowed shape. Reads only.
+    """
+    return index_trees(roots, config, _Reporter(log))
 
 
 def _free_parking_name(folder: Path, stem: str, extension: str,
@@ -663,10 +759,10 @@ def _free_parking_name(folder: Path, stem: str, extension: str,
         index += 1
 
 
-def place_companions(root: Path, config: dict, duplicates_root: Path,
+def place_companions(roots, config: dict, duplicates_for,
                      log=lambda _msg: None, move=None, checksum=None,
                      prune: bool = True) -> PlacementReport:
-    r"""Put every sidecar and preview under ``root`` in the folder that belongs to it.
+    r"""Put every sidecar and preview under ``roots`` in the folder that belongs to it.
 
     Standard X10 for sidecars, X13 for previews, and they say the same thing: a
     companion sits in ``__EXIF`` (or ``__PREVIEWS``) *directly inside* the
@@ -674,11 +770,19 @@ def place_companions(root: Path, config: dict, duplicates_root: Path,
     along the tree. A RAW in ``__RAW`` keeps its sidecar in ``__RAW\__EXIF``; a
     still at the top level keeps its own in the dated folder's ``__EXIF``.
 
-    **Gather, then distribute.** ``root`` is a whole tree, not one event folder,
-    and the index is built before anything moves. That is what lets a sidecar
-    stranded in a different event folder entirely find its subject, and what
-    makes an ambiguous name visible instead of guessed at -- neither is
-    answerable while walking one folder at a time.
+    **Gather, then distribute.** ``roots`` is every tree of the run at once,
+    not one event folder, and the index is built before anything moves. A
+    sidecar is looked for **anywhere in the target, at any depth** -- that is
+    what lets one stranded in a different event folder, or a different year,
+    find its subject, and what makes an ambiguous name visible instead of
+    guessed at. Neither is answerable while walking one folder at a time.
+
+    **Only a dated folder holds subjects.** A media file outside one is not a
+    candidate however plausible its name -- see ``index_trees``.
+
+    ``duplicates_for(folder)`` returns where a collision loser from that folder
+    should be parked, so a run over several year trees parks each year's losers
+    under that year rather than pooling them.
 
     Two ways a companion names its subject, tried in that order:
 
@@ -720,16 +824,24 @@ def place_companions(root: Path, config: dict, duplicates_root: Path,
     move = default_move if move is None else move
     checksum = default_checksum if checksum is None else checksum
 
-    if not root.is_dir():
-        reporter.error(f"{root} is gone, no companions placed")
+    roots = [Path(one) for one in roots]
+    missing = [one for one in roots if not one.is_dir()]
+    for one in missing:
+        reporter.error(f"{one} is gone, no companions placed")
+    roots = [one for one in roots if one not in missing]
+    if not roots:
         report.errors = reporter.error_count
         return report
 
     if not any(extensions for _key, extensions in companion_kinds(config)):
         return report          # an archive configured to keep neither
 
-    index = index_tree(root, config, reporter, skip=duplicates_root)
+    skip_keys = {os.path.normcase(os.path.abspath(str(duplicates_for(one))))
+                 for one in roots}
+    index = index_trees(roots, config, reporter, skip_keys)
     report.media = len(index.media)
+    report.non_compliant = list(index.non_compliant)
+    report.legacy_containers = list(index.legacy_containers)
 
     # Which subjects a sidecar was found for, so the X4 audit can name the media
     # that have none. Only "._exif" counts here: a preview is not counted in e
@@ -802,7 +914,8 @@ def place_companions(root: Path, config: dict, duplicates_root: Path,
                     f"could not checksum {path} against {destination}: {error}")
                 continue
             parked = _free_parking_name(
-                duplicates_root, subject_name, extension, digest[:8], not same)
+                duplicates_for(subject_folder), subject_name, extension,
+                digest[:8], not same)
             try:
                 move(path, parked)
             except Exception as error:
@@ -864,3 +977,204 @@ def _dated_ancestor(folder: Path) -> str:
         if day_prefix(candidate.name):
             return candidate.name
     return folder.name
+
+
+# --------------------------------------------------------------------------
+# Migrating the legacy containers
+# --------------------------------------------------------------------------
+
+@dataclass
+class MigrationReport:
+    """What became of the pre-"__" containers the legacy CLI wrote."""
+
+    renamed: int = 0
+    merged: int = 0
+    files_moved: int = 0
+    parked: int = 0
+    left: int = 0
+    errors: int = 0
+
+    @property
+    def seen(self) -> int:
+        return self.renamed + self.merged + self.left + self.errors
+
+    def summary(self) -> str:
+        parts = [f"renamed {self.renamed}"]
+        for label, value in (("merged", self.merged),
+                             ("files moved", self.files_moved),
+                             ("parked empty", self.parked),
+                             ("left alone", self.left),
+                             ("errors", self.errors)):
+            if value:
+                parts.append(f"{value} {label}")
+        return ", ".join(parts)
+
+    def merge(self, other: "MigrationReport") -> None:
+        for field in ("renamed", "merged", "files_moved", "parked", "left",
+                      "errors"):
+            setattr(self, field, getattr(self, field) + getattr(other, field))
+
+
+def _free_versioned_name(folder: Path, name: str) -> Path:
+    """``folder/name``, numbered until nothing holds it.
+
+    The `_2`, `_3` … the standard already uses to keep two emptied folders
+    apart (N10a's discriminator), applied here for the same reason: every day
+    in a month has a container of the same name, and they all end up in one
+    parking folder.
+    """
+    candidate = folder / name
+    index = 1
+    while candidate.exists():
+        index += 1
+        candidate = folder / f"{name}_{index}"
+    return candidate
+
+
+def _folder_is_empty(folder: Path) -> bool:
+    """True when ``folder`` holds no file anywhere beneath it."""
+    try:
+        for _directory, _subdirs, names in os.walk(folder):
+            if names:
+                return False
+    except OSError:
+        return False
+    return True
+
+
+def migrate_legacy_containers(containers, config: dict, duplicates_for,
+                              log=lambda _msg: None, move=None,
+                              checksum=None) -> MigrationReport:
+    r"""Move what the legacy CLI wrote into the folders it is called now.
+
+    ``##   EXIFs   ##`` becomes ``__EXIF`` and ``##   RAWs   ##`` becomes
+    ``__RAW``. Two ways, whichever is safe:
+
+      * the modern folder does not exist yet -- the container is **renamed**,
+        one atomic operation that cannot half-finish and cannot lose a file;
+      * it does exist -- each file is **moved across** individually, and a name
+        already taken is settled by checksum exactly as companion placement
+        settles one: identical is parked as ``_DUPE_``, different as
+        ``_DIFFERS_``. Nothing is overwritten (T2) and nothing is deleted (T1).
+
+    A container left **absolutely empty** -- no file anywhere beneath it -- is
+    then parked in the ``__EMPTY_SUBFOLDERS`` beside it, the same holding area
+    and the same "sibling of what it takes" rule the grouping stage uses,
+    numbered ``_2``, ``_3`` … when that name is taken. One still holding
+    anything is left exactly where it is and reported: a folder that would not
+    empty is a question, not a job.
+
+    Containers with no modern equivalent -- ``old_EXIF`` and the three "FILES"
+    holders -- are counted as left alone. Where their contents belong is a
+    decision for a person, and this makes none of it.
+
+    ``containers`` is ``[(path, taxonomy_key or None)]``, as ``index_trees``
+    collects them. ``duplicates_for(folder)`` says where a collision loser is
+    parked -- the same place companion placement parks one, so the two passes
+    do not scatter losers into two different holding areas.
+    """
+    report = MigrationReport()
+    reporter = _Reporter(log)
+    move = default_move if move is None else move
+    checksum = default_checksum if checksum is None else checksum
+
+    for container, key in containers:
+        container = Path(container)
+        if key is None:
+            report.left += 1
+            reporter.note(
+                "unmapped",
+                f"- left {container}: no modern folder corresponds to it")
+            continue
+        if not container.is_dir():
+            continue                      # an earlier pass already took it
+
+        destination = Path(taxonomy_subdir(container.parent, config, key))
+        if not destination.exists():
+            try:
+                move(container, destination)
+            except Exception as error:
+                reporter.error(f"could not rename {container}: {error}")
+                continue
+            report.renamed += 1
+            reporter.note("renamed",
+                          f"* {container.name} -> {destination.name}")
+            continue
+
+        moved_here = _merge_container(container, destination,
+                                      duplicates_for(container.parent),
+                                      move, checksum, report, reporter)
+        if moved_here:
+            report.merged += 1
+        _park_if_empty(container, report, reporter, move)
+
+    report.errors = reporter.error_count
+    return report
+
+
+def _merge_container(container: Path, destination: Path, parking: Path,
+                     move, checksum, report: "MigrationReport",
+                     reporter: "_Reporter") -> bool:
+    """Move every file out of ``container`` into ``destination``. Returns moved-any."""
+    moved_any = False
+    for directory, _subdirs, names in os.walk(container):
+        relative = Path(directory).relative_to(container)
+        for name in sorted(names):
+            source = Path(directory) / name
+            target = destination / relative / name
+            if target.exists():
+                try:
+                    digest = checksum(source)
+                    same = digest == checksum(target)
+                except OSError as error:
+                    reporter.error(f"could not checksum {source}: {error}")
+                    continue
+                stem, extension = os.path.splitext(name)
+                parked = _free_parking_name(
+                    parking, stem, extension, digest[:8], not same)
+                try:
+                    move(source, parked)
+                except Exception as error:
+                    reporter.error(f"could not park {source}: {error}")
+                    continue
+                report.files_moved += 1
+                moved_any = True
+                reporter.note(
+                    "collision",
+                    ("= " if same else "! ")
+                    + f"{name}: {'identical to' if same else 'DIFFERENT from'} "
+                      f"the one already in {destination.name}, "
+                      f"parked as {parked.name}")
+                continue
+            try:
+                move(source, target)
+            except Exception as error:
+                reporter.error(f"could not move {source}: {error}")
+                continue
+            report.files_moved += 1
+            moved_any = True
+    return moved_any
+
+
+def _park_if_empty(container: Path, report: "MigrationReport",
+                   reporter: "_Reporter", move) -> None:
+    """Park an emptied container in the ``__EMPTY_SUBFOLDERS`` beside it."""
+    if not container.is_dir():
+        return
+    if not _folder_is_empty(container):
+        report.left += 1
+        reporter.note(
+            "not-empty",
+            f"- left {container}: still holds files after the migration")
+        return
+    parking = container.parent / EMPTY_SUBFOLDERS_FOLDER
+    target = _free_versioned_name(parking, container.name)
+    try:
+        move(container, target)
+    except Exception as error:
+        reporter.error(f"could not park empty {container}: {error}")
+        return
+    report.parked += 1
+    reporter.note("parked",
+                  f"* {container.name} was left empty, parked as "
+                  f"{EMPTY_SUBFOLDERS_FOLDER}/{target.name}")

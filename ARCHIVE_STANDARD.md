@@ -247,6 +247,37 @@ live *inside* an event folder and hold that event's files.
 | H3 | It holds **dated folders**, which keep their own names and go on obeying §2. Moving a folder into one does not rename it. |
 | H4 | The set is closed, as §4's is. Today there is exactly one: `__EMPTY_SUBFOLDERS`, for day folders emptied of every file — parked rather than offered to a grouper. |
 
+### 4.2 Legacy containers — read, migrated, never written
+
+Before every subfolder gained its `__` prefix the legacy CLI wrote a different
+set, and an archive this old is still full of them. They are **recognised** so a
+walk does not report them as unknown folders, and **migrated** where a modern
+folder corresponds:
+
+| Legacy container | Becomes | |
+| --- | --- | --- |
+| `##   RAWs   ##` | `__RAW` | migrated |
+| `##   EXIFs   ##` | `__EXIF` | migrated |
+| `old_EXIF` | — | reported; the sidecars in it were already judged stale |
+| `##   UNSUPPORTED EXTENSIONS   ##` | — | reported |
+| `##   EMPTY FILES   ##` | — | reported |
+| `##   NOT_ENOUGH_INFO FILES   ##` | — | reported |
+| `##   DUPLICATE_FILE_NAMES FILES   ##` | — | reported |
+
+| ID | Rule |
+| --- | --- |
+| L1 | A legacy container MUST NOT be newly written. Same read-old/write-new rule as N5 and S5. |
+| L2 | Migration is a **rename** where the modern folder does not exist, so it cannot half-finish; a **file-by-file move** where it does. |
+| L3 | A name collision during the move is settled by **checksum**, never by overwriting: identical is parked `_DUPE_`, different `_DIFFERS_` (F4). |
+| L4 | A container left **absolutely empty** — no file anywhere beneath it — is parked in the `__EMPTY_SUBFOLDERS` beside it, numbered `_2`, `_3` … when that name is taken. One still holding anything is left where it is and reported. |
+| L5 | A container with **no modern equivalent** is never emptied automatically. Where its contents belong is a decision for a person. |
+
+**Implemented** — `migrate_legacy_containers` in `companion_matching.py`, run by
+the restructure tool. The names are read through `legacy_container_targets` in
+`taxonomy.py`, which honours `config.json`'s `legacy.subfolders` (T8/S4).
+
+---
+
 ### **[OPEN]** — still to settle
 
 1. **Where does a collision loser go?** S4 puts `__DUPLICATES` inside a dated
@@ -254,7 +285,13 @@ live *inside* an event folder and hold that event's files.
    `<YYYY>\__DUPLICATES`, so a whole year's losers are in a single place to
    review rather than scattered one per event. That is outside §4 as written and
    wants either an amendment here or a change there before this leaves draft.
-2. **May a tool other than the grouping stage move folders into
+2. **May a holding area hold something that is not a dated folder?** H3 says it
+   holds dated folders. The legacy-container migration (§4.2) parks an emptied
+   `##   EXIFs   ##` in the `__EMPTY_SUBFOLDERS` beside it, which is a
+   *subfolder*, not a dated folder — and inside a dated folder rather than beside
+   one, since that is where the container was. Both halves of H1–H4 would have to
+   widen, or the migration needs somewhere else to put them.
+3. **May a tool other than the grouping stage move folders into
    `__EMPTY_SUBFOLDERS`?** §4.1 now gives it a home — a sibling of the dated
    folders it takes, at whatever level they live — but only
    `screenshot_grouping.py` writes to it today.

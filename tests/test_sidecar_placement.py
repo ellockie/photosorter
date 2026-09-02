@@ -26,12 +26,14 @@ from src.pipeline_stages.grouping_names import sidecar_subject_name
 
 def relocate_sidecars(root, config, log=lambda _m: None, move=None,
                       checksum=None, prune=True):
-    """place_companions with the duplicates folder alongside the tree.
+    """place_companions over one dated folder, parking beside it.
 
-    Every test here works on one dated folder, so collision losers land in a
-    "__DUPLICATES" beside it rather than under a year.
+    Every test here works on a single dated folder, so it is passed as the one
+    root and collision losers land in a "__DUPLICATES" beside it rather than
+    under a year.
     """
-    return place_companions(root, config, Path(root).parent / "__DUPLICATES",
+    parking = Path(root).parent / "__DUPLICATES"
+    return place_companions([root], config, lambda _folder: parking,
                             log, move=move, checksum=checksum, prune=prune)
 
 STEM = "2026-07-18_(Sat)__17.04.53"
@@ -410,3 +412,105 @@ def test_an_archive_keeping_no_previews_leaves_them_alone(tmp_path):
     report = relocate_sidecars(day, config)
     assert report.seen == 0
     assert preview.is_file()
+
+
+# --------------------------------------------------------------------------
+# Only a dated folder holds subjects, and a sidecar may lie anywhere
+# --------------------------------------------------------------------------
+
+def place(roots, config, log=lambda _m: None, parking=None):
+    return place_companions(roots, config, lambda _folder: parking or roots[0],
+                            log)
+
+
+def build_two_years(tmp_path):
+    """Two year trees, each with one dated folder holding one image."""
+    made = {}
+    for year, month, day, name in (
+            ("2025", "08. August", "2025-08-01_(Fri) - Trip", "2025-08-01_(Fri)__12.00.00__f4__6D.jpg"),
+            ("2026", "07. July", "2026-07-18_(Sat)__17.04.53 - Dive", JPG)):
+        folder = tmp_path / year / month / day
+        folder.mkdir(parents=True)
+        (folder / name).write_bytes(b"media")
+        made[year] = (tmp_path / year, folder, name)
+    return made
+
+
+def test_a_dated_folder_needs_no_time(tmp_path):
+    """The format is read loosely: a leading date is enough (N1)."""
+    made = build_two_years(tmp_path)
+    year, folder, name = made["2025"]
+    # "2025-08-01_(Fri) - Trip" carries no time at all.
+    (folder / f"{name}._exif").write_bytes(b"e")
+    report = place([year], make_config())
+    assert report.moved == 1
+    assert (folder / "__EXIF" / f"{name}._exif").is_file()
+
+
+def test_a_sidecar_finds_its_subject_in_another_year(tmp_path):
+    """Anywhere in the whole target, at any depth."""
+    made = build_two_years(tmp_path)
+    year_2025, folder_2025, name_2025 = made["2025"]
+    year_2026, folder_2026, _name = made["2026"]
+    # The 2025 sidecar is stranded deep inside a 2026 event folder.
+    stranded = folder_2026 / "__RAW"
+    stranded.mkdir()
+    (stranded / f"{name_2025}._exif").write_bytes(b"e")
+
+    report = place([year_2025, year_2026], make_config())
+
+    assert report.moved == 1
+    assert report.across_folders == 1
+    assert (folder_2025 / "__EXIF" / f"{name_2025}._exif").is_file()
+
+
+def test_media_outside_a_dated_folder_is_never_a_subject(tmp_path):
+    """A stray JPG in a working folder must not answer some sidecar's search."""
+    made = build_two_years(tmp_path)
+    year, _folder, _name = made["2026"]
+    junk = year / "07. July" / "Random Junk Folder"
+    junk.mkdir()
+    (junk / "stray.jpg").write_bytes(b"stray")
+    (junk / "stray.jpg._exif").write_bytes(b"e")
+
+    report = place([year], make_config())
+
+    assert report.orphaned == 1                 # the subject is not indexed
+    assert (junk / "stray.jpg._exif").is_file()
+    assert (junk / "stray.jpg").is_file()
+
+
+def test_a_folder_that_fits_no_shape_is_reported(tmp_path):
+    made = build_two_years(tmp_path)
+    year, _folder, _name = made["2026"]
+    junk = year / "07. July" / "Random Junk Folder"
+    junk.mkdir()
+
+    report = place([year], make_config())
+
+    assert [path for path, _reason in report.non_compliant] == [junk]
+    assert "carries no date" in report.non_compliant[0][1]
+
+
+def test_month_folders_and_dated_folders_are_not_reported(tmp_path):
+    made = build_two_years(tmp_path)
+    year, folder, _name = made["2026"]
+    (folder / "__RAW").mkdir()
+    (folder / "__RAW" / "__EXIF").mkdir()       # X11's one legal nest
+    (year / "__DUPLICATES").mkdir()
+
+    report = place([year], make_config())
+
+    assert report.non_compliant == []
+
+
+def test_an_unknown_folder_inside_a_dated_folder_is_reported(tmp_path):
+    made = build_two_years(tmp_path)
+    year, folder, _name = made["2026"]
+    odd = folder / "my notes"
+    odd.mkdir()
+
+    report = place([year], make_config())
+
+    assert [path for path, _reason in report.non_compliant] == [odd]
+    assert "allowed subfolders" in report.non_compliant[0][1]

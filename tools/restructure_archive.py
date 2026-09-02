@@ -60,43 +60,79 @@ the audit markers from what is finally on disk.
 
 What reconciliation does
 ------------------------
-Two passes over every dated folder, in this order:
+Three passes, in this order and no other:
 
+  * ``migrate_legacy_containers`` -- "##   EXIFs   ##" becomes "__EXIF" and
+    "##   RAWs   ##" becomes "__RAW". Renamed outright where nothing of that
+    name is there yet; where one is, each file moves across and a collision is
+    settled by checksum. An emptied container is parked in the
+    "__EMPTY_SUBFOLDERS" beside it, numbered when that name is taken. A
+    container with no modern equivalent -- "old_EXIF", the three "FILES"
+    holders -- is reported and never touched.
   * ``reconcile_folder`` -- a companion left in an event folder's taxonomy
     subdir follows the representative the grouper moved into a sibling
     sub-event. Matched on capture time, because the representative has been
     renamed since.
   * ``place_companions`` -- X10 and X13: a companion goes into the folder
     directly inside the one that holds its subject -- an "._exif" sidecar into
-    "__EXIF", a ".thm" or ".lrv" preview into "__PREVIEWS". A RAW in "__RAW"
-    keeps its sidecar in "__RAW\__EXIF"; a still at the top level keeps its own
-    in the dated folder's "__EXIF". Matched on name, because a companion
-    carries its subject's full name (X1).
+    "__EXIF", a ".thm" or ".lrv" preview into "__PREVIEWS". Matched on name,
+    because a companion carries its subject's full name (X1).
 
-    For sidecars this is the migration section 6 asks for: everything that
-    writes the archive already honours X10, so what is left over is the ones
-    written before it. For previews it is the first routing they have ever
-    had -- nothing has moved a ".thm" anywhere -- so they are still lying where
-    the camera wrote them, named after the subject's *stem* rather than its
-    full name. Those are matched by stem and renamed onto X1 as they move:
-    "GX010042.LRV" becomes "GX010042.MP4.lrv" in "__PREVIEWS". A stem shared by
-    two subjects is not knowable, so that preview is left where it is.
+The order is the dependency order. Migration first, so everything after it
+reads one set of folder names instead of two. Reconciliation next, because it
+moves *subjects*: a RAW still in the wrong event folder has no business having
+its sidecar placed beside it yet. Placement last, once every file is in the
+folder it belongs to.
 
-Companions first, because that pass moves *subjects*: a RAW still sitting in
-the wrong event folder has no business having its sidecar placed beside it
-yet. Once every file is in the right folder, the second pass says where in
-that folder it goes.
+**A sidecar is looked for anywhere in the target**, at any depth and across
+year trees -- placement indexes every tree of the run at once before it moves
+anything. That is what lets one stranded in a different event folder, or a
+different year, find its subject.
 
-A sidecar whose subject cannot be found is **left exactly where it is** and
+**Only a dated folder holds subjects.** A media file outside one is not a
+candidate however plausible its name: the archive's shape is what says which
+files are the archive's, and a stray JPG in a working folder must not become
+the answer to some sidecar's search. The date format is read loosely, as N1
+allows -- a leading "YYYY-MM-DD" is enough, with or without the weekday and
+the time. A day folder that never gained a time is still a day folder.
+
+For sidecars, placement is the migration section 6 asks for: everything that
+writes the archive already honours X10, so what is left over is the ones
+written before it. For previews it is the first routing they have ever had --
+nothing has moved a ".thm" anywhere -- so they are still lying where the camera
+wrote them, named after the subject's *stem* rather than its full name. Those
+are matched by stem and renamed onto X1 as they move: "GX010042.LRV" becomes
+"GX010042.MP4.lrv" in "__PREVIEWS". A stem shared by two subjects is not
+knowable, so that preview is left where it is.
+
+A companion whose subject cannot be found is **left exactly where it is** and
 reported. It is the only surviving record that the subject existed (X3), and
 moving it on a guess would lose the one thing it still says.
 
-Neither pass is implemented here. Both are ``companion_matching.py``, the same
-module the pipeline's companion-reconciliation stage runs -- see its docstring
-for why it is a module rather than part of the stage. This tool supplies only
-the two things a maintenance run needs and a pipeline run does not: a mover
-that records instead of writing, so a dry run can report (T3), and pruning
-turned off while it does.
+None of the three is implemented here. All are ``companion_matching.py``, the
+same module the pipeline's companion-reconciliation stage runs -- see its
+docstring for why it is a module rather than part of the stage. This tool
+supplies only what a maintenance run needs and a pipeline run does not: a mover
+that records instead of writing so a dry run can report (T3), the project's
+chunked checksum, and pruning turned off while it reports.
+
+Folders that fit no shape
+-------------------------
+Anything the walk meets that is neither a dated folder, nor an allowed
+subfolder, nor a holding area, nor a recognised legacy container is collected
+and printed **at the end of the run, in red**. A structural problem noticed
+halfway through a rename report scrolls past; these are the one part of the
+output somebody has to act on by hand. Reported, never fixed -- what to do with
+a folder the standard does not describe is a decision, and steps 6 and 7 are
+where that will live once the standard leaves draft.
+
+A dry run does each thing once
+------------------------------
+Steps 4 and 5 repeat 2 and 1 to clean up after the grouper. In a dry run the
+grouper never opens, so nothing has changed between the passes and the second
+would print the first's report word for word. Those are skipped, with a line
+saying why. Asked for on their own (``--steps 5``) they still run: nothing came
+before them to repeat.
 
 Steps 6 and 7 are placeholders
 ------------------------------
@@ -768,41 +804,56 @@ def archive_checksum(run):
     return checksum
 
 
-def duplicates_folder(tree, config):
+def tree_of(folder, run):
+    """The run tree ``folder`` sits in, or the first tree as a fallback."""
+    key = path_key(folder)
+    for tree in run.trees:
+        if inside(path_key(tree), folder):
+            return tree
+    return run.trees[0]
+
+
+def duplicates_folder(folder, run, config):
     r"""Where a companion that lost a name collision is parked.
 
     One per year tree -- ``<year>\__DUPLICATES`` -- so a whole year's collision
     losers land in a single place to review, rather than being scattered one
-    per event folder. This is a deliberate extension of section 4, which puts
-    ``__DUPLICATES`` *inside* a dated folder; see the tool's module docstring.
+    per event folder. Chosen from the *subject's* tree, so a run over several
+    years parks each year's losers under that year instead of pooling them.
+
+    This is a deliberate extension of section 4, which puts ``__DUPLICATES``
+    inside a dated folder; see the tool's module docstring.
 
     The name itself is read from the taxonomy, never spelled here (S4).
     """
-    return Path(tree) / taxonomy.taxonomy_folder(config, "duplicates")
+    return Path(tree_of(folder, run)) / taxonomy.taxonomy_folder(config, "duplicates")
 
 
 def step_reconcile(run, label):
-    """Reunite companions with their representatives, then place every one of them.
+    """Migrate the legacy containers, reunite companions, place every one of them.
 
-    Two passes, in this order and no other:
+    Three passes, in this order and no other:
 
-    1. ``reconcile_folder``, per dated folder -- the engine the pipeline stage
+    1. ``migrate_legacy_containers`` -- ``##   EXIFs   ##`` becomes ``__EXIF``
+       and ``##   RAWs   ##`` becomes ``__RAW``, so everything after this reads
+       one set of folder names instead of two.
+    2. ``reconcile_folder``, per dated folder -- the engine the pipeline stage
        runs. A companion left behind in an event folder's taxonomy subdir
        follows the representative the grouper moved into a sibling sub-event,
        matched on capture time because the representative has been renamed
        since.
-    2. ``place_companions``, per year tree -- gather every subject and every
-       companion in the whole tree, then distribute. A sidecar goes into the
+    3. ``place_companions``, over the **whole target at once** -- gather every
+       subject and every companion, then distribute. A sidecar goes into the
        ``__EXIF`` directly inside the folder holding its subject (X10), a
        preview into that folder's ``__PREVIEWS`` (X13), matched on name because
        a companion carries its subject's full name (X1).
 
-    Pass 1 first, because it is the one that moves *subjects*: a RAW still in
-    the wrong event folder has no business having its sidecar placed beside it
-    yet. Once every file is in the folder it belongs to, pass 2 says where in
-    that folder each companion goes -- and, because it indexes the whole tree
-    before moving anything, finds the ones stranded in a different event
-    entirely.
+    The order is the dependency order. Migration first, because a companion
+    still sitting in ``##   EXIFs   ##`` is in a folder the later passes would
+    have to know two names for. Reconciliation next, because it moves
+    *subjects*: a RAW still in the wrong event folder has no business having
+    its sidecar placed beside it yet. Placement last, once every file is in the
+    folder it belongs to, to say where in that folder each companion goes.
     """
     folders = dated_folders(run)
     if not folders:
@@ -813,48 +864,75 @@ def step_reconcile(run, label):
     move = archive_mover(run)
     checksum = archive_checksum(run)
     run.planned = []
+    migration = matching.MigrationReport()
     companions = matching.ReconcileReport()
     placement = matching.PlacementReport()
 
     run.report("bold", "%s %d dated folder(s) in %d tree(s)"
                % (label, len(folders), len(run.trees)))
 
+    def log(message):
+        run.report("dim", "  %s" % message.strip())
+
+    # 1 -- the legacy containers. Found by the same walk that indexes the tree,
+    # so this asks for an index first and then acts on what it named.
+    survey = matching.survey_trees(run.trees, config, log)
+    if survey.legacy_containers:
+        try:
+            migration.merge(matching.migrate_legacy_containers(
+                survey.legacy_containers, config,
+                lambda folder: duplicates_folder(folder, run, config), log,
+                move=move, checksum=checksum))
+        except Exception as error:
+            run.report(FAILED, "  ! migrating legacy containers failed: %r" % error)
+            migration.errors += 1
+
+    # 2 -- companions after their representative, per event folder.
     for folder in folders:
-        def log(message, folder=folder):
+        def folder_log(message, folder=folder):
             run.report("dim", "  %s: %s" % (folder.name, message.strip()))
         try:
             companions.merge(matching.reconcile_folder(
-                folder, config, log, move=move, prune=run.apply))
-        except Exception as error:            # never abandon the rest of the tree
+                folder, config, folder_log, move=move, prune=run.apply))
+        except Exception as error:        # never abandon the rest of the tree
             run.report(FAILED, "  ! reconciling %s failed: %r" % (folder.name, error))
             companions.errors += 1
 
-    for tree in run.trees:
-        def log(message, tree=tree):
-            run.report("dim", "  %s" % message.strip())
-        try:
-            placement.merge(matching.place_companions(
-                tree, config, duplicates_folder(tree, config), log,
-                move=move, checksum=checksum, prune=run.apply))
-        except Exception as error:
-            run.report(FAILED, "  ! placing companions in %s failed: %r"
-                       % (tree, error))
-            placement.errors += 1
+    # 3 -- placement, over every tree at once so a sidecar stranded anywhere in
+    # the target can still find its subject.
+    try:
+        placement.merge(matching.place_companions(
+            run.trees, config, lambda folder: duplicates_folder(folder, run, config),
+            log, move=move, checksum=checksum, prune=run.apply))
+    except Exception as error:
+        run.report(FAILED, "  ! placing companions failed: %r" % error)
+        placement.errors += 1
 
     if not run.apply:
         for source, target in run.planned:
             run.report("dim", "    %s\n    ->  %s" % (source, target))
 
+    if migration.seen:
+        run.report("bold", "\nLegacy containers: %s" % migration.summary())
     run.report("bold", "\nCompanions following their representative: %s"
                % companions.summary())
     run.report("bold", "Companion placement (X10/X13): %s" % placement.summary())
     run.report("dim", "%d media file(s) indexed" % placement.media)
 
+    # Everything the run saw and did not settle, gathered where it can be read
+    # rather than scrolled back to.
+    run.non_compliant.extend(placement.non_compliant)
+    for path, key in survey.legacy_containers:
+        if key is None:
+            run.non_compliant.append(
+                (path, "legacy container with no modern equivalent; "
+                       "its contents are a decision for a person"))
+
     if placement.needs_attention:
         run.report("warn", "\n%d thing(s) want a look: %s" % (
             placement.needs_attention,
             ", ".join(
-                "%d %s" % (value, label) for label, value in (
+                "%d %s" % (value, text) for text, value in (
                     ("with DIFFERENT bytes at the destination",
                      placement.parked_differing),
                     ("with no subject anywhere", placement.orphaned),
@@ -868,6 +946,10 @@ def step_reconcile(run, label):
                          "with --apply." % len(run.planned))
 
     run.journal.write("reconcile", folders=len(folders),
+                      legacy_renamed=migration.renamed,
+                      legacy_merged=migration.merged,
+                      legacy_files_moved=migration.files_moved,
+                      legacy_parked=migration.parked,
                       companions_moved=companions.moved,
                       companions_left=companions.left_behind,
                       placed=placement.moved,
@@ -878,9 +960,11 @@ def step_reconcile(run, label):
                       ambiguous=placement.ambiguous,
                       media=placement.media,
                       media_without_sidecar=placement.media_without_sidecar,
-                      errors=companions.errors + placement.errors)
+                      non_compliant=len(placement.non_compliant),
+                      errors=(companions.errors + placement.errors
+                              + migration.errors))
 
-    if companions.errors or placement.errors:
+    if companions.errors or placement.errors or migration.errors:
         return 1
     if not run.apply and run.planned:
         return 1
@@ -919,19 +1003,50 @@ def step_standard_fix(run):
 # The run
 # --------------------------------------------------------------------------
 
+# number, title, action, and the step this one repeats (None for a first pass).
+#
+# A repeat exists to clean up after the step between the two -- the grouper. In
+# a dry run the grouper never opens, so nothing has changed between the passes
+# and the second would print the first's report word for word. Those are
+# skipped, with a line saying why, unless asked for on their own.
 STEPS = (
     (1, "Canonicalise names",
-     lambda run: step_canonicalise(run, "Canonicalising")),
+     lambda run: step_canonicalise(run, "Canonicalising"), None),
     (2, "Reunite companions and sidecars",
-     lambda run: step_reconcile(run, "Reconciling")),
-    (3, "Group the %s folders" % TO_SPLIT_MARKER, step_group),
+     lambda run: step_reconcile(run, "Reconciling"), None),
+    (3, "Group the %s folders" % TO_SPLIT_MARKER, step_group, None),
     (4, "Reunite companions and sidecars again",
-     lambda run: step_reconcile(run, "Reconciling (again)")),
+     lambda run: step_reconcile(run, "Reconciling (again)"), 2),
     (5, "Canonicalise names again",
-     lambda run: step_canonicalise(run, "Canonicalising (again)")),
-    (6, "Check compliance with the archive standard", step_standard_check),
-    (7, "Fix compliance with the archive standard", step_standard_fix),
+     lambda run: step_canonicalise(run, "Canonicalising (again)"), 1),
+    (6, "Check compliance with the archive standard", step_standard_check, None),
+    (7, "Fix compliance with the archive standard", step_standard_fix, None),
 )
+
+
+def report_non_compliant(run, colour):
+    """The last thing the run prints: folders that fit no allowed shape.
+
+    In red, at the end, and nowhere else. A structural problem noticed halfway
+    through a rename report scrolls past; the point of gathering them is that
+    they are the one part of the output somebody has to act on by hand.
+
+    Reported, never fixed. What to do with a folder the standard does not
+    describe is a decision, and steps 6 and 7 are where that will live once the
+    standard leaves draft.
+    """
+    if not run.non_compliant:
+        return
+    print()
+    print(colourise("NON-COMPLIANT FOLDERS  (%d) -- reported, not touched"
+                    % len(run.non_compliant), FAILED, colour))
+    seen = set()
+    for path, reason in sorted(run.non_compliant, key=lambda item: str(item[0]).lower()):
+        if path_key(path) in seen:
+            continue
+        seen.add(path_key(path))
+        print(colourise("  %s" % path, FAILED, colour))
+        print(colourise("      %s" % reason, "dim", colour))
 
 
 class Run:
@@ -952,6 +1067,10 @@ class Run:
         self.grouping_settings = canonicalise.GroupingSettings(canonicalise._config())
         # Where a dry run's reconcile step collects the moves it would make.
         self.planned = []
+        # Folders that fit none of the shapes the standard allows, gathered as
+        # the run goes and printed together at the end (in red) rather than
+        # scrolling past in the middle of a rename report.
+        self.non_compliant = []
         self.journal = Journal(None)
 
     def report(self, key, message):
@@ -983,7 +1102,7 @@ class Run:
 
 def selected_steps(text):
     """``--steps 1,3`` -> the step numbers to run, in their fixed order."""
-    numbers = [number for number, _, _ in STEPS]
+    numbers = [number for number, _, _, _ in STEPS]
     if not text:
         return numbers
     wanted = set()
@@ -1106,14 +1225,24 @@ def main(argv=None):
 
     outcomes = []
     worst = 0
-    for number, title, action in STEPS:
+    ran = set()
+    for number, title, action, repeats in STEPS:
         if number not in steps:
+            outcomes.append((number, title, SKIPPED))
+            continue
+        if not args.apply and repeats is not None and repeats in ran:
+            # Nothing between the two passes changed anything, so the second
+            # would report exactly what the first did.
+            report("dim", "\nSTEP %d -- %s: skipped, a dry run leaves nothing "
+                          "for a second pass to find (step %d already reported "
+                          "it)." % (number, title, repeats))
             outcomes.append((number, title, SKIPPED))
             continue
         report("bold", "\n" + "=" * 60)
         report("bold", "STEP %d -- %s" % (number, title))
         report("bold", "=" * 60)
         code = action(run)
+        ran.add(number)
         worst = max(worst, code)
         outcomes.append((number, title, {0: OK, 1: PENDING}.get(code, FAILED)))
         if code == 2:
@@ -1129,8 +1258,11 @@ def main(argv=None):
         key = {OK: "ok", PENDING: "warn", SKIPPED: "dim"}.get(outcome, FAILED)
         print("  %s  %s" % (colourise("%-7s" % outcome, key, colour),
                             "%d. %s" % (number, title)))
+    report_non_compliant(run, colour)
+
     if run.journal.path is not None:
-        run.journal.write("run_finished", exit_code=worst)
+        run.journal.write("run_finished", exit_code=worst,
+                          non_compliant=len(run.non_compliant))
         print(colourise("\nJournal: %s" % run.journal.path, "dim", colour))
     if not args.apply and worst == 1:
         print(colourise("\nNothing was changed. Re-run with --apply.", "ok", colour))

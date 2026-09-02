@@ -54,6 +54,58 @@ LEGACY_TAXONOMY = {
     "to_share_old": "__2_SHARE",
 }
 
+# The containers the legacy CLI wrote, before every subfolder gained its "__"
+# prefix, and the taxonomy key each one's contents belong under now. Mirrors
+# config.json "legacy.subfolders"; that block may rename them, so read through
+# ``legacy_container_targets`` rather than using this directly.
+#
+# Only these two carry a mapping. The rest are recognised so a walk does not
+# report them as unknown folders, but nothing moves their contents: an
+# "old_EXIF" holds sidecars already judged stale, and the three "FILES"
+# containers hold whatever the legacy run could not classify. Where those
+# belong is a decision for a person.
+DEFAULT_LEGACY_CONTAINERS = {
+    "raw": "##   RAWs   ##",
+    "exif": "##   EXIFs   ##",
+}
+
+DEFAULT_LEGACY_CONTAINERS_UNMAPPED = (
+    "old_EXIF",
+    "##   UNSUPPORTED EXTENSIONS   ##",
+    "##   EMPTY FILES   ##",
+    "##   NOT_ENOUGH_INFO FILES   ##",
+    "##   DUPLICATE_FILE_NAMES FILES   ##",
+)
+
+
+def legacy_container_targets(config: dict) -> dict[str, str]:
+    """``{folder name on disk: taxonomy key its contents belong under}``.
+
+    The migration map: what a legacy container is called, and where what is
+    inside it goes. Config may rename either side, so both halves are read.
+    """
+    names = (config.get("legacy") or {}).get("subfolders") or {}
+    return {
+        names.get(key, default): key
+        for key, default in DEFAULT_LEGACY_CONTAINERS.items()
+    }
+
+
+def legacy_container_names(config: dict) -> set[str]:
+    """Every legacy container name, mapped or not.
+
+    A walk uses this to tell "an old folder still to migrate" from "a folder
+    nobody recognises" -- the first is expected in an archive this old, the
+    second is worth reporting.
+    """
+    names = (config.get("legacy") or {}).get("subfolders") or {}
+    found = set(legacy_container_targets(config))
+    for default in DEFAULT_LEGACY_CONTAINERS_UNMAPPED:
+        found.add(default)
+    found.update(str(value) for value in names.values())
+    return found
+
+
 # The subfolders that hold a *subject's* companions rather than media of their
 # own. A sidecar lives in one of these directly inside the folder holding its
 # subject (standard X10), so unlike every other taxonomy folder these may nest
