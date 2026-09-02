@@ -4,6 +4,7 @@ from pathlib import Path
 from src.constants.constants import \
     KNOWN_CAMERAS_SYMBOLS
 from src.constants.months import MONTH_FOLDERS
+from src.pipeline_stages.taxonomy import duplicate_name  # noqa: F401  (re-exported: F4 lives in taxonomy)
 from src.pipeline_stages.stamps import \
     format_day_prefix, \
     format_stamp
@@ -244,8 +245,7 @@ def final_event_folder(captured_at: datetime.datetime, config: dict,
     return root / folder_date.strftime("%Y") / month_folder_name(captured_at, config) / legacy_date_folder_name(captured_at, config, label)
 
 
-def duplicate_name(stem: str, md5: str, index: int, extension: str) -> str:
-    return f"{stem}_DUPE_{md5}_{index}{extension}"
+
 
 
 def problematic_folder(config: dict, key: str) -> Path:

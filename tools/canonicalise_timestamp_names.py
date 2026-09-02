@@ -311,33 +311,49 @@ def folder_media(top_level_files, nested, settings):
 
 
 def folder_audit(everything, nested, settings):
-    """``(sidecars, subfolder_files)`` for a day folder; ``None`` where silent.
+    """``(sidecars, clashes, subfolder_files)`` for a day folder; ``None`` where silent.
 
     Each is something the ``i``/``v`` counts do not account for, and each is
     reported only when it has something to say:
 
-      * ``sidecars`` -- every "._exif" in the tree, but only when the count
-        does not match the media in that tree. One sidecar per media file is
-        the norm; any other number means a sidecar was orphaned when its image
-        moved, or an image arrived without one. ``e=0`` beside a folder full of
-        images is the loudest form of that, so zero is reported, not dropped.
+      * ``sidecars`` -- the number of distinct **subjects** the folder's
+        "._exif" files name, written only when it does not match the media in
+        that tree. One sidecar per media file is the norm (X4); any other
+        number means a sidecar was orphaned when its image moved, or an image
+        arrived without one. ``e=0`` beside a folder full of images is the
+        loudest form of that, so zero is reported, not dropped.
+      * ``clashes`` -- the sidecars beyond the first for any one subject, so two
+        files claiming to describe one shot are counted here rather than
+        inflating ``e``. Written whenever there are any.
       * ``subfolder_files`` -- everything below the top level that is not a
         sidecar, whenever there is any. The grouper GUI shows the top level
         only, so nothing down there is in front of the reviewer.
 
-    An archive configured to keep no sidecars silences ``e`` outright: with no
+    Counting **subjects** rather than sidecar files is what lets the two
+    numbers mean separate things. It also stops one covering for the other: two
+    sidecars for the JPG and none for the RAW used to total two against two
+    media and report nothing at all, when a sidecar was in fact missing. Now
+    that reads ``e=1_c=1`` -- one subject covered, one file too many -- which is
+    the truth about the folder.
+
+    An archive configured to keep no sidecars silences both outright: with no
     extension to look for, a count of zero would be saying nothing.
     """
     media = grouping.select_media(everything, settings.image_exts, settings.video_exts)
-    sidecars = grouping.count_sidecars(everything, settings.sidecar_exts)
-    if not settings.sidecar_exts or sidecars == len(media):
-        sidecars = None
+    subjects = grouping.sidecar_subjects(everything, settings.sidecar_exts)
+
+    covered = len(subjects)
+    clashes = sum(count - 1 for count in subjects.values())
+    if not settings.sidecar_exts or covered == len(media):
+        covered = None
+    if not settings.sidecar_exts:
+        clashes = 0
 
     subfolder_files = sum(
         1 for path in nested
         if Path(path).suffix.lower() not in settings.sidecar_exts)
 
-    return sidecars, subfolder_files or None
+    return covered, clashes or None, subfolder_files or None
 
 
 def dating_files(everything, settings):
@@ -415,8 +431,9 @@ def canonical_event_folder_name(folder, name, media_files, settings):
     media = folder_media(media_files, nested, settings)
     images, videos = grouping.count_media(
         media, settings.image_exts, settings.video_exts)
-    sidecars, subfolder_files = folder_audit(everything, nested, settings)
-    return grouping.to_split_name(dated, images, videos, sidecars, subfolder_files)
+    sidecars, clashes, subfolder_files = folder_audit(everything, nested, settings)
+    return grouping.to_split_name(
+        dated, images, videos, sidecars, clashes, subfolder_files)
 
 
 # --------------------------------------------------------------------------
@@ -637,8 +654,27 @@ def free_name(source, target, claimed):
     return candidate
 
 
+def count_legend(letters, colour):
+    """The lines explaining the count bracket, for the letters actually written.
+
+    Only the letters this run put on a folder: a legend of all seven, on a run
+    where two appeared, is a legend nobody reads. The meanings come from
+    ``grouping_names.COUNT_MEANINGS`` -- spelling them out here would be the
+    second definition that drifts (T8).
+    """
+    if not letters:
+        return []
+    lines = ["", colourise("What the counts in those names mean:", "bold", colour)]
+    for letter in grouping.COUNT_LETTERS:
+        if letter in letters:
+            lines.append("  %s  %s" % (
+                colourise("%s=" % letter, "new", colour),
+                colourise(grouping.COUNT_MEANINGS[letter], "dim", colour)))
+    return lines
+
+
 def apply_plan(entries, apply_changes, attempts, delay_seconds, journal, report,
-               grouping_settings=None, claimed=None):
+               grouping_settings=None, claimed=None, letters=None):
     """Walk the planned renames, reporting each outcome. Returns counters.
 
     ``entries`` pairs each path with the top-level files of the folder it *is*
@@ -646,6 +682,7 @@ def apply_plan(entries, apply_changes, attempts, delay_seconds, journal, report,
     """
     counters = {CHANGED: 0, CONFLICT: 0, FAILED: 0, UNPARSEABLE: 0}
     claimed = set() if claimed is None else claimed
+    letters = set() if letters is None else letters
 
     for path, media_files in entries:
         if carries_impossible_stamp(path.name):
@@ -666,6 +703,8 @@ def apply_plan(entries, apply_changes, attempts, delay_seconds, journal, report,
                 counters[CONFLICT] += 1
                 report(CONFLICT, path, target, "already exists; left alone")
                 continue
+
+        letters.update(grouping.count_letters_in(target.name))
 
         if not apply_changes:
             counters[CHANGED] += 1
@@ -861,6 +900,9 @@ def main(argv=None):
     # directory -- which is also what lets a dry run predict the numbering an
     # --apply run would write, having renamed nothing to look at.
     claimed = set()
+    # Which count letters this run actually wrote, so the legend below explains
+    # those and no others.
+    letters = set()
     try:
         for directory, files in walk_bottom_up(target, root_key, refused, skip_keys):
             # Files first, then the directory itself: renaming the directory
@@ -869,7 +911,8 @@ def main(argv=None):
             if path_key(directory) != root_key:
                 entries.append((directory, files))
             counters = apply_plan(entries, args.apply, attempts, delay_seconds,
-                                  journal_handle, report, grouping_settings, claimed)
+                                  journal_handle, report, grouping_settings,
+                                  claimed, letters)
             for key, value in counters.items():
                 totals[key] += value
     finally:
@@ -885,6 +928,10 @@ def main(argv=None):
         "%d %s, %d conflict(s), %d failure(s), %d unparseable, %d refused."
         % (totals[CHANGED], verb, totals[CONFLICT], totals[FAILED],
            totals[UNPARSEABLE], len(refused)), "bold", colour))
+
+    if not args.quiet:
+        for line in count_legend(letters, colour):
+            print(line)
 
     if args.apply and totals[CHANGED]:
         print(colourise("Journal: %s  (revert with --undo)" % journal_path,

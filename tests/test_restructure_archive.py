@@ -1,4 +1,4 @@
-"""The restructuring front door: the five steps, the target rules, the guards.
+"""The restructuring front door: the seven steps, the target rules, the guards.
 
 Every test here passes an explicit target under ``tmp_path``. The tool's
 default target is the real archive (``c:\\__PHOTOS\\2026``) and step 1 renames
@@ -319,7 +319,7 @@ def test_showless_folders_are_never_opened(tmp_path, config, fake_grouper, capsy
     worth = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=1)")
     empty = make_event(root, "2026-07-18_(Sat)__00.00.00 - __TO_SPLIT__(EMPTY)",
                        images=0)
-    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+    assert run(str(root), "--steps", "3", "--apply", "--yes") == 0
     assert opened_folders(fake_grouper) == [worth]
     out = capsys.readouterr().out
     assert "nothing for the grouper to show" in out
@@ -330,7 +330,7 @@ def test_every_marked_folder_showless_is_success_and_opens_nothing(
         tmp_path, config, fake_grouper, capsys):
     root = make_archive(tmp_path)
     make_event(root, "2026-07-15_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)", images=0)
-    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+    assert run(str(root), "--steps", "3", "--apply", "--yes") == 0
     assert opened_folders(fake_grouper) == []
     assert "all 1 marked folder(s) have an empty top level" in capsys.readouterr().out
 
@@ -353,7 +353,7 @@ def test_a_folder_an_earlier_window_emptied_is_skipped(tmp_path, config,
 
     tool.grouper.run_grouper = empty_the_second
     try:
-        assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+        assert run(str(root), "--steps", "3", "--apply", "--yes") == 0
     finally:
         tool.grouper.run_grouper = real_run_grouper
     assert opened_folders(fake_grouper) == [first]
@@ -371,14 +371,14 @@ def test_list_to_split_separates_the_two(tmp_path, config, capsys):
 
 
 # --------------------------------------------------------------------------
-# Step 2 -- launching the grouper
+# Step 3 -- launching the grouper
 # --------------------------------------------------------------------------
 
 def test_dry_run_lists_the_folders_and_opens_nothing(tmp_path, config, fake_grouper,
                                                     capsys):
     root = make_archive(tmp_path)
     make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=1)")
-    assert run(str(root), "--steps", "2") == 1
+    assert run(str(root), "--steps", "3") == 1
     assert "the grouper was not opened" in capsys.readouterr().out
     assert opened_folders(fake_grouper) == []
 
@@ -388,7 +388,7 @@ def test_apply_opens_every_marked_folder_one_at_a_time(tmp_path, config,
     root = make_archive(tmp_path)
     first = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=1)")
     second = make_event(root, "2026-07-18_(Sat)__09.00.00 - __TO_SPLIT__(i=1)")
-    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+    assert run(str(root), "--steps", "3", "--apply", "--yes") == 0
     assert opened_folders(fake_grouper) == [first, second]
 
 
@@ -410,7 +410,7 @@ def test_a_folder_an_earlier_window_renamed_is_skipped(tmp_path, config,
 
     tool.grouper.run_grouper = rename_the_second
     try:
-        assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+        assert run(str(root), "--steps", "3", "--apply", "--yes") == 0
     finally:
         tool.grouper.run_grouper = real_run_grouper
     assert opened_folders(fake_grouper) == [first]
@@ -421,7 +421,7 @@ def test_max_folders_limits_the_batch(tmp_path, config, fake_grouper, capsys):
     root = make_archive(tmp_path)
     first = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=1)")
     make_event(root, "2026-07-18_(Sat)__09.00.00 - __TO_SPLIT__(i=1)")
-    assert run(str(root), "--steps", "2", "--apply", "--yes", "--max-folders", "1") == 0
+    assert run(str(root), "--steps", "3", "--apply", "--yes", "--max-folders", "1") == 0
     assert opened_folders(fake_grouper) == [first]
     assert "limiting this run" in capsys.readouterr().out
 
@@ -437,7 +437,7 @@ def test_a_grouper_that_fails_does_not_end_the_batch(tmp_path, config,
         "sys.stderr.write('boom\\n')\n"
         "sys.exit(3)\n" % str(fake_grouper["_log"]),
         encoding="utf-8")
-    assert run(str(root), "--steps", "2", "--apply", "--yes") == 1
+    assert run(str(root), "--steps", "3", "--apply", "--yes") == 1
     assert len(opened_folders(fake_grouper)) == 2
     out = capsys.readouterr().out
     assert "exited with code 3" in out
@@ -445,11 +445,11 @@ def test_a_grouper_that_fails_does_not_end_the_batch(tmp_path, config,
     assert str(second) in "\n".join(str(path) for path in opened_folders(fake_grouper))
 
 
-def test_a_missing_grouper_stops_step_two(tmp_path, config, capsys):
+def test_a_missing_grouper_stops_the_grouping_step(tmp_path, config, capsys):
     config["screenshot_grouping"] = {"python": "", "project_path": ""}
     root = make_archive(tmp_path)
     make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=1)")
-    assert run(str(root), "--steps", "2", "--apply", "--yes") == 2
+    assert run(str(root), "--steps", "3", "--apply", "--yes") == 2
     assert "not installed" in capsys.readouterr().out
 
 
@@ -460,7 +460,7 @@ def test_a_grouper_on_the_network_is_refused(tmp_path, config, fake_grouper,
     project = Path(fake_grouper["project_path"])
     monkeypatch.setattr(tool.canonicalise, "drive_is_network",
                         lambda path: Path(path) == project)
-    assert run(str(root), "--steps", "2", "--apply", "--yes") == 2
+    assert run(str(root), "--steps", "3", "--apply", "--yes") == 2
     assert "network location" in capsys.readouterr().out
 
 
@@ -471,7 +471,7 @@ def test_allow_network_tool_overrides_that(tmp_path, config, fake_grouper,
     project = Path(fake_grouper["project_path"])
     monkeypatch.setattr(tool.canonicalise, "drive_is_network",
                         lambda path: Path(path) == project)
-    assert run(str(root), "--steps", "2", "--apply", "--yes",
+    assert run(str(root), "--steps", "3", "--apply", "--yes",
                "--allow-network-tool") == 0
     assert opened_folders(fake_grouper) == [folder]
 
@@ -479,7 +479,7 @@ def test_allow_network_tool_overrides_that(tmp_path, config, fake_grouper,
 def test_nothing_to_group_is_success(tmp_path, config, fake_grouper):
     root = make_archive(tmp_path)
     make_event(root, "2026-07-15_(Wed)__08.14.02 - Sopot weekend")
-    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+    assert run(str(root), "--steps", "3", "--apply", "--yes") == 0
     assert opened_folders(fake_grouper) == []
 
 
@@ -493,7 +493,7 @@ def test_applying_with_no_terminal_and_no_yes_is_refused(tmp_path, config,
     make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=1)")
     # pytest captures stdin, so isatty() is already False: this is the
     # unattended case, and without --yes it must not proceed.
-    assert run(str(root), "--steps", "2", "--apply") == 2
+    assert run(str(root), "--steps", "3", "--apply") == 2
     assert "No terminal to confirm at" in capsys.readouterr().out
     assert opened_folders(fake_grouper) == []
 
@@ -522,18 +522,133 @@ def test_only_the_confirmation_word_is_a_yes(tmp_path, config, monkeypatch):
 
 
 # --------------------------------------------------------------------------
+# Steps 2 and 4 -- reuniting companions and sidecars
+# --------------------------------------------------------------------------
+
+RAW_STEM = "2026-07-15_(Wed)__08.14.02"
+
+
+def build_stranded(root, year="2026"):
+    """Two defects the reconcile step exists for, in one month folder.
+
+    * a RAW whose representative the grouper moved into a sibling sub-event,
+      left behind in the original event folder's ``__RAW``;
+    * a RAW's sidecar in the dated folder's own ``__EXIF``, one level above
+      where X10 puts it.
+    """
+    month = root / year / "07. July"
+    event = month / f"{RAW_STEM} - __TO_SPLIT__(i=1)"
+    (event / "__RAW").mkdir(parents=True)
+    (event / "__EXIF").mkdir(parents=True)
+    (event / f"{RAW_STEM}__f1.7__SG23U.jpg").write_bytes(b"jpg")
+    (event / "__RAW" / f"{RAW_STEM}__RAW__f1.7__SG23U.CR2").write_bytes(b"raw")
+    (event / "__EXIF" / f"{RAW_STEM}__RAW__f1.7__SG23U.CR2._exif").write_bytes(b"e")
+
+    moved_stem = "2026-07-16_(Thu)__10.00.00"
+    orphan_event = month / f"{moved_stem} - __TO_SPLIT__(i=0)"
+    (orphan_event / "__RAW").mkdir(parents=True)
+    (orphan_event / "__RAW" / f"{moved_stem}__RAW__f2.8__6D.CR2").write_bytes(b"raw")
+    sub_event = month / f"{moved_stem} - Pier walk"
+    sub_event.mkdir(parents=True)
+    (sub_event / f"{moved_stem}__f2.8__6D.jpg").write_bytes(b"jpg")
+    return event, orphan_event, sub_event
+
+
+def test_a_stranded_companion_follows_its_representative(tmp_path, config):
+    root = make_archive(tmp_path)
+    _event, orphan_event, sub_event = build_stranded(root)
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+    landed = sub_event / "__RAW" / "2026-07-16_(Thu)__10.00.00__RAW__f2.8__6D.CR2"
+    assert landed.is_file()
+    assert not (orphan_event / "__RAW").exists()          # emptied and pruned
+    assert orphan_event.is_dir()                          # T1: never deleted
+
+
+def test_a_sidecar_moves_down_beside_its_subject(tmp_path, config):
+    root = make_archive(tmp_path)
+    event, _orphan, _sub = build_stranded(root)
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+    name = f"{RAW_STEM}__RAW__f1.7__SG23U.CR2._exif"
+    assert (event / "__RAW" / "__EXIF" / name).is_file()  # X10
+    assert not (event / "__EXIF" / name).exists()
+
+
+def test_reconcile_dry_run_writes_nothing(tmp_path, config, capsys):
+    root = make_archive(tmp_path)
+    event, orphan_event, sub_event = build_stranded(root)
+    before = sorted(str(path) for path in root.rglob("*"))
+    assert run(str(root), "--steps", "2") == 1
+    assert sorted(str(path) for path in root.rglob("*")) == before
+    out = capsys.readouterr().out
+    assert "2 file(s) to move" in out
+    assert "Nothing was changed" in out
+
+
+def test_reconcile_is_idempotent(tmp_path, config):
+    root = make_archive(tmp_path)
+    build_stranded(root)
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+    settled = sorted(str(path) for path in root.rglob("*"))
+    # Second run: nothing left to do, and nothing pending either.
+    assert run(str(root), "--steps", "2") == 0
+    assert sorted(str(path) for path in root.rglob("*")) == settled
+
+
+def test_reconcile_never_descends_into_the_ingest_pipeline(tmp_path, config):
+    root = make_archive(tmp_path)
+    stray = root / "____INGEST_PIPELINE" / "2026-07-15_(Wed)__08.14.02 - Day"
+    (stray / "__EXIF").mkdir(parents=True)
+    (stray / "shot.jpg").write_bytes(b"jpg")
+    sidecar = stray / "__EXIF" / "shot.jpg._exif"
+    sidecar.write_bytes(b"e")
+    build_stranded(root)
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+    assert sidecar.is_file()                              # untouched, P1/§0
+
+
+def test_dated_folders_skips_month_and_taxonomy_folders(tmp_path, config):
+    root = make_archive(tmp_path)
+    event, orphan_event, sub_event = build_stranded(root)
+    found = tool.dated_folders(make_run(root, config))
+    assert set(found) == {event, orphan_event, sub_event}
+
+
+def test_reconcile_runs_before_and_after_grouping(tmp_path, config, fake_grouper):
+    """Steps 2 and 4 are the same engine, on either side of the GUI."""
+    numbers = [number for number, _title, _action in tool.STEPS]
+    titles = {number: title for number, title, _action in tool.STEPS}
+    assert numbers == [1, 2, 3, 4, 5, 6, 7]
+    assert "companions" in titles[2].lower()
+    assert "companions" in titles[4].lower()
+    assert TO_SPLIT_IN_TITLE in titles[3]
+
+
+TO_SPLIT_IN_TITLE = "__TO_SPLIT__"
+
+
+def test_the_engine_is_the_pipelines_own(tmp_path, config):
+    """T8: one implementation, loaded rather than restated."""
+    from src.pipeline_stages import companion_matching
+
+    assert tool.matching.reconcile_folder.__doc__ == \
+        companion_matching.reconcile_folder.__doc__
+    assert tool.matching.place_companions.__doc__ == \
+        companion_matching.place_companions.__doc__
+
+
+# --------------------------------------------------------------------------
 # Steps, ordering and exit codes
 # --------------------------------------------------------------------------
 
 def test_steps_run_in_their_fixed_order_however_they_are_typed():
     assert tool.selected_steps("3,1") == [1, 3]
-    assert tool.selected_steps(None) == [1, 2, 3, 4, 5]
+    assert tool.selected_steps(None) == [1, 2, 3, 4, 5, 6, 7]
     assert tool.selected_steps("2") == [2]
 
 
 def test_a_bad_step_number_is_an_error(tmp_path, config, capsys):
     root = make_archive(tmp_path)
-    assert run(str(root), "--steps", "9") == 2
+    assert run(str(root), "--steps", "99") == 2
     assert "Bad --steps" in capsys.readouterr().out
 
 

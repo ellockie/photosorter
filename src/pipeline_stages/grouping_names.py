@@ -76,10 +76,36 @@ DEFAULT_DATE_FOLDER_SUFFIX = " - 1. ######"
 # Matches config.json extensions.sidecars, for the same reason.
 DEFAULT_SIDECAR_EXTENSIONS = ("._exif",)
 
+# Matches config.json extensions.previews, for the same reason. Previews are
+# sidecars by X6 and live in "__PREVIEWS", not in the media counts.
+DEFAULT_PREVIEW_EXTENSIONS = (".thm", ".lrv")
+
 # The letters of the count bracket, in the order they are written, matching
 # ARCHIVE_STANDARD.md 2. "d" (direct dated children) is recognised so a
 # container name can be read, but nothing here writes one yet.
-COUNT_LETTERS = ("d", "i", "v", "e", "s", "f")
+# "c" sits next to "e" because it is the other half of the same question: "e"
+# says how many subjects here have a sidecar, "c" how many sidecars are fighting
+# over one.
+COUNT_LETTERS = ("d", "i", "v", "e", "c", "s", "f")
+
+# What each letter means, in one line, for a tool to print after it has written
+# a name carrying one. Mirrors "count_meaning" in ARCHIVE_STANDARD.md section 8;
+# a legend spelled out in a tool would be a second definition, and the one that
+# drifts is always the one nobody is testing (T8).
+#
+# "w" is in the standard's list and not here, for the same reason it is not in
+# COUNT_LETTERS: nothing writes it yet.
+COUNT_MEANINGS = {
+    "d": "direct dated child folders",
+    "i": "top-level images -- the review job, what a grouper GUI will show",
+    "v": "top-level videos -- likewise",
+    "e": "media covered by a sidecar, counted by subject; shown only when it "
+         "does not match the media in the subtree",
+    "c": "sidecars beyond the first for one subject -- two files claiming one shot",
+    "s": "files below the top level that are not sidecars, which the GUI will "
+         "not put in front of you",
+    "f": "subfolders still standing in a folder holding no files",
+}
 
 # A folder holding no files at all, however deep you look, says so instead of
 # counting: "(EMPTY)", or "(f=3_EMPTY)" when empty subfolders are all it has
@@ -134,6 +160,18 @@ _EMPTY_BRACKET_RE = re.compile(
     r"\(%s\)(?:%s)?$" % (_EMPTY_COUNTS_PATTERN, DISCRIMINATOR_PATTERN))
 
 
+def count_letters_in(name: str) -> set[str]:
+    """The count-bracket letters ``name`` actually carries.
+
+    So a tool can explain the names it just wrote and nothing else: a legend of
+    every letter, on a run where only two appeared, is a legend nobody reads.
+    """
+    match = _COUNT_BRACKET_RE.search(name)
+    if match is None:
+        return set()
+    return {letter for letter in COUNT_LETTERS if f"{letter}=" in match.group(0)}
+
+
 def date_folder_suffix(config: dict) -> str:
     """The placeholder suffix folder-sorting writes, from config."""
     return config.get("legacy", {}).get("date_folder_suffix", DEFAULT_DATE_FOLDER_SUFFIX)
@@ -162,6 +200,58 @@ def sidecar_extensions(config: dict) -> set[str]:
     if "sidecars" not in extensions:
         return {value.lower() for value in DEFAULT_SIDECAR_EXTENSIONS}
     return {value.lower() for value in extensions["sidecars"]}
+
+
+def preview_extensions(config: dict) -> set[str]:
+    """Preview suffixes (``.thm``, ``.lrv``), lower-cased, from config.
+
+    A camera thumbnail and a GoPro proxy are sidecars too (standard X6): never
+    media, never a representative, never counted in ``i``/``v`` or ``e``. They
+    are read from their own config key rather than from the image and video
+    lists, which is what stops a 40x30 ".thm" being picked as the
+    representative for a shot whose real image is missing.
+    """
+    extensions = config.get("extensions", {})
+    if "previews" not in extensions:
+        return {value.lower() for value in DEFAULT_PREVIEW_EXTENSIONS}
+    return {value.lower() for value in extensions["previews"]}
+
+
+def sidecar_subject_name(name: str, sidecar_exts: set[str]) -> str | None:
+    """The name of the file a companion describes, or None if it is not one.
+
+    X1 makes this exact rather than a guess: a sidecar keeps its subject's
+    **full** name and appends its own extension, so "shot.jpg._exif" describes
+    "shot.jpg" and the answer is a string comparison.
+
+    It lives here rather than beside the code that moves companions because the
+    count bracket needs it too: "e" counts the distinct subjects a folder's
+    sidecars name, and "c" counts the sidecars beyond the first for any one of
+    them. Two definitions of "which file is this a sidecar of" would let the
+    counts and the placement disagree about the same folder.
+    """
+    lowered = name.lower()
+    for extension in sidecar_exts:
+        if lowered.endswith(extension) and len(name) > len(extension):
+            return name[: -len(extension)]
+    return None
+
+
+def sidecar_subjects(paths, sidecar_exts: set[str]) -> dict[str, int]:
+    """How many sidecars each subject under ``paths`` has, keyed case-insensitively.
+
+    One per subject is the norm (X4). Anything more is a clash: two files
+    claiming to describe the same shot, which is what "c" reports and what
+    companion placement settles by checksum.
+    """
+    counts: dict[str, int] = {}
+    for path in paths:
+        subject = sidecar_subject_name(Path(path).name, sidecar_exts)
+        if subject is None:
+            continue
+        key = subject.lower()
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def select_sidecars(paths, sidecar_exts: set[str]) -> list:
@@ -250,6 +340,7 @@ def with_earliest_time(base: str, media) -> str:
 
 def to_split_suffix(images: int, videos: int,
                     sidecars: int | None = None,
+                    clashes: int | None = None,
                     subfolder_files: int | None = None) -> str:
     """The count bracket: ``(i=79_v=3_e=83_s=4)``, or "" when it has nothing to say.
 
@@ -268,6 +359,8 @@ def to_split_suffix(images: int, videos: int,
         parts.append(f"v={videos}")
     if sidecars is not None:
         parts.append(f"e={sidecars}")
+    if clashes is not None:
+        parts.append(f"c={clashes}")
     if subfolder_files is not None:
         parts.append(f"s={subfolder_files}")
     return "(" + "_".join(parts) + ")" if parts else ""
@@ -315,6 +408,7 @@ def carries_empty_bracket(name: str) -> bool:
 
 def to_split_name(base: str, images: int, videos: int,
                   sidecars: int | None = None,
+                  clashes: int | None = None,
                   subfolder_files: int | None = None) -> str:
     """The full ``__TO_SPLIT__`` folder name for a dated ``base`` prefix.
 
@@ -323,7 +417,8 @@ def to_split_name(base: str, images: int, videos: int,
     two audit markers default to absent, so the live grouping stage keeps
     writing the plain ``(i=N_v=M)`` name it always has.
     """
-    return f"{base} - {TO_SPLIT_MARKER}{to_split_suffix(images, videos, sidecars, subfolder_files)}"
+    return (f"{base} - {TO_SPLIT_MARKER}"
+            f"{to_split_suffix(images, videos, sidecars, clashes, subfolder_files)}")
 
 
 def split_labelled_name(name: str) -> tuple[str, str] | None:

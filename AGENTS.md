@@ -62,6 +62,7 @@ photosorter — Python 3.13 photo processing pipeline: rename, sort, and organis
 | Archive maintenance tools | `tools/` | Stdlib-only; run on a bare interpreter, load name grammars by file path |
 | Restructuring an archive | `tools/restructure_archive.py` | The five-step front door; `_restructure_archive.bat` / `.ps1` at the root |
 | Where the grouper GUI lives | `src/pipeline_stages/grouper_launch.py` | Leaf module: install detection + command line, one definition |
+| Companion + sidecar matching | `src/pipeline_stages/companion_matching.py` | Leaf module: the engine. `reconcile_folder` (follow the representative), `place_companions` (X10/X13: `._exif`->`__EXIF`, `.thm`/`.lrv`->`__PREVIEWS`, MD5 on collision). Pipeline stage AND restructure tool both run it |
 | Tests | `tests/test_organise_date_folders.py` | Pytest, 6 cases |
 
 ## CONVENTIONS
@@ -90,9 +91,9 @@ photosorter — Python 3.13 photo processing pipeline: rename, sort, and organis
 # Launch full pipeline
 _photosorter.bat
 
-# Restructure an existing archive: canonicalise -> group -> canonicalise
-# -> check/fix against ARCHIVE_STANDARD.md (last two not implemented).
-# Dry run by default. _restructure_archive.ps1 is the same, for PowerShell.
+# Restructure an existing archive: canonicalise -> reconcile -> group ->
+# reconcile -> canonicalise -> check/fix against ARCHIVE_STANDARD.md (last two
+# not implemented). Dry run by default; .ps1 is the same, for PowerShell.
 _restructure_archive.bat
 _restructure_archive.bat "d:\__PHOTOS_BACKUP" --year 2024 --apply
 

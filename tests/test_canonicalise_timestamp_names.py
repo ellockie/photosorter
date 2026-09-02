@@ -24,6 +24,10 @@ def _load_tool():
 
 tool = _load_tool()
 
+# The grammar the tool loaded, so a test asserts against the one definition
+# rather than a second copy of the letters.
+grouping = tool.grouping
+
 
 # --------------------------------------------------------------------------
 # Name transformation
@@ -546,6 +550,119 @@ def test_media_still_outranks_a_sidecar_when_dating_a_folder(tmp_path):
     assert tool.main([str(year), "--apply", "--no-colour"]) == 0
 
     assert (year / "2026-07-25_(Sat)__09.30.00 - __TO_SPLIT__(i=1_e=2)").is_dir()
+
+
+# --------------------------------------------------------------------------
+# The count-bracket legend
+# --------------------------------------------------------------------------
+
+def test_the_legend_explains_the_letters_this_run_wrote(tmp_path, capsys):
+    year = tmp_path / "2026"
+    image = _stamped("2026-07-15_(Wed)", "09.12.53")
+    folder = _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######", [image])
+    (folder / "__RAW").mkdir()
+    (folder / "__RAW" / (image + "._exif")).write_text("x", encoding="utf-8")
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    out = capsys.readouterr().out
+    assert "What the counts in those names mean:" in out
+    # The name written is "(i=1_c=1)" — the second "._exif" is a sidecar, so it
+    # counts into "c" and never into "s". Those two are explained ...
+    for letter in ("i", "c"):
+        assert ("  %s=" % letter) in out
+        assert grouping.COUNT_MEANINGS[letter] in out
+    # ... and the letters it did not write are not.
+    for letter in ("d", "e", "s", "f"):
+        assert ("  %s=" % letter) not in out
+
+
+def test_no_legend_when_no_name_carries_a_bracket(tmp_path, capsys):
+    # A file rename only: nothing gained a count bracket, so nothing to explain.
+    year = tmp_path / "2026"
+    folder = year / "2026-07-15_(Wed)__09.12.53 - Lens tests"
+    folder.mkdir(parents=True)
+    (folder / "2026-07-15_(Wed)_09.12.53__f2.8__SG23U.jpg").write_text(
+        "x", encoding="utf-8")
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert "What the counts" not in capsys.readouterr().out
+
+
+def test_quiet_suppresses_the_legend(tmp_path, capsys):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######",
+                        [_stamped("2026-07-15_(Wed)", "09.12.53")])
+
+    assert tool.main([str(year), "--apply", "--no-colour", "--quiet"]) == 0
+
+    assert "What the counts" not in capsys.readouterr().out
+
+
+def test_a_dry_run_still_explains_what_it_would_write(tmp_path, capsys):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######",
+                        [_stamped("2026-07-15_(Wed)", "09.12.53")])
+
+    assert tool.main([str(year), "--no-colour"]) == 1
+
+    assert "What the counts in those names mean:" in capsys.readouterr().out
+
+
+def test_every_letter_the_grammar_writes_has_a_meaning(tmp_path):
+    """A letter added to COUNT_LETTERS without a meaning would print nothing."""
+    assert set(grouping.COUNT_MEANINGS) == set(grouping.COUNT_LETTERS)
+
+
+def test_a_second_sidecar_for_one_subject_is_counted_as_a_clash(tmp_path):
+    # Two files claiming to describe one shot. "e" stays silent because every
+    # subject is covered; "c" says one file too many.
+    year = tmp_path / "2026"
+    image = _stamped("2026-07-15_(Wed)", "09.12.53")
+    folder = _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######", [image])
+    # The same sidecar again, a level down, which is where placement finds them.
+    (folder / "__RAW").mkdir()
+    (folder / "__RAW" / (image + "._exif")).write_text("x", encoding="utf-8")
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-15_(Wed)__09.12.53 - __TO_SPLIT__(i=1_c=1)").is_dir()
+
+
+def test_a_clash_no_longer_masks_a_missing_sidecar(tmp_path):
+    """The bug counting subjects rather than files fixes.
+
+    Two media, two sidecars -- but both sidecars name the JPG, so the RAW has
+    none. Comparing totals said 2 == 2 and reported nothing at all.
+    """
+    year = tmp_path / "2026"
+    image = _stamped("2026-07-15_(Wed)", "09.12.53")
+    raw = _stamped("2026-07-15_(Wed)", "09.12.53", ".CR2")
+    folder = _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######", [image],
+                                 sidecars=False)
+    (folder / "__RAW").mkdir()
+    (folder / "__RAW" / raw).write_text("x", encoding="utf-8")
+    (folder / "__EXIF").mkdir()
+    (folder / "__EXIF" / (image + "._exif")).write_text("x", encoding="utf-8")
+    (folder / "__RAW" / (image + "._exif")).write_text("x", encoding="utf-8")
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    # e=1: one of the two media has a sidecar. c=1: one file too many.
+    assert (year / "2026-07-15_(Wed)__09.12.53 - __TO_SPLIT__(i=1_e=1_c=1_s=1)").is_dir()
+
+
+def test_a_folder_in_order_carries_no_clash_marker(tmp_path):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######", [
+        _stamped("2026-07-15_(Wed)", "09.12.53"),
+        _stamped("2026-07-15_(Wed)", "10.00.00"),
+    ])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-15_(Wed)__09.12.53 - __TO_SPLIT__(i=2)").is_dir()
 
 
 def test_images_that_lost_every_sidecar_are_reported_as_zero(tmp_path):

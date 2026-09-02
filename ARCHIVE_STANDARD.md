@@ -108,22 +108,34 @@ prefix:  YYYY-MM-DD_(Ddd)__HH.MM.SS      canonical — DOUBLE underscore before 
 | N11 | ` - __TO_LABEL__` | Day still to be described. |
 | N12 | ` - 1. ######` | Legacy placeholder. Read and converted to N10; never newly written. |
 
-**Count bracket** (N9/N10): letters in the fixed order `d i v e s w f`, joined by `_`.
+**Count bracket** (N9/N10): letters in the fixed order `d i v e c s w f`, joined by `_`.
 
 | Letter | Counts | Written when |
 | --- | --- | --- |
 | `d` | direct dated child folders | the folder is a container |
 | `i` | top-level images | there are any |
 | `v` | top-level videos | there are any |
-| `e` | `._exif` in the whole subtree | the count ≠ media count in that subtree |
+| `e` | distinct **subjects** the subtree's `._exif` files name | the count ≠ media count in that subtree |
+| `c` | `._exif` files beyond the first for any one subject | there are any |
 | `s` | non-sidecar files below the top level | there are any |
 | `w` | videos in `__VIDEOS_TO_RENAME` awaiting a name (V8) | there are any |
 | `f` | subfolders in the whole subtree | the folder is `EMPTY` and has any |
 
-`i`/`v` are the review job — they state what a grouper GUI will show. `e`/`s`/`w`
-are audit markers: something the folder holds that `i`/`v` do not account for.
-`w` differs from the others in that it is addressed to a tool, not only to a
-reader — see V9.
+`i`/`v` are the review job — they state what a grouper GUI will show.
+`e`/`c`/`s`/`w` are audit markers: something the folder holds that `i`/`v` do not
+account for. `w` differs from the others in that it is addressed to a tool, not
+only to a reader — see V9.
+
+**`e` counts subjects, not files, and `c` is why.** One sidecar per media file is
+the norm (X4), so the useful question is how many media are *covered*, not how
+many `._exif` are lying about. Counting files let one fault mask another: two
+sidecars naming the JPG and none naming the RAW totalled two against two media
+and reported nothing at all. Split in two, that folder reads `e=1_c=1` — one
+subject covered, one file too many — and both faults are visible.
+
+In a folder in order, every subject is covered, so `e` is silent and `c` absent.
+`c` is what companion placement (§6) settles: it compares the clashing files by
+checksum and parks the loser, after which `c` goes and `e` matches.
 
 **Discriminator.** `EMPTY` discards what told two emptied folders on one day
 apart, so the second and later carry `_2`, `_3` … appended after the bracket, in
@@ -237,7 +249,12 @@ live *inside* an event folder and hold that event's files.
 
 ### **[OPEN]** — still to settle
 
-1. **May a tool other than the grouping stage move folders into
+1. **Where does a collision loser go?** S4 puts `__DUPLICATES` inside a dated
+   folder. Companion placement (§6) instead writes one per **year tree**,
+   `<YYYY>\__DUPLICATES`, so a whole year's losers are in a single place to
+   review rather than scattered one per event. That is outside §4 as written and
+   wants either an amendment here or a change there before this leaves draft.
+2. **May a tool other than the grouping stage move folders into
    `__EMPTY_SUBFOLDERS`?** §4.1 now gives it a home — a sibling of the dated
    folders it takes, at whatever level they live — but only
    `screenshot_grouping.py` writes to it today.
@@ -260,7 +277,7 @@ YYYY-MM-DD_(Ddd)__HH.MM.SS[__RAW]__f<ap>__T<exp>__L<focal>__I<iso>__<CAM>[_RAW][
 | F3 | Semantic suffixes announce how the shot was taken and what else exists, in this fixed order: `_HAS_RAW` **or** `_FROM_RAW`, then `_HAS_EDIT`. Extension follows all of them. `_HAS_*` names a sibling elsewhere; `_FROM_*` names this file's own provenance. |
 | F3a | The two RAW suffixes are **mutually exclusive**: `_FROM_RAW` already says a RAW exists, so it never carries `_HAS_RAW` as well. |
 | F3b | Earlier names `_RAW` (has raw), `_EXT` (extracted) and `_EDT` (has edit) MUST still be **read** and MUST NOT be newly written — the N5 rule again. `_RAW` was the ambiguous one: on a camera JPEG it read as *this is a RAW*, the sense `RAW__` carries inside a filename, when it meant *a RAW exists*. |
-| F4 | Collision suffixes: `_DUPE_<md5>_<n>`, `_LOWRES`. |
+| F4 | Collision suffixes: `_DUPE_<md5>_<n>`, `_DIFFERS_<md5>_<n>`, `_LOWRES`. `_DUPE` is a byte-identical loser; `_DIFFERS` is one that claimed the same name with **different** bytes, which is a defect a person has to settle. Both are written by companion placement (§6). |
 | F5 | **One representative per shot at the top level, at most.** Every other version of the shot goes in a subfolder. |
 | F6 | A camera-produced image is the preferred representative. For a RAW-only shot one selected extraction may stand in; the others go to `__EXTRACTED`. |
 | F7 | RAW originals, sidecars, edits, exports, resizes and duplicates MUST NOT sit at the top level. *Why:* the top level is what a grouper GUI shows and what `i`/`v` count. A file in a subfolder is a file the reviewer never sees — which is what `s` exists to announce. |
@@ -380,8 +397,10 @@ follows a representative into a sub-event, so `__RAW/__EXIF/x._exif` arrives at
 OpenSpec `pipeline-core` scenario that puts every `._exif` under the event
 folder's own `__EXIF`.
 The folder is `__PREVIEWS` — settled. It holds both a 40×30 `.thm` and a
-four-minute `.lrv` proxy, which is why it is not `__THUMBNAILS`. The name is
-already in the taxonomy and recognised; nothing routes into it yet.
+four-minute `.lrv` proxy, which is why it is not `__THUMBNAILS`. **Routing is
+implemented** — `place_companions` in `companion_matching.py`, run by the
+restructure tool — though nothing *writes* a preview there during a live
+ingest yet.
 
 **`.thm` and `.lrv` are previews, not media — applied.** `.thm` used to sit in
 `extensions.lossy_images`, so a camera thumbnail counted into `i` and could be
@@ -389,7 +408,19 @@ selected as the representative for a shot whose real image was absent. Both now
 live in `extensions.previews` and are neither media nor `._exif` sidecars: they
 count into `s` (X7), never into `i`/`v` or `e` (X8). This reclassifies `.thm`
 files already in the archive — their `i` counts fall on the next tool run.
-Nothing routes them into `__PREVIEWS` yet.
+
+**Routing them is implemented — applied.** `place_companions` places a preview
+in the `__PREVIEWS` directly inside the folder holding its subject (X13), in the
+same pass that places `._exif` sidecars in `__EXIF` (X10).
+
+A preview arrives in **camera form** — the subject's *stem* plus its own
+extension, `GX010042.LRV` beside `GX010042.MP4` — because nothing has ever
+renamed one. X6 requires previews to follow X1, and once a preview is in
+`__PREVIEWS` the stem is all that would be left to pair it by, so a camera-form
+preview is **renamed onto X1 as it moves**: `GX010042.LRV` becomes
+`GX010042.MP4.lrv`. The extension is lower-cased, following the convention for
+every other non-RAW extension. A stem shared by two subjects is not knowable
+from the name, so that preview is left where it is and reported.
 ---
 
 ## 7. Tool obligations — `T`
@@ -456,11 +487,16 @@ does not, so folding them in would widen a grammar rather than share one:
 
 ### **[OPEN]** — still defined more than once
 
-1. **`MONTH_FOLDERS`, twice** — `constants.py:316` (legacy CLI) and
+1. **`file_md5`, twice** — `core.py:465` and `common/common.py:360`. Companion
+   placement needs a checksum and cannot import either without dragging the
+   pipeline in, so it takes one as a parameter and carries a stdlib default
+   (`default_checksum`). That is three implementations of MD5-a-file, which is
+   two too many.
+2. **`MONTH_FOLDERS`, twice** — `constants.py:316` (legacy CLI) and
    `legacy.py:11` (new pipeline). The legacy copy is reachable only from the
    legacy CLI; consolidating means the new pipeline importing `constants.py`,
    which asserts `PHOTO_BASE_FOLDER` at import time. Worth doing, not free.
-2. `grouping_names.py:73` duplicates the leading-stamp regex **deliberately** (its
+3. `grouping_names.py:73` duplicates the leading-stamp regex **deliberately** (its
    docstring explains why: importing `stamps` pulls in the whole package
    `__init__`). An accepted exception — but a test should hold the two equal.
 
@@ -536,12 +572,13 @@ folder_tail:
   to_label:   ' - __TO_LABEL__$'
   legacy_placeholder: ' - 1\. ######$'
   markers: ["__CONTAINER__", "__TO_SPLIT__", "__TO_LABEL__"]
-  count_letters: [d, i, v, e, s, w, f]   # fixed order, joined by "_"
+  count_letters: [d, i, v, e, c, s, w, f]   # fixed order, joined by "_"
   count_meaning:
     d: direct dated child folders
     i: top-level images
     v: top-level videos
-    e: sidecars in subtree, written only when != media count in subtree
+    e: distinct subjects named by the subtree's sidecars, written only when != media count in subtree
+    c: sidecars beyond the first for any one subject; written whenever there are any
     s: non-sidecar files below the top level
     w: videos in __VIDEOS_TO_RENAME awaiting a name; a request to the cleanup tool
     f: subfolders in subtree, written only alongside EMPTY
@@ -610,6 +647,7 @@ files:
   legacy_representative_suffixes: ["_RAW", "_EXT", "_EDT"]          # F3b: read, never written
   collision_suffixes:
     duplicate: "_DUPE_<md5>_<n>"
+    differing: "_DIFFERS_<md5>_<n>"
     low_resolution: "_LOWRES"
   top_level: representatives_only
   max_representatives_per_shot: 1

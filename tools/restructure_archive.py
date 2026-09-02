@@ -1,19 +1,21 @@
 r"""Bring an existing archive onto the current conventions, in one pass.
 
-This is the front door for restructuring work: the five steps that turn a tree
+This is the front door for restructuring work: the seven steps that turn a tree
 written by an older Photosorter, an older grouper or a third-party tool into
 the shape ``ARCHIVE_STANDARD.md`` describes, run in the one order that makes
 sense, over one target, with one set of safety rules.
 
     1. Canonicalise names          tools/canonicalise_timestamp_names.py
-    2. Group the "__TO_SPLIT__" folders, one at a time, in the grouper GUI
-    3. Canonicalise names again    tools/canonicalise_timestamp_names.py
-    4. Check compliance with the archive standard      [not implemented]
-    5. Fix compliance with the archive standard        [not implemented]
+    2. Reunite companions and sidecars     companion_matching.py
+    3. Group the "__TO_SPLIT__" folders, one at a time, in the grouper GUI
+    4. Reunite companions and sidecars     companion_matching.py
+    5. Canonicalise names again    tools/canonicalise_timestamp_names.py
+    6. Check compliance with the archive standard      [not implemented]
+    7. Fix compliance with the archive standard        [not implemented]
 
 Only the folders worth opening
 ------------------------------
-Step 2 opens a marked folder only when it has an image or a video **at its top
+Step 3 opens a marked folder only when it has an image or a video **at its top
 level**, which is the whole of what the grouper's thumbnail grid shows. A
 folder can carry the marker and still have nothing for it to do: an earlier
 pass already split the day into sub-events, the day's files all sit in
@@ -29,24 +31,76 @@ canonicaliser counts the whole subtree when a top level is bare, so a day
 whose every file sits in a subfolder is still named "__TO_SPLIT__(v=3)"
 while having nothing to show.
 
-Why twice
----------
-Step 1 is what makes step 2 possible: the grouper is opened on folders
+Why everything happens twice
+---------------------------
+Step 1 is what makes step 3 possible: the grouper is opened on folders
 carrying the "__TO_SPLIT__" marker, and a legacy "- 1. ######" day does not
 carry it until the canonicaliser has rewritten the tail. Step 1 also gives
 every folder the time of its earliest file, so two days that would otherwise
 collide on a bare date are separated before anything else runs.
 
-Step 3 is what makes step 2 durable: the grouper writes its own names, on its
-own convention, and rebuilds a count bracket from scratch every time it
-touches a folder -- dropping the "e"/"s" audit markers, and leaving the
-sub-event folders it creates stamped in whatever shape it favours. Running the
-canonicaliser again folds all of that back onto the canonical form and
-re-derives the audit markers from what is now on disk.
+Step 2 is reconciliation over an archive nobody has touched yet: the point of
+this tool is already-archived material, where earlier passes and third-party
+tools have left companions stranded and sidecars a level too high. Healing
+that **before** the GUI opens is what puts a whole shot in front of the
+reviewer instead of half of one.
 
-Steps 4 and 5 are placeholders
+Step 4 is the same engine over what step 3 has just done, and is the reason
+the pipeline has the stage at all: splitting a day moves only the top-level
+representatives, leaving every RAW, sidecar and preview behind in the event
+folder's taxonomy subdirs. Without this pass they stay behind for good.
+
+Step 5 is what makes steps 3 and 4 durable: the grouper writes its own names,
+on its own convention, and rebuilds a count bracket from scratch every time it
+touches a folder -- dropping the "e"/"s" audit markers, and leaving the
+sub-event folders it creates stamped in whatever shape it favours. Step 4 then
+moves files between folders, which changes those counts again. Running the
+canonicaliser last folds all of it back onto the canonical form and re-derives
+the audit markers from what is finally on disk.
+
+What reconciliation does
+------------------------
+Two passes over every dated folder, in this order:
+
+  * ``reconcile_folder`` -- a companion left in an event folder's taxonomy
+    subdir follows the representative the grouper moved into a sibling
+    sub-event. Matched on capture time, because the representative has been
+    renamed since.
+  * ``place_companions`` -- X10 and X13: a companion goes into the folder
+    directly inside the one that holds its subject -- an "._exif" sidecar into
+    "__EXIF", a ".thm" or ".lrv" preview into "__PREVIEWS". A RAW in "__RAW"
+    keeps its sidecar in "__RAW\__EXIF"; a still at the top level keeps its own
+    in the dated folder's "__EXIF". Matched on name, because a companion
+    carries its subject's full name (X1).
+
+    For sidecars this is the migration section 6 asks for: everything that
+    writes the archive already honours X10, so what is left over is the ones
+    written before it. For previews it is the first routing they have ever
+    had -- nothing has moved a ".thm" anywhere -- so they are still lying where
+    the camera wrote them, named after the subject's *stem* rather than its
+    full name. Those are matched by stem and renamed onto X1 as they move:
+    "GX010042.LRV" becomes "GX010042.MP4.lrv" in "__PREVIEWS". A stem shared by
+    two subjects is not knowable, so that preview is left where it is.
+
+Companions first, because that pass moves *subjects*: a RAW still sitting in
+the wrong event folder has no business having its sidecar placed beside it
+yet. Once every file is in the right folder, the second pass says where in
+that folder it goes.
+
+A sidecar whose subject cannot be found is **left exactly where it is** and
+reported. It is the only surviving record that the subject existed (X3), and
+moving it on a guess would lose the one thing it still says.
+
+Neither pass is implemented here. Both are ``companion_matching.py``, the same
+module the pipeline's companion-reconciliation stage runs -- see its docstring
+for why it is a module rather than part of the stage. This tool supplies only
+the two things a maintenance run needs and a pipeline run does not: a mover
+that records instead of writing, so a dry run can report (T3), and pruning
+turned off while it does.
+
+Steps 6 and 7 are placeholders
 ------------------------------
-``ARCHIVE_STANDARD.md`` is **v0.1, a draft, enforced by nothing** -- its S4
+``ARCHIVE_STANDARD.md`` is **v0.8, a draft, enforced by nothing** -- its S4
 subfolder set and its T8 "defined more than once" list still carry open
 questions whose answers change what "compliant" means. Enforcing it now would
 migrate a live archive of hundreds of thousands of files to a shape that is
@@ -95,6 +149,10 @@ target multiplies every way a run can go wrong. This tool therefore:
   * **re-checks every folder immediately before opening the GUI on it**: still
     inside the resolved root, still not a reparse point, still a directory. A
     folder can be renamed or split away by the previous window in the batch;
+  * **moves a companion with ``os.rename``**, never ``os.replace`` and never a
+    copy-and-delete, so an unexpected collision fails loudly instead of
+    destroying the file it lands on (T2), and never over an existing file: a
+    companion already at its destination is left where it is and reported;
   * **will not run an interpreter off the network.** The grouper is launched
     from the paths in config.json, and if either sits on a share or a mapped
     drive the run stops: an executable on a share is an executable somebody
@@ -109,22 +167,24 @@ target multiplies every way a run can go wrong. This tool therefore:
 
 Every applied run appends to a journal recording what each step did and which
 folders were opened. The canonicaliser writes its own rename journal per year
-tree, and ``--undo`` on that tool replays those renames backwards; step 2 is
+tree, and ``--undo`` on that tool replays those renames backwards; step 3 is
 not undoable, because what the GUI does inside a folder is the user's own
 work.
 
 Nothing here redefines a convention. The steps, the path-safety primitives and
 the config reader are loaded from ``tools/canonicalise_timestamp_names.py``,
-the "__TO_SPLIT__" marker from ``src/pipeline_stages/grouping_names.py``, and
-the grouper's location and command line from
-``src/pipeline_stages/grouper_launch.py`` -- by file path rather than by
-``import src...``, because that package's ``__init__`` imports every pipeline
-stage (exiftool, dashboard, converters) and a maintenance tool must run on a
-bare interpreter with none of that installed.
+the "__TO_SPLIT__" marker from ``src/pipeline_stages/grouping_names.py``, the
+grouper's location and command line from
+``src/pipeline_stages/grouper_launch.py``, and the whole of reconciliation
+from ``src/pipeline_stages/companion_matching.py`` -- without going through
+``import src.pipeline_stages...``, because that package's ``__init__`` imports
+every pipeline stage (exiftool, dashboard, converters) and a maintenance tool
+must run on a bare interpreter with none of that installed. See
+``load_leaf_package`` for how the last of those is reached.
 
 Usage:
     python tools/restructure_archive.py [TARGET] [--year YYYY] [--apply]
-    python tools/restructure_archive.py [TARGET] --steps 2 --apply
+    python tools/restructure_archive.py [TARGET] --steps 2,4 --apply
     python tools/restructure_archive.py [TARGET] --list-to-split
 
 Exit codes: 0 = nothing left to do, 1 = changes pending or failures, 2 = error.
@@ -132,6 +192,8 @@ Exit codes: 0 = nothing left to do, 1 = changes pending or failures, 2 = error.
 
 import argparse
 import datetime
+import importlib
+import importlib.machinery
 import importlib.util
 import json
 import os
@@ -143,7 +205,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CANONICALISE_TOOL_PATH = REPO_ROOT / "tools" / "canonicalise_timestamp_names.py"
-GROUPER_LAUNCH_MODULE_PATH = REPO_ROOT / "src" / "pipeline_stages" / "grouper_launch.py"
+PIPELINE_STAGES_DIR = REPO_ROOT / "src" / "pipeline_stages"
+GROUPER_LAUNCH_MODULE_PATH = PIPELINE_STAGES_DIR / "grouper_launch.py"
 STANDARD_PATH = REPO_ROOT / "ARCHIVE_STANDARD.md"
 
 # A year folder: exactly four digits and nothing else (ARCHIVE_STANDARD P2).
@@ -154,6 +217,34 @@ YEAR_FOLDER_RE = re.compile(r"^\d{4}$")
 CONFIRM_WORD = "APPLY"
 
 OK, SKIPPED, FAILED, PENDING = "OK", "SKIPPED", "FAILED", "PENDING"
+
+
+def load_leaf_package():
+    """Make ``src.pipeline_stages``' leaf modules importable, without its ``__init__``.
+
+    ``companion_matching`` is the reconciliation engine, and unlike the other
+    leaf modules it is not self-contained: it imports ``stamps``, ``taxonomy``
+    and ``grouping_names`` the ordinary way. Loading it by bare file path would
+    execute those imports, and ``src.pipeline_stages.__init__`` imports every
+    pipeline stage -- exiftool, the dashboard, the converters -- which a
+    maintenance tool must run without.
+
+    So instead of loading the module out of its package, this puts a stub of
+    the package in ``sys.modules`` first. The import machinery finds the parent
+    already present, never runs either ``__init__``, and resolves
+    ``from src.pipeline_stages.stamps import ...`` normally against the real
+    file. The engine stays a plain readable module with plain imports, and this
+    tool still starts on a bare interpreter.
+    """
+    for name, folder in (("src", REPO_ROOT / "src"),
+                         ("src.pipeline_stages", PIPELINE_STAGES_DIR)):
+        if name in sys.modules:
+            continue
+        spec = importlib.machinery.ModuleSpec(name, None, is_package=True)
+        module = importlib.util.module_from_spec(spec)
+        module.__path__ = [str(folder)]
+        sys.modules[name] = module
+    return importlib.import_module("src.pipeline_stages.companion_matching")
 
 
 def load_module(name, path):
@@ -173,6 +264,13 @@ def load_module(name, path):
 # right for the same targets.
 canonicalise = load_module("canonicalise_timestamp_names", CANONICALISE_TOOL_PATH)
 grouper = load_module("photosorter_grouper_launch", GROUPER_LAUNCH_MODULE_PATH)
+
+# The companion-matching engine the pipeline stage runs, used here unchanged --
+# see its module docstring, and T8. Steps 2 and 4 are this module; nothing
+# about which file follows which representative is decided in this tool.
+matching = load_leaf_package()
+# The taxonomy folder names, read rather than spelled here (S4).
+taxonomy = importlib.import_module("src.pipeline_stages.taxonomy")
 
 # The grouping marker's grammar, already loaded by the canonicaliser from
 # src/pipeline_stages/grouping_names.py.
@@ -605,7 +703,192 @@ def step_group(run):
 
 
 # --------------------------------------------------------------------------
-# Steps 4 and 5 -- compliance with the archive standard
+# Steps 2 and 4 -- reunite companions with their subjects
+# --------------------------------------------------------------------------
+
+def dated_folders(run):
+    """Every dated folder under the target, parents before children.
+
+    A dated name is what marks an event folder (N1); a month folder
+    ("07. July") and a taxonomy subfolder are not dated and are skipped. The
+    walk is the canonicaliser's, so a reparse point is refused here exactly as
+    it is everywhere else (T4).
+    """
+    found, refused = [], []
+    for tree in run.trees:
+        root_key = path_key(tree)
+        for directory, _files in canonicalise.walk_bottom_up(tree, root_key, refused):
+            if path_key(directory) == root_key:
+                continue
+            if canonicalise.stamps.day_prefix(directory.name):
+                found.append(directory)
+    for path, reason in refused:
+        run.report("warn", "REFUSED %s: %s" % (path, reason))
+    # Sorting the paths puts a parent before its children, which is the order
+    # the two passes want: companions are distributed out of the event folder
+    # the grouper was opened on, and sidecars are placed from the top down.
+    found.sort(key=lambda path: str(path).lower())
+    return found
+
+
+def archive_mover(run):
+    """The move the engine performs, or a recorder when this is a dry run.
+
+    Applying goes through the canonicaliser's ``rename_path``: ``os.rename``,
+    never ``os.replace``, so an unexpected collision fails loudly instead of
+    destroying the file it lands on (T2), retried so a dropped SMB handle does
+    not strand a folder half-reconciled.
+    """
+    if not run.apply:
+        def record(source, target):
+            run.planned.append((Path(source), Path(target)))
+            return Path(target)
+        return record
+
+    attempts, delay_seconds = canonicalise.configured_retry()
+
+    def move(source, target):
+        target = Path(target)
+        os.makedirs(extended_path(target.parent), exist_ok=True)
+        return canonicalise.rename_path(source, target, attempts, delay_seconds)
+    return move
+
+
+def archive_checksum(run):
+    """The MD5 the placement pass compares two same-named companions with.
+
+    Chunked, at the size ``safety.hash_chunk_size`` configures, because a
+    sidecar is small but a ".lrv" proxy is not and this runs over a share.
+    """
+    chunk_size = canonicalise._config().get("safety", {}).get(
+        "hash_chunk_size", 1024 * 1024)
+
+    def checksum(path):
+        return matching.default_checksum(Path(path), chunk_size)
+    return checksum
+
+
+def duplicates_folder(tree, config):
+    r"""Where a companion that lost a name collision is parked.
+
+    One per year tree -- ``<year>\__DUPLICATES`` -- so a whole year's collision
+    losers land in a single place to review, rather than being scattered one
+    per event folder. This is a deliberate extension of section 4, which puts
+    ``__DUPLICATES`` *inside* a dated folder; see the tool's module docstring.
+
+    The name itself is read from the taxonomy, never spelled here (S4).
+    """
+    return Path(tree) / taxonomy.taxonomy_folder(config, "duplicates")
+
+
+def step_reconcile(run, label):
+    """Reunite companions with their representatives, then place every one of them.
+
+    Two passes, in this order and no other:
+
+    1. ``reconcile_folder``, per dated folder -- the engine the pipeline stage
+       runs. A companion left behind in an event folder's taxonomy subdir
+       follows the representative the grouper moved into a sibling sub-event,
+       matched on capture time because the representative has been renamed
+       since.
+    2. ``place_companions``, per year tree -- gather every subject and every
+       companion in the whole tree, then distribute. A sidecar goes into the
+       ``__EXIF`` directly inside the folder holding its subject (X10), a
+       preview into that folder's ``__PREVIEWS`` (X13), matched on name because
+       a companion carries its subject's full name (X1).
+
+    Pass 1 first, because it is the one that moves *subjects*: a RAW still in
+    the wrong event folder has no business having its sidecar placed beside it
+    yet. Once every file is in the folder it belongs to, pass 2 says where in
+    that folder each companion goes -- and, because it indexes the whole tree
+    before moving anything, finds the ones stranded in a different event
+    entirely.
+    """
+    folders = dated_folders(run)
+    if not folders:
+        run.report("ok", "No dated folder found; nothing to reconcile.")
+        return 0
+
+    config = canonicalise._config()
+    move = archive_mover(run)
+    checksum = archive_checksum(run)
+    run.planned = []
+    companions = matching.ReconcileReport()
+    placement = matching.PlacementReport()
+
+    run.report("bold", "%s %d dated folder(s) in %d tree(s)"
+               % (label, len(folders), len(run.trees)))
+
+    for folder in folders:
+        def log(message, folder=folder):
+            run.report("dim", "  %s: %s" % (folder.name, message.strip()))
+        try:
+            companions.merge(matching.reconcile_folder(
+                folder, config, log, move=move, prune=run.apply))
+        except Exception as error:            # never abandon the rest of the tree
+            run.report(FAILED, "  ! reconciling %s failed: %r" % (folder.name, error))
+            companions.errors += 1
+
+    for tree in run.trees:
+        def log(message, tree=tree):
+            run.report("dim", "  %s" % message.strip())
+        try:
+            placement.merge(matching.place_companions(
+                tree, config, duplicates_folder(tree, config), log,
+                move=move, checksum=checksum, prune=run.apply))
+        except Exception as error:
+            run.report(FAILED, "  ! placing companions in %s failed: %r"
+                       % (tree, error))
+            placement.errors += 1
+
+    if not run.apply:
+        for source, target in run.planned:
+            run.report("dim", "    %s\n    ->  %s" % (source, target))
+
+    run.report("bold", "\nCompanions following their representative: %s"
+               % companions.summary())
+    run.report("bold", "Companion placement (X10/X13): %s" % placement.summary())
+    run.report("dim", "%d media file(s) indexed" % placement.media)
+
+    if placement.needs_attention:
+        run.report("warn", "\n%d thing(s) want a look: %s" % (
+            placement.needs_attention,
+            ", ".join(
+                "%d %s" % (value, label) for label, value in (
+                    ("with DIFFERENT bytes at the destination",
+                     placement.parked_differing),
+                    ("with no subject anywhere", placement.orphaned),
+                    ("whose subject is ambiguous", placement.ambiguous),
+                    ("media with no sidecar", placement.media_without_sidecar),
+                    ("errors", placement.errors),
+                ) if value)))
+
+    if not run.apply and run.planned:
+        run.report("ok", "\n%d file(s) to move. Nothing was changed. Re-run "
+                         "with --apply." % len(run.planned))
+
+    run.journal.write("reconcile", folders=len(folders),
+                      companions_moved=companions.moved,
+                      companions_left=companions.left_behind,
+                      placed=placement.moved,
+                      placed_across_folders=placement.across_folders,
+                      parked_duplicate=placement.parked_duplicate,
+                      parked_differing=placement.parked_differing,
+                      orphaned=placement.orphaned,
+                      ambiguous=placement.ambiguous,
+                      media=placement.media,
+                      media_without_sidecar=placement.media_without_sidecar,
+                      errors=companions.errors + placement.errors)
+
+    if companions.errors or placement.errors:
+        return 1
+    if not run.apply and run.planned:
+        return 1
+    return 0
+
+
+# --------------------------------------------------------------------------
+# Steps 6 and 7 -- compliance with the archive standard
 # --------------------------------------------------------------------------
 
 _STANDARD_NOTICE = (
@@ -639,11 +922,15 @@ def step_standard_fix(run):
 STEPS = (
     (1, "Canonicalise names",
      lambda run: step_canonicalise(run, "Canonicalising")),
-    (2, "Group the %s folders" % TO_SPLIT_MARKER, step_group),
-    (3, "Canonicalise names again",
+    (2, "Reunite companions and sidecars",
+     lambda run: step_reconcile(run, "Reconciling")),
+    (3, "Group the %s folders" % TO_SPLIT_MARKER, step_group),
+    (4, "Reunite companions and sidecars again",
+     lambda run: step_reconcile(run, "Reconciling (again)")),
+    (5, "Canonicalise names again",
      lambda run: step_canonicalise(run, "Canonicalising (again)")),
-    (4, "Check compliance with the archive standard", step_standard_check),
-    (5, "Fix compliance with the archive standard", step_standard_fix),
+    (6, "Check compliance with the archive standard", step_standard_check),
+    (7, "Fix compliance with the archive standard", step_standard_fix),
 )
 
 
@@ -663,6 +950,8 @@ class Run:
         # The extension sets that say what counts as an image or a video, read
         # once from the same config the pipeline uses.
         self.grouping_settings = canonicalise.GroupingSettings(canonicalise._config())
+        # Where a dry run's reconcile step collects the moves it would make.
+        self.planned = []
         self.journal = Journal(None)
 
     def report(self, key, message):

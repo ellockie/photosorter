@@ -186,9 +186,10 @@ The standard proposes more that no code writes yet:
   `__VIDEOS_TO_RENAME`, with its companions alongside, and the folder carries a
   `w=N` count for an interactive cleanup tool to pick up later;
 - **`__PREVIEWS`** (X6–X9) for camera thumbnails and proxies. `.thm` and `.lrv`
-  are already classified as previews rather than media, so a thumbnail no longer
-  counts as an image or can be picked as a representative — but nothing routes
-  them into the folder yet.
+  are classified as previews rather than media, so a thumbnail no longer counts
+  as an image or can be picked as a representative. Routing them into the folder
+  is implemented in `place_companions` and run by the restructure tool, but
+  nothing *writes* one there during a live ingest yet.
 
 ### Shooting modes
 
@@ -363,18 +364,32 @@ they state exactly what it will put in front of you. A day whose every file was
 routed into a subfolder — a video-only day, everything in `__VIDEOS` — is
 counted from the subtree instead, rather than reported as empty.
 
-`e` and `s` are audit markers. They are written only by the maintenance tool
+`e`, `c` and `s` are audit markers. They are written only by the maintenance tool
 below, and only when something does not add up:
 
 ```text
 2026-07-01_(Wed)__13.07.11 - __TO_SPLIT__(i=129_s=6)   6 files sit in subfolders
 2026-07-25_(Sat) - __TO_SPLIT__(e=7)                   7 sidecars, and no media
+2026-07-15_(Wed)__09.12.53 - __TO_SPLIT__(i=1_c=1)     2 sidecars claim one shot
 ```
 
 One `._exif` per media file is the norm, so `e` appears only when that breaks:
 `e=7` beside no images means the day's photos left without their sidecars, and
 `e=0` beside a folder full of images means the sidecars are gone. `s` means the
 grouper will not show you everything the folder holds.
+
+**`e` counts subjects, not files, and `c` is why.** The useful question is how
+many media are *covered* by a sidecar, not how many `._exif` are lying about — so
+`e` counts the distinct subjects the folder's sidecars name, and `c` counts the
+files beyond the first for any one of them. Splitting the two is what stops one
+fault masking another: two sidecars naming the JPG and none naming the RAW used
+to total 2 against 2 media and report nothing at all. That folder now reads
+`e=1_c=1` — one subject covered, one file too many — and both faults are visible.
+
+In a folder in order every subject is covered, so `e` is silent and `c` absent —
+which is the state [companion placement](#restructuring-an-existing-archive)
+leaves behind: it compares the clashing files by checksum, parks the loser, and
+`c` goes.
 
 A folder holding **no files at all**, however deep you look, says so instead of
 counting — there is nothing there to count:
@@ -496,6 +511,24 @@ white and the text replacing it is red.
 `--no-colour` drops the escape codes; `--quiet` drops the per-rename lines,
 leaving the summary.
 
+After the summary the tool explains the count bracket — but only the letters it
+actually wrote this run, so a run that produced `(i=1_c=1)` explains `i` and `c`
+and nothing else:
+
+```text
+2 to rename, 0 conflict(s), 0 failure(s), 0 unparseable, 0 refused.
+
+What the counts in those names mean:
+  i=  top-level images -- the review job, what a grouper GUI will show
+  e=  media covered by a sidecar, counted by subject; shown only when it does not match the media in the subtree
+```
+
+The meanings come from `COUNT_MEANINGS` in
+[`grouping_names.py`](src/pipeline_stages/grouping_names.py), mirroring §8 —
+a legend spelled out in the tool would be the second definition that drifts.
+`--quiet` suppresses it, and a run where no name gained a bracket prints
+nothing.
+
 #### On a network target
 
 A mapped drive letter is a per-session alias that can be remapped between the
@@ -521,10 +554,12 @@ order that makes sense, over one target, under one set of safety rules:
 | Step | What it does |
 | --- | --- |
 | 1 | Canonicalise names (the tool above) |
-| 2 | Open the grouper GUI on every `__TO_SPLIT__` folder, one at a time |
-| 3 | Canonicalise names again |
-| 4 | Check compliance with the archive standard — **not implemented** |
-| 5 | Fix compliance with the archive standard — **not implemented** |
+| 2 | Reunite companions with their representatives, and sidecars/previews with their subjects |
+| 3 | Open the grouper GUI on every `__TO_SPLIT__` folder, one at a time |
+| 4 | Reunite companions and sidecars again |
+| 5 | Canonicalise names again |
+| 6 | Check compliance with the archive standard — **not implemented** |
+| 7 | Fix compliance with the archive standard — **not implemented** |
 
 ```powershell
 _restructure_archive.bat                                        # dry run over <root_folder>\<year>
@@ -532,7 +567,8 @@ _restructure_archive.bat --apply
 _restructure_archive.bat "d:\__PHOTOS_BACKUP" --year 2024 --apply
 _restructure_archive.bat "\\NAS\PhotoBackup" --year 2024 --apply
 _restructure_archive.bat --list-to-split                        # just the folders step 2 would open
-_restructure_archive.bat --steps 2 --apply                      # only the grouping pass
+_restructure_archive.bat --steps 3 --apply                      # only the grouping pass
+_restructure_archive.bat --steps 2,4 --apply                    # only the reconcile passes
 ```
 
 The `.ps1` takes the same arguments and returns the same exit codes, and adds
@@ -566,7 +602,7 @@ writes its own rename journal per year tree, and `--undo` on *that* tool replays
 those renames backwards. Step 2 is not undoable — what the GUI does inside a
 folder is your own work.
 
-**Only the folders worth opening.** Step 2 opens a marked folder only when it has
+**Only the folders worth opening.** Step 3 opens a marked folder only when it has
 an image or a video **at its top level**, which is the whole of what the grouper's
 thumbnail grid shows. A folder can carry the marker and have nothing for it to do
 — an earlier pass already split the day into sub-events, the day's files all sit
@@ -593,15 +629,87 @@ splitting a day moves its files down into the new sub-event folders: a folder
 that had a gridful when the batch was planned can have an empty top level by the
 time the batch reaches it.
 
-**Why canonicalise twice.** Step 1 is what makes step 2 possible: the grouper is
-opened on folders carrying the `__TO_SPLIT__` marker, and a legacy `- 1. ######`
-day does not carry it until the canonicaliser has rewritten the tail. Step 3 is
-what makes step 2 durable: the grouper writes on its own convention and rebuilds
-a count bracket from scratch every time it touches a folder, dropping the `e`/`s`
-audit markers and stamping new sub-event folders in whatever shape it favours.
-The second pass folds all of that back onto the canonical form.
+**Reuniting companions and sidecars (steps 2 and 4).** Two passes over every
+dated folder, in this order:
 
-**Steps 4 and 5 are placeholders.** The standard is v0.8, a draft, enforced by
+- **`reconcile_folder`** — a companion left behind in an event folder's taxonomy
+  subdir follows the representative the grouper moved into a sibling sub-event.
+  Matched on capture time, because the representative has been renamed since.
+- **`place_companions`** — **X10 and X13**, over the whole tree. Gather every
+  subject and every companion first, then distribute: a sidecar goes into the
+  `__EXIF` *directly inside* the folder that holds its subject, a preview into
+  that folder's `__PREVIEWS`. Matched on **name**, because a companion carries
+  its subject's full name (X1), which makes it exact rather than careful.
+
+Companions first, because that pass moves *subjects*: a RAW still sitting in the
+wrong event folder has no business having its sidecar placed beside it yet.
+
+Gathering the whole index before moving anything is what lets a sidecar stranded
+in a different event folder entirely find its subject, and what makes an
+ambiguous name visible instead of guessed at — neither is answerable while
+walking one folder at a time. Cross-folder moves are counted and reported
+separately so they are reviewable.
+
+```text
+2026-07-18_(Sat)__17.04.53 - Dive    2026-07-18…__f2.8__GP.mp4
+    2026-07-18…__f8.0__6D.jpg
+    __EXIF\        …__f2.8__GP.mp4._exif        stays — subject is here
+    __PREVIEWS\    …__f2.8__GP.mp4.lrv          was "…__f2.8__GP.LRV" beside it
+    __RAW\         …__RAW__f8.0__6D.CR2
+    __RAW\__EXIF\  …__RAW__f8.0__6D.CR2._exif   moved down out of __EXIF
+```
+
+**Previews arrive in camera form** — the subject's *stem* plus its own extension,
+`GX010042.LRV` beside `GX010042.MP4` — because nothing has ever renamed one. X6
+requires previews to follow X1, and once a preview is in `__PREVIEWS` the stem is
+all that would be left to pair it by, so a camera-form preview is **renamed onto
+X1 as it moves**: `GX010042.LRV` becomes `GX010042.MP4.lrv`, extension
+lower-cased. A stem shared by two subjects is not knowable from the name, so that
+preview is left where it is and reported.
+
+The stem form is accepted for previews only. An `._exif` is written by this
+pipeline and is always in X1 form already, so allowing a stem match there would
+add a way to get it wrong and no way to get it right.
+
+#### When something already holds the destination name
+
+The two files are compared by **MD5** rather than one being picked:
+
+| | |
+| --- | --- |
+| **identical** | the incoming copy is redundant — parked as `<name>_DUPE_<md5>_<n>` (F4) |
+| **different** | one of them is wrong and which is not knowable here — parked as `<name>_DIFFERS_<md5>_<n>` and counted separately |
+
+Both land in `<year>\__DUPLICATES`, one per year tree, so a whole year's collision
+losers are in a single place to review. **Nothing is overwritten and nothing is
+deleted** (T1, T2) — the file already at the destination is left exactly as it
+was, and the parking folder is excluded from the next run's index so its contents
+are not re-reported as orphans.
+
+> `__DUPLICATES` under a *year* is a deliberate extension of §4, which places it
+> inside a dated folder. Worth an amendment before the standard leaves draft.
+
+A companion whose subject is nowhere in the tree is **left exactly where it is**
+and reported. It is the only surviving record that the subject existed (X3), and
+moving it on a guess would lose the one thing it still says — which is what `e`
+reports (X4).
+
+The pass also carries the other half of the audit: how many media files the tree
+holds, and how many of them have **no sidecar at all** (X4). Those, the
+`_DIFFERS` parkings, the orphans and the ambiguous names are gathered into one
+"things that want a look" line at the end of the step.
+
+**Why canonicalise twice.** Step 1 is what makes step 3 possible: the grouper is
+opened on folders carrying the `__TO_SPLIT__` marker, and a legacy `- 1. ######`
+day does not carry it until the canonicaliser has rewritten the tail. Step 5 is
+what makes steps 3 and 4 durable: the grouper writes on its own convention and
+rebuilds a count bracket from scratch every time it touches a folder, dropping
+the `e`/`s` audit markers and stamping new sub-event folders in whatever shape it
+favours — and step 4 then moves files between folders, changing those counts
+again. Running the canonicaliser last folds all of it back onto the canonical
+form and re-derives the audit markers from what is finally on disk.
+
+**Steps 6 and 7 are placeholders.** The standard is v0.8, a draft, enforced by
 nothing — its `S4` subfolder set and its `T8` "defined more than once" list carry
 open questions whose answers change what "compliant" means. Both steps announce
 themselves and do nothing; the plumbing is there so implementing them is a change

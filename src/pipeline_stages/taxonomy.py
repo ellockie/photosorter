@@ -120,6 +120,30 @@ def sidecar_subdir(subject_folder: str | Path, config: dict, key: str = "exif") 
 # filename -- when it meant "a raw exists". _HAS_RAW and _FROM_RAW cannot be
 # misread for each other, and they are mutually exclusive by construction:
 # _FROM_RAW already says a RAW exists.
+# Collision suffixes (standard F4). A file that lost a name collision keeps its
+# own name and says so, carrying the checksum that identified it so the pair can
+# be matched up again by eye.
+#
+#   _DUPE_<md5>_<n>     byte-identical to the file already holding the name
+#   _DIFFERS_<md5>_<n>  same name, different bytes -- the case that needs a human
+#
+# "_DIFFERS" is the newer of the two: F4 names only "_DUPE" and "_LOWRES",
+# because until companion placement went archive-wide there was nowhere for two
+# sidecars of one subject to meet.
+DUPLICATE_SUFFIX = "_DUPE"
+DIFFERING_SUFFIX = "_DIFFERS"
+
+
+def duplicate_name(stem: str, md5: str, index: int, extension: str) -> str:
+    """``photo_DUPE_abcd_2.jpg`` -- F4's name for a byte-identical loser."""
+    return f"{stem}{DUPLICATE_SUFFIX}_{md5}_{index}{extension}"
+
+
+def differing_name(stem: str, md5: str, index: int, extension: str) -> str:
+    """``photo_DIFFERS_abcd_2.jpg`` -- same name, different bytes."""
+    return f"{stem}{DIFFERING_SUFFIX}_{md5}_{index}{extension}"
+
+
 SUFFIX_HAS_RAW = "_HAS_RAW"
 SUFFIX_FROM_RAW = "_FROM_RAW"
 SUFFIX_HAS_EDIT = "_HAS_EDIT"
