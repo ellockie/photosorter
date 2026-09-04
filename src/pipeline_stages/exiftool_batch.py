@@ -5,30 +5,10 @@ from src.core import \
     PipelineContext, \
     PipelineStage, \
     safe_delete
-
-
-# Windows rejects command lines beyond ~32k characters (CreateProcess raises
-# WinError 206, which Python surfaces as FileNotFoundError). Keep each exiftool
-# invocation comfortably below that so large ingests do not silently fail.
-MAX_COMMAND_CHARS = 24000
-
-
-def chunk_targets(targets: list[Path], budget: int = MAX_COMMAND_CHARS) -> list[list[str]]:
-    chunks: list[list[str]] = []
-    current: list[str] = []
-    used = 0
-    for target in targets:
-        argument = str(target)
-        cost = len(argument) + 3  # quotes plus separating space
-        if current and used + cost > budget:
-            chunks.append(current)
-            current = []
-            used = 0
-        current.append(argument)
-        used += cost
-    if current:
-        chunks.append(current)
-    return chunks
+from src.pipeline_stages.exiftool_sidecars import \
+    MAX_COMMAND_CHARS, \
+    WRITE_FORMAT, \
+    chunk_targets
 
 
 class ExiftoolBatchStage(PipelineStage):
@@ -67,7 +47,7 @@ class ExiftoolBatchStage(PipelineStage):
             "-u",
             "-g1",
             "-w!",
-            "%d%f.%e._exif",
+            WRITE_FORMAT,
         ]
         for chunk in chunk_targets(targets):
             try:

@@ -4,6 +4,7 @@ from pathlib import Path
 from src.core import     PipelineContext,     PipelineStage
 from src.pipeline_stages.legacy import date_folder_suffix
 from src.pipeline_stages.grouper_launch import     grouper_command as _grouper_command,     grouper_install,     run_grouper as _run_grouper,     stderr_tail as _stderr_tail
+from src.pipeline_stages.parking import parking_area_for as _parking_area_for
 from src.pipeline_stages.grouping_names import     EMPTY_SUBFOLDERS_FOLDER as _EMPTY_SUBFOLDERS_FOLDER,     TO_SPLIT_MARKER as _TO_SPLIT_MARKER,     count_media as _count_media,     extension_sets as _extension_sets,     select_media as _select_media,     to_split_name as _to_split_name,     with_earliest_time as _with_earliest_time
 
 # grouper_install is re-exported: the dashboard (src/server.py) imports it
@@ -153,7 +154,7 @@ class ScreenshotGroupingStage(PipelineStage):
         return found
 
     def _park_empty_folder(self, context: PipelineContext, folder: Path) -> None:
-        """Move an empty day folder into "__EMPTY_SUBFOLDERS" beside it.
+        """Move an empty day folder into its month's ``__EMPTY_SUBFOLDERS``.
 
         Opening the grouper on a folder with nothing in it costs the reviewer a
         window to read and close, and teaches them to click through the GUI
@@ -162,14 +163,21 @@ class ScreenshotGroupingStage(PipelineStage):
         keeping the folder itself: its name still records which day it was and
         what it held before it was emptied.
 
-        The parking folder is a sibling of the folder being moved, so a day
-        leaves the working list without leaving its month. Created on first use.
+        The parking folder is a sibling of the folder being moved -- it sits
+        where dated folders sit, so a day emptied out of a month folder is
+        parked in that month folder and a sub-event emptied out of a group is
+        parked in that group (H2). Neither leaves the level it was on, so what
+        a folder was near is still what it is near. Created on first use.
 
         Nothing is overwritten. A folder of that name already parked means an
         earlier run put one there, and which of the two is which is not this
         stage's guess to make -- it says so and leaves the folder alone.
         """
-        parking = folder.parent / _EMPTY_SUBFOLDERS_FOLDER
+        parking = _parking_area_for(folder)
+        if parking is None:
+            context.log(f"  ! {folder.name} is empty, but no conforming month "
+                        "folder stands above it (H2); left where it is")
+            return False
         destination = parking / folder.name
         if destination.exists():
             context.log(f"  ! {folder.name} is empty, but {_EMPTY_SUBFOLDERS_FOLDER}"

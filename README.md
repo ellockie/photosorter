@@ -17,7 +17,7 @@ Read it before writing any stage or tool that creates, moves, renames or scans
 archive folders. The sections below describe what the current code does; where the
 two disagree, the standard is the intent and the code is the gap.
 
-Currently **v0.8, draft, not enforced anywhere** — and existing tools are not
+Currently **v0.12, draft, partially enforced by the restructure tool** — and existing tools are not
 assumed compliant.
 
 ## Current Default Behaviour
@@ -172,19 +172,36 @@ metadata is a representative and sits at the top level of the event folder besid
 the stills (§5.1 V1), its sidecar in the same `__EXIF`. `__VIDEOS` and
 `__EXTRACTED_VIDEOS` (and `__EXTRACTED`, now `__RAW_EXTRACTED_JPGS`) were the
 earlier arrangement: they live on in
-`LEGACY_TAXONOMY`, recognised when read so an existing archive is not reported as
-malformed and companion reconciliation can still drain them, and written by
-nothing (S5).
+`LEGACY_TAXONOMY`, recognised case-insensitively when read so an existing archive
+is not reported as malformed, and written by nothing (S5). Reconciliation in
+`tools/restructure_archive.py` now drains legacy `__VIDEOS`: dated videos move
+up beside images, intrinsic ExifTool metadata names an unstamped video, and a
+genuinely undatable one is tagged and moved to `__VIDEOS_TO_RENAME`. Sidecars
+and previews follow; the verified-empty legacy folder is parked under the
+month's `__EMPTY_SUBFOLDERS` (V12/L4).
+
+**Groups (§3) are written.** A dated folder holding dated child folders carries
+`____GROUP____` as the first element of its tail and states the whole span it
+covers in its prefix -- start stamp, then `#` and the last day with the time of
+the last shot in the subtree:
+
+    2026-08-20_(Thu)__09.14.02#27__18.31.50 - ____GROUP____(d=7) - Norway
+
+Both stamps and the `d` count are the tool's, rebuilt from the subtree on every
+run; the description after them is the only part a person owns. Step 6 of
+`tools/restructure_archive.py` maintains them, adds the marker to a folder that
+has gained dated children and takes it off one that has lost its last. What it
+holds (C3) is only reported: moving media down into a child of its own is C4,
+still an open question. `__CONTAINER__` was the v0.8 spelling; nothing ever
+wrote one, and step 6 converts any that a person typed.
 
 The standard proposes more that no code writes yet:
 
-- a `__CONTAINER__` marker (§3) on any dated folder that holds dated child
-  folders, so a container is distinguishable from a leaf by regex;
-- **undatable videos** (V4–V11) — one with no usable capture time gets a stamp
-  interpolated from the stills around it, marked `__EST__`; one that cannot even
-  be ordered is tagged `__TO_RENAME__<original name>` **and** moved to
-  `__VIDEOS_TO_RENAME`, with its companions alongside, and the folder carries a
-  `w=N` count for an interactive cleanup tool to pick up later;
+- **the interactive cleanup for undatable videos** (V9/V11) — automatic
+  migration now tags an undatable video `__TO_RENAME__<original name>` **and**
+  moves it to `__VIDEOS_TO_RENAME` with its companions. The reserved `__EST__`
+  interpolation marker is not written; choosing neighbouring anchors remains
+  unresolved. The future cleanup UI still needs to resolve the `w=N` backlog;
 - **`__PREVIEWS`** (X6–X9) for camera thumbnails and proxies. `.thm` and `.lrv`
   are classified as previews rather than media, so a thumbnail no longer counts
   as an image or can be picked as a representative. Routing them into the folder
@@ -629,14 +646,30 @@ splitting a day moves its files down into the new sub-event folders: a folder
 that had a gridful when the batch was planned can have an empty top level by the
 time the batch reaches it.
 
-**Reuniting companions and sidecars (steps 2 and 4).** Three passes, in this
+**Reuniting companions and sidecars (steps 2 and 4).** Six passes, in this
 order and no other:
 
+- **`hoist_parking_areas`** — a parking area sits **where dated folders sit**:
+  under a month folder, or inside a group beside its dated children (H2). One
+  found anywhere else — inside a leaf day, where the legacy-container migration
+  used to leave a shell — is merged into the nearest allowed one above it, and
+  no further: a sub-event emptied out of a group stays in that group. Name
+  collisions gain `_2`, `_3` …; each emptied shell is removed only after it is
+  verified to hold nothing at all. One sitting *above* its level, under a year
+  folder, is reported and never pushed down (H7). A parking area is then a
+  traversal boundary wherever it sits, so parked days do not re-enter grouping
+  or reconciliation.
+- **`migrate_legacy_videos`** — every video in a case-variant `__VIDEOS` moves
+  up beside images when its filename or intrinsic metadata supplies a time.
+  A genuinely undatable one is tagged and routed to `__VIDEOS_TO_RENAME`; an
+  ExifTool failure leaves it untouched. Companions follow and the verified-empty
+  legacy folder is parked beside the dated folder it sat in (V12/L4).
 - **`migrate_legacy_containers`** — `##   EXIFs   ##` becomes `__EXIF` and
   `##   RAWs   ##` becomes `__RAW`. Renamed outright where nothing of that name
   is there yet (one atomic operation that cannot half-finish); where one is,
   each file moves across individually and a collision is settled by checksum. An
-  emptied container is parked in the `__EMPTY_SUBFOLDERS` beside it, numbered
+  emptied container is parked in the `__EMPTY_SUBFOLDERS` beside its dated
+  folder — one level up, since a leaf day is not a level one may sit on — numbered
   `_2`, `_3` … when that name is taken. One with no modern equivalent —
   `old_EXIF`, the three `FILES` holders — is **reported and never touched**.
 - **`reconcile_folder`** — a companion left behind in an event folder's taxonomy
@@ -644,12 +677,18 @@ order and no other:
   Matched on capture time, because the representative has been renamed since.
 - **`place_companions`** — **X10 and X13**: a companion goes into the folder
   *directly inside* the one that holds its subject — an `._exif` into `__EXIF`,
-  a `.thm`/`.lrv` into `__PREVIEWS`. Matched on **name** (X1).
+  a `.thm`/`.lrv` into `__PREVIEWS`. Canonical names match directly; historical
+  EXIF names without the media extension or with different case match by stem
+  and X10 location, then are renamed onto X1 (X1a).
+- **`generate_missing_raw_sidecars`** — once tolerant matching has removed the
+  false positives, genuinely uncovered RAWs are read by ExifTool and receive a
+  canonical sidecar in their own `__RAW\__EXIF` (X14).
 
-The order is the dependency order. Migration first, so everything after it reads
-one set of folder names instead of two. Reconciliation next, because it moves
+The order is the dependency order. Parking is normalized first, then legacy
+migration gives everything after it one set of folder names. Reconciliation moves
 *subjects*: a RAW still in the wrong event folder has no business having its
-sidecar placed beside it yet. Placement last.
+sidecar placed beside it yet. Placement settles old names before generation,
+so only genuinely absent RAW sidecars are created.
 
 **A sidecar is looked for anywhere in the target** — at any depth, and across
 year trees. Placement indexes every tree of the run at once before it moves
@@ -671,12 +710,12 @@ time. A day folder that never gained a time is still a day folder.
     __RAW\__EXIF\  …__RAW__f8.0__6D.CR2._exif   moved down out of __EXIF
 ```
 
-**Previews arrive in camera form** — the subject's *stem* plus its own extension,
+**Historical companions may arrive in stem form** — the subject's *stem* plus
+the companion extension. That includes `shot._exif` from older extraction and
 `GX010042.LRV` beside `GX010042.MP4` — because nothing has ever renamed one. They
 are matched by stem and **renamed onto X1 as they move**: `GX010042.MP4.lrv`,
-extension lower-cased. A stem shared by two subjects is not knowable, so that
-preview is left where it is. The stem form is accepted for previews only; an
-`._exif` is always in X1 form already.
+extension lower-cased. X10 location distinguishes a same-stem top-level JPEG
+from its RAW; multiple candidates at that same location are left for review.
 
 #### When something already holds the destination name
 
@@ -692,9 +731,9 @@ tree so a multi-year run does not pool them. **Nothing is overwritten and nothin
 is deleted** (T1, T2), and the parking folder is excluded from the next run's
 index so its contents are not re-reported as orphans.
 
-> `__DUPLICATES` under a *year*, and an emptied `##   EXIFs   ##` inside an
-> `__EMPTY_SUBFOLDERS`, are both deliberate extensions of §4/§4.1. Both are
-> listed under that document's open questions.
+> `__DUPLICATES` under a *year* remains a deliberate extension of §4 and is
+> listed in the standard's open questions. Empty legacy containers now park in
+> the `__EMPTY_SUBFOLDERS` beside their dated folder under settled H2/L4.
 
 A companion whose subject is nowhere in the target is **left exactly where it
 is** and reported (X3). The pass also counts the media that have **no sidecar at
@@ -731,8 +770,8 @@ favours — and step 4 then moves files between folders, changing those counts
 again. Running the canonicaliser last folds all of it back onto the canonical
 form and re-derives the audit markers from what is finally on disk.
 
-**Steps 6 and 7 are placeholders.** The standard is v0.8, a draft, enforced by
-nothing — its `S4` subfolder set and its `T8` "defined more than once" list carry
+**Steps 6 and 7 are placeholders.** The standard is v0.12, a draft, only partly
+enforced — its `S4` subfolder set and its `T8` "defined more than once" list carry
 open questions whose answers change what "compliant" means. Both steps announce
 themselves and do nothing; the plumbing is there so implementing them is a change
 to one function each, against "The fixing tool" in §7 and the machine-readable

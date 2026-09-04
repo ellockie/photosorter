@@ -35,10 +35,10 @@ implementation of the matching, living in the tools directory and drifting away
 from the one the pipeline uses, is exactly what T8 forbids.
 
 This is a **leaf module** in the sense the standard means (T8): it imports
-nothing from the project but the other leaf modules — ``stamps``,
-``grouping_names`` and ``taxonomy`` — and in particular nothing from
-``src.core``. A maintenance tool can therefore load it without dragging
-exiftool, the dashboard and the converters in behind it.
+nothing from the project but other dependency-free modules — ``stamps``,
+``grouping_names``, ``taxonomy`` and ``parking`` (which reads ``months``) — and
+in particular nothing from ``src.core``. A maintenance tool can therefore load
+it without dragging exiftool, the dashboard and the converters in behind it.
 
 Every file lands in exactly one bucket of the returned report, and every file
 that is *not* moved is named in the log, so a partial run can never look like a
@@ -53,6 +53,9 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.pipeline_stages.parking import \
+    free_versioned_name, \
+    parking_area_for
 from src.pipeline_stages.grouping_names import \
     EMPTY_SUBFOLDERS_FOLDER, \
     extension_sets, \
@@ -521,6 +524,7 @@ class PlacementReport:
     # The audit half: media indexed, and how many of them have no sidecar (X4).
     media: int = 0
     media_without_sidecar: int = 0
+    missing_sidecars: list = None       # media Paths, resolved after tolerant matching
 
     # What the walk saw on its way past and did not act on: folders that fit
     # none of the shapes the standard allows, and legacy containers still to be
@@ -532,6 +536,8 @@ class PlacementReport:
         self.non_compliant = [] if self.non_compliant is None else self.non_compliant
         self.legacy_containers = (
             [] if self.legacy_containers is None else self.legacy_containers)
+        self.missing_sidecars = (
+            [] if self.missing_sidecars is None else self.missing_sidecars)
 
     @property
     def seen(self) -> int:
@@ -569,6 +575,7 @@ class PlacementReport:
             setattr(self, field, getattr(self, field) + getattr(other, field))
         self.non_compliant.extend(other.non_compliant)
         self.legacy_containers.extend(other.legacy_containers)
+        self.missing_sidecars.extend(other.missing_sidecars)
 
 
 def companion_kinds(config: dict) -> list[tuple[str, set[str]]]:
@@ -592,7 +599,7 @@ class _Index:
     # A subject is any file that is not itself a companion: media, but also the
     # ".psd" in __EDITED and the ".xmp" beside it, which have sidecars too.
     # Only files inside a dated folder are indexed -- see ``index_trees``.
-    subjects_by_name: dict = None        # name.lower() -> [folder, ...]
+    subjects_by_name: dict = None        # name.lower() -> [(actual name, folder), ...]
     subjects_by_stem: dict = None        # stem.lower() -> [(name, folder), ...]
     # The media half, for the X4 audit: the files that *ought* to have a sidecar.
     media: list = None                   # [(name, folder), ...]
@@ -625,10 +632,11 @@ def _folder_problem(name: str, inside_dated: bool, depth: int,
         return None                       # a dated folder is legal at any level
     if name == EMPTY_SUBFOLDERS_FOLDER:
         return None                       # a holding area (H2)
-    if name in legacy_names:
+    folded = name.casefold()
+    if folded in legacy_names:
         return None                       # reported separately, as a migration
     if inside_dated:
-        if name in tax_names or name in sidecar_names:
+        if folded in tax_names or folded in sidecar_names:
             return None                   # S2/X11 allow the nesting
         return "not a dated folder and not one of the allowed subfolders (S1)"
     if depth <= 0:
@@ -668,10 +676,13 @@ def index_trees(roots, config: dict, reporter: "_Reporter",
              if extensions]
     image_exts, video_exts = extension_sets(config)
     media_exts = image_exts | video_exts
-    tax_names = taxonomy_dir_names(config)
-    sidecar_names = sidecar_dir_names(config)
-    legacy_names = legacy_container_names(config)
+    tax_names = {name.casefold() for name in taxonomy_dir_names(config)}
+    sidecar_names = {name.casefold() for name in sidecar_dir_names(config)}
+    legacy_names = {name.casefold() for name in legacy_container_names(config)}
     legacy_targets = legacy_container_targets(config)
+    legacy_targets_folded = {
+        name.casefold(): key for name, key in legacy_targets.items()
+    }
     index = _Index()
 
     def walk(folder: Path, inside_dated: bool, depth: int) -> None:
@@ -699,9 +710,15 @@ def index_trees(roots, config: dict, reporter: "_Reporter",
                                           tax_names, sidecar_names, legacy_names)
                 if problem is not None:
                     index.non_compliant.append((path, problem))
-                if entry.name in legacy_names:
+                if entry.name.casefold() in legacy_names:
                     index.legacy_containers.append(
-                        (path, legacy_targets.get(entry.name)))
+                        (path, legacy_targets_folded.get(entry.name.casefold())))
+                if entry.name == EMPTY_SUBFOLDERS_FOLDER:
+                    # H1/H5: a parking area is an archive of hollow folders,
+                    # not a source tree, wherever it sits. Parked days must
+                    # not re-enter companion reconciliation just because they
+                    # still carry dated names.
+                    continue
                 walk(path, inside_dated or bool(day_prefix(entry.name)), depth + 1)
                 continue
 
@@ -721,7 +738,8 @@ def index_trees(roots, config: dict, reporter: "_Reporter",
             if not inside_dated:
                 continue                  # only a dated folder holds subjects
 
-            index.subjects_by_name.setdefault(entry.name.lower(), []).append(folder)
+            index.subjects_by_name.setdefault(
+                entry.name.lower(), []).append((entry.name, folder))
             index.subjects_by_stem.setdefault(
                 Path(entry.name).stem.lower(), []).append((entry.name, folder))
             if Path(entry.name).suffix.lower() in media_exts:
@@ -759,6 +777,48 @@ def _free_parking_name(folder: Path, stem: str, extension: str,
         index += 1
 
 
+def _path_key(path: Path) -> str:
+    """Case-insensitive absolute key, matching Windows archive semantics."""
+    return os.path.normcase(os.path.abspath(str(path)))
+
+
+def _distinct_subjects(candidates) -> list[tuple[str, Path]]:
+    """De-duplicate ``(actual name, folder)`` candidates without losing case."""
+    distinct = {}
+    for name, folder in candidates:
+        distinct[(name.lower(), _path_key(folder))] = (name, Path(folder))
+    return list(distinct.values())
+
+
+def _subject_candidates(index: _Index, subject_name: str, sidecar_folder: Path,
+                        key: str, config: dict) -> tuple[list[tuple[str, Path]], bool]:
+    """Resolve canonical and historical companion names to possible subjects.
+
+    The historical ``._exif`` writer omitted the media extension, so a sidecar
+    named ``shot._exif`` has to fall back to the subject stem. When both a JPEG
+    and its RAW share that stem, position resolves the otherwise ambiguous
+    pair: ``<event>/__EXIF`` belongs to the top-level JPEG, while
+    ``<event>/__RAW/__EXIF`` belongs to the RAW (X10).
+
+    Returns ``(candidates, used_stem_form)``. A caller still refuses more than
+    one candidate; location narrows a match but never guesses between peers.
+    """
+    direct = _distinct_subjects(
+        index.subjects_by_name.get(subject_name.lower(), []))
+    if direct:
+        return direct, False
+
+    stem = _distinct_subjects(index.subjects_by_stem.get(subject_name.lower(), []))
+    if not stem:
+        return [], True
+    local = [
+        candidate for candidate in stem
+        if _path_key(sidecar_subdir(candidate[1], config, key))
+        == _path_key(sidecar_folder)
+    ]
+    return (local or stem), True
+
+
 def place_companions(roots, config: dict, duplicates_for,
                      log=lambda _msg: None, move=None, checksum=None,
                      prune: bool = True) -> PlacementReport:
@@ -788,14 +848,12 @@ def place_companions(roots, config: dict, duplicates_for,
 
     1. **X1** -- the subject's full name with an extension appended,
        "clip.mp4._exif", "clip.mp4.thm". A direct lookup, and unambiguous.
-    2. **Camera form** -- the subject's *stem* with the companion's own
-       extension, "GX010042.LRV" beside "GX010042.MP4". Nothing in the pipeline
-       writes this and nothing has ever renamed it, so it is what a preview
-       actually looks like on disk. Resolved by stem, and renamed onto X1 as it
-       moves, because once it is in ``__PREVIEWS`` the stem is all that would be
-       left to pair it by. Accepted for previews only: an ``._exif`` is written
-       by this pipeline and is always in X1 form already, so allowing a stem
-       match there would add a way to get it wrong and no way to get it right.
+    2. **Historical stem form** -- the subject's *stem* with the companion's own
+       extension, "shot._exif" or "GX010042.LRV" beside "GX010042.MP4". Older
+       EXIF extraction omitted the media extension, and previews arrive this
+       way from cameras. Both are resolved by stem and renamed onto X1. If a
+       JPEG and RAW share the stem, their X10 location selects the one the
+       sidecar can describe; otherwise a non-unique stem is refused.
 
     **When something already holds the destination name**, the two files are
     compared by MD5 rather than one being picked:
@@ -843,68 +901,51 @@ def place_companions(roots, config: dict, duplicates_for,
     report.non_compliant = list(index.non_compliant)
     report.legacy_containers = list(index.legacy_containers)
 
-    # Which subjects a sidecar was found for, so the X4 audit can name the media
-    # that have none. Only "._exif" counts here: a preview is not counted in e
-    # (X8), so a video with a .thm and no ._exif still wants one.
-    sidecar_exts = sidecar_extensions(config)
-    have_sidecar = {
-        subject.lower()
-        for _path, _folder, key, subject, _ext in index.companions
-        if key == "exif"
-    }
-    for name, folder in index.media:
-        if name.lower() not in have_sidecar:
-            report.media_without_sidecar += 1
-            reporter.note(
-                "no-sidecar",
-                f"- {folder.name}/{name} has no sidecar",
-            )
-
+    keeps_exif_sidecars = bool(sidecar_extensions(config))
+    covered = set()
     emptied: list[Path] = []
 
     for path, folder, key, subject_name, extension in index.companions:
-        wanted_name = path.name
-        folders = index.subjects_by_name.get(subject_name.lower(), [])
-
-        if not folders and key == "previews":
-            # Camera form: the stem of the subject rather than its name.
-            candidates = index.subjects_by_stem.get(subject_name.lower(), [])
-            distinct = {(name, str(where)) for name, where in candidates}
-            if len(distinct) > 1:
-                report.ambiguous += 1
-                reporter.note(
-                    "ambiguous",
-                    f"? left {path}: {len(distinct)} files share the stem "
-                    f"{subject_name}, so its subject is not knowable",
-                )
-                continue
-            if candidates:
-                media_name, subject_folder = candidates[0]
-                wanted_name = media_name + extension.lower()
-                folders = [subject_folder]
-
-        if not folders:
+        candidates, used_stem = _subject_candidates(
+            index, subject_name, folder, key, config)
+        if not candidates:
             report.orphaned += 1
             reporter.note("orphaned",
                           f"- left {path}: {subject_name} is nowhere in the tree")
             continue
-        if len({str(where) for where in folders}) > 1:
+        if len(candidates) > 1:
             report.ambiguous += 1
             reporter.note(
                 "ambiguous",
-                f"? left {path}: {subject_name} exists in "
-                f"{len(set(str(w) for w in folders))} folders, so which one "
-                "this describes is not knowable",
+                f"? left {path}: {len(candidates)} files "
+                f"{'share the stem' if used_stem else 'claim the name'} "
+                f"{subject_name}, so its subject is not knowable",
             )
             continue
 
-        subject_folder = folders[0]
+        media_name, subject_folder = candidates[0]
+        wanted_name = media_name + extension.lower()
+        if key == "exif":
+            covered.add((media_name.lower(), _path_key(subject_folder)))
         wanted = Path(sidecar_subdir(subject_folder, config, key))
-        if wanted == folder and wanted_name == path.name:
+        destination = wanted / wanted_name
+        same_folder = _path_key(wanted) == _path_key(folder)
+        if same_folder and wanted_name == path.name:
             report.in_place += 1
             continue
 
-        destination = wanted / wanted_name
+        # A case-only normalization names the same directory entry on Windows;
+        # it is a rename, not a collision with a second file.
+        if _path_key(destination) == _path_key(path):
+            try:
+                move(path, destination)
+            except Exception as error:
+                reporter.error(f"could not rename {path} to {wanted_name}: {error}")
+                continue
+            report.moved += 1
+            report.renamed += 1
+            continue
+
         if destination.exists():
             try:
                 digest = checksum(path)
@@ -958,6 +999,15 @@ def place_companions(roots, config: dict, duplicates_for,
             )
         if folder not in emptied:
             emptied.append(folder)
+
+    # Audit only after tolerant matching. A stem-form or case-variant sidecar
+    # covers the real media just as fully as an already-canonical X1 name; the
+    # move above normalizes its spelling for the next run.
+    if keeps_exif_sidecars:
+        for name, folder in index.media:
+            if (name.lower(), _path_key(folder)) not in covered:
+                report.missing_sidecars.append(Path(folder) / name)
+    report.media_without_sidecar = len(report.missing_sidecars)
 
     if prune and emptied:
         # Only the folders this pass took files out of: one that was already
@@ -1015,22 +1065,6 @@ class MigrationReport:
             setattr(self, field, getattr(self, field) + getattr(other, field))
 
 
-def _free_versioned_name(folder: Path, name: str) -> Path:
-    """``folder/name``, numbered until nothing holds it.
-
-    The `_2`, `_3` … the standard already uses to keep two emptied folders
-    apart (N10a's discriminator), applied here for the same reason: every day
-    in a month has a container of the same name, and they all end up in one
-    parking folder.
-    """
-    candidate = folder / name
-    index = 1
-    while candidate.exists():
-        index += 1
-        candidate = folder / f"{name}_{index}"
-    return candidate
-
-
 def _folder_is_empty(folder: Path) -> bool:
     """True when ``folder`` holds no file anywhere beneath it."""
     try:
@@ -1057,12 +1091,12 @@ def migrate_legacy_containers(containers, config: dict, duplicates_for,
         settles one: identical is parked as ``_DUPE_``, different as
         ``_DIFFERS_``. Nothing is overwritten (T2) and nothing is deleted (T1).
 
-    A container left **absolutely empty** -- no file anywhere beneath it -- is
-    then parked in the ``__EMPTY_SUBFOLDERS`` beside it, the same holding area
-    and the same "sibling of what it takes" rule the grouping stage uses,
-    numbered ``_2``, ``_3`` … when that name is taken. One still holding
-    anything is left exactly where it is and reported: a folder that would not
-    empty is a question, not a job.
+    A container left **absolutely empty** -- no file anywhere beneath it, which
+    is checked rather than assumed -- is then parked in the
+    ``__EMPTY_SUBFOLDERS`` **under its month folder** (H2), numbered ``_2``,
+    ``_3`` … when that name is taken. One still holding anything is left
+    exactly where it is and reported: a folder that would not empty is a
+    question, not a job.
 
     Containers with no modern equivalent -- ``old_EXIF`` and the three "FILES"
     holders -- are counted as left alone. Where their contents belong is a
@@ -1077,6 +1111,7 @@ def migrate_legacy_containers(containers, config: dict, duplicates_for,
     reporter = _Reporter(log)
     move = default_move if move is None else move
     checksum = default_checksum if checksum is None else checksum
+    reserved_parking_names = set()
 
     for container, key in containers:
         container = Path(container)
@@ -1106,7 +1141,7 @@ def migrate_legacy_containers(containers, config: dict, duplicates_for,
                                       move, checksum, report, reporter)
         if moved_here:
             report.merged += 1
-        _park_if_empty(container, report, reporter, move)
+        _park_if_empty(container, report, reporter, move, reserved_parking_names)
 
     report.errors = reporter.error_count
     return report
@@ -1157,8 +1192,8 @@ def _merge_container(container: Path, destination: Path, parking: Path,
 
 
 def _park_if_empty(container: Path, report: "MigrationReport",
-                   reporter: "_Reporter", move) -> None:
-    """Park an emptied container in the ``__EMPTY_SUBFOLDERS`` beside it."""
+                   reporter: "_Reporter", move, reserved=None) -> None:
+    """Park an emptied container in its month folder's ``__EMPTY_SUBFOLDERS``."""
     if not container.is_dir():
         return
     if not _folder_is_empty(container):
@@ -1167,8 +1202,13 @@ def _park_if_empty(container: Path, report: "MigrationReport",
             "not-empty",
             f"- left {container}: still holds files after the migration")
         return
-    parking = container.parent / EMPTY_SUBFOLDERS_FOLDER
-    target = _free_versioned_name(parking, container.name)
+    parking = parking_area_for(container)
+    if parking is None:
+        report.left += 1
+        reporter.error(
+            f"could not park empty {container}: no conforming month folder above it (H2)")
+        return
+    target = free_versioned_name(parking, container.name, reserved)
     try:
         move(container, target)
     except Exception as error:

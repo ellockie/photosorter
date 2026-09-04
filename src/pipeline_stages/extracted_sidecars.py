@@ -24,9 +24,10 @@ from pathlib import Path
 from src.core import \
     PipelineContext, \
     PipelineStage
-from src.pipeline_stages.exiftool_batch import chunk_targets
-
-SIDECAR_SUFFIX = "._exif"
+from src.pipeline_stages.exiftool_sidecars import \
+    SIDECAR_SUFFIX, \
+    WRITE_FORMAT, \
+    chunk_targets
 
 
 def pending_extractions(context: PipelineContext) -> list:
@@ -63,7 +64,7 @@ class ExtractedSidecarsStage(PipelineStage):
 
         exiftool = context.config.get("external_tools", {}).get("exiftool", "exiftool")
         targets = [Path(asset.sidecars["converted_jpg"]) for asset in pending]
-        base_command = [exiftool, "-a", "-u", "-g1", "-w!", "%d%f.%e._exif"]
+        base_command = [exiftool, "-a", "-u", "-g1", "-w!", WRITE_FORMAT]
 
         for chunk in chunk_targets(targets):
             try:

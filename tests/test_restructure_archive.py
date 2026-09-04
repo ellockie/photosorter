@@ -1,4 +1,4 @@
-"""The restructuring front door: the seven steps, the target rules, the guards.
+"""The restructuring front door: the eight steps, the target rules, the guards.
 
 Every test here passes an explicit target under ``tmp_path``. The tool's
 default target is the real archive (``c:\\__PHOTOS\\2026``) and step 1 renames
@@ -97,7 +97,10 @@ def config(monkeypatch, fake_grouper):
                                "videos": [".mp4", ".mov"],
                                "sidecars": ["._exif"]},
                 "legacy": {"date_folder_suffix": " - 1. ######",
-                           "day_boundary_time": "04.44.44"}}
+                           "day_boundary_time": "04.44.44"},
+                # Existing reconciliation tests isolate matching/moving. Tests
+                # for the new ExifTool repair explicitly enable this pass.
+                "raw_sidecar_generation": {"enabled": False}}
     monkeypatch.setattr(tool.canonicalise, "_config", lambda: settings)
     return settings
 
@@ -594,6 +597,77 @@ def test_reconcile_is_idempotent(tmp_path, config):
     assert sorted(str(path) for path in root.rglob("*")) == settled
 
 
+def make_raw_without_sidecar(root):
+    day = make_event(root, "2026-07-15_(Wed)__08.14.02 - RAW only", images=0)
+    raw_dir = day / "__RAW"
+    raw_dir.mkdir()
+    raw = raw_dir / f"{RAW_STEM}__RAW__f1.7__SG23U.CR2"
+    raw.write_bytes(b"raw")
+    return raw
+
+
+def test_restructure_generates_and_places_a_missing_raw_sidecar(
+        tmp_path, config, monkeypatch, capsys):
+    root = make_archive(tmp_path)
+    raw = make_raw_without_sidecar(root)
+    config["raw_sidecar_generation"]["enabled"] = True
+
+    def fake_generate(targets, _exiftool, log):
+        assert targets == [raw]
+        temporary = Path(str(raw) + "._exif")
+        temporary.write_bytes(b"exiftool output")
+        return tool.exif_sidecars.GenerationReport(
+            requested=1, created=[temporary])
+
+    monkeypatch.setattr(
+        tool.exif_sidecars, "generate_adjacent_sidecars", fake_generate)
+
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+
+    sidecar = raw.parent / "__EXIF" / f"{raw.name}._exif"
+    assert sidecar.read_bytes() == b"exiftool output"
+    assert not Path(str(raw) + "._exif").exists()
+    out = capsys.readouterr().out
+    assert "Generated and placed 1/1 RAW sidecar" in out
+    assert "has no sidecar" not in out
+
+
+def test_raw_sidecar_generation_is_only_planned_in_a_dry_run(
+        tmp_path, config, monkeypatch, capsys):
+    root = make_archive(tmp_path)
+    raw = make_raw_without_sidecar(root)
+    config["raw_sidecar_generation"]["enabled"] = True
+    monkeypatch.setattr(
+        tool.exif_sidecars, "generate_adjacent_sidecars",
+        lambda *_args, **_kwargs: pytest.fail("dry run must not invoke ExifTool"))
+
+    assert run(str(root), "--steps", "2") == 1
+
+    assert not (raw.parent / "__EXIF").exists()
+    out = capsys.readouterr().out
+    assert "1 RAW sidecar(s) to generate" in out
+    assert "has no sidecar" not in out
+
+
+def test_a_raw_exiftool_failure_is_reported_and_the_raw_is_left_untouched(
+        tmp_path, config, monkeypatch, capsys):
+    root = make_archive(tmp_path)
+    raw = make_raw_without_sidecar(root)
+    config["raw_sidecar_generation"]["enabled"] = True
+    monkeypatch.setattr(
+        tool.exif_sidecars, "generate_adjacent_sidecars",
+        lambda *_args, **_kwargs: tool.exif_sidecars.GenerationReport(
+            requested=1, missing=[raw], errors=1))
+
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 1
+
+    assert raw.is_file()
+    assert not (raw.parent / "__EXIF").exists()
+    out = capsys.readouterr().out
+    assert str(raw) in out
+    assert "has no sidecar" in out
+
+
 def test_reconcile_never_descends_into_the_ingest_pipeline(tmp_path, config):
     root = make_archive(tmp_path)
     stray = root / "____INGEST_PIPELINE" / "2026-07-15_(Wed)__08.14.02 - Day"
@@ -618,7 +692,7 @@ def test_reconcile_runs_before_and_after_grouping(tmp_path, config, fake_grouper
     numbers = [number for number, _title, _action, _repeats in tool.STEPS]
     titles = {number: title for number, title, _a, _r in tool.STEPS}
     repeats = {number: repeated for number, _t, _a, repeated in tool.STEPS}
-    assert numbers == [1, 2, 3, 4, 5, 6, 7]
+    assert numbers == [1, 2, 3, 4, 5, 6, 7, 8]
     assert "companions" in titles[2].lower()
     assert "companions" in titles[4].lower()
     assert TO_SPLIT_IN_TITLE in titles[3]
@@ -741,12 +815,269 @@ def test_legacy_containers_migrate_through_the_tool(tmp_path, config):
 
 
 # --------------------------------------------------------------------------
+# Legacy __VIDEOS migration (ARCHIVE_STANDARD.md S5/V1/V4/V8)
+# --------------------------------------------------------------------------
+
+VIDEO_NAME = "2026-07-15_(Wed)__10.11.12__fNA__T---__LNA__I---s__NOID.mp4"
+
+
+def test_legacy_videos_move_up_with_sidecars_and_previews_then_park_the_folder(
+        tmp_path, config):
+    root = make_archive(tmp_path)
+    event = make_event(root, "2026-07-15_(Wed)__08.14.02 - Videos", images=0)
+    legacy = event / "__Videos"              # historical casing is accepted
+    legacy_exif = legacy / "__EXIF"
+    legacy_previews = legacy / "__PREVIEWS"
+    legacy_exif.mkdir(parents=True)
+    legacy_previews.mkdir()
+    (legacy / VIDEO_NAME).write_bytes(b"video")
+    (legacy_exif / f"{VIDEO_NAME}._exif").write_text(
+        "Date/Time Original              : 2026:07:15 10:11:12\n",
+        encoding="iso-8859-1")
+    (legacy_previews / f"{VIDEO_NAME}.lrv").write_bytes(b"preview")
+
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+
+    assert (event / VIDEO_NAME).read_bytes() == b"video"
+    assert (event / "__EXIF" / f"{VIDEO_NAME}._exif").is_file()
+    assert (event / "__PREVIEWS" / f"{VIDEO_NAME}.lrv").is_file()
+    assert (event.parent / "__EMPTY_SUBFOLDERS" / "__Videos").is_dir()
+    assert not legacy.exists()
+
+
+def test_an_unstamped_legacy_video_is_named_from_intrinsic_metadata(
+        tmp_path, config, monkeypatch):
+    root = make_archive(tmp_path)
+    event = make_event(root, "2026-07-15_(Wed)__08.14.02 - Videos", images=0)
+    legacy = event / "__VIDEOS"
+    legacy.mkdir()
+    video = legacy / "MVI_0042.MOV"
+    video.write_bytes(b"video")
+    monkeypatch.setattr(
+        tool.exif_sidecars, "read_metadata_text",
+        lambda *_args: (
+            "[QuickTime]\n"
+            "Create Date                     : 2026:07:15 10:11:12\n"
+            "Camera Model Name               : Mystery Camera\n"))
+
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+
+    renamed = event / VIDEO_NAME.replace(".mp4", ".mov")
+    assert renamed.read_bytes() == b"video"
+    assert (event / "__EXIF" / f"{renamed.name}._exif").is_file()
+    assert (event.parent / "__EMPTY_SUBFOLDERS" / "__VIDEOS").is_dir()
+
+
+def test_an_unstamped_video_uses_and_renames_a_sidecar_already_in_event_exif(
+        tmp_path, config, monkeypatch):
+    root = make_archive(tmp_path)
+    event = make_event(root, "2026-07-15_(Wed)__08.14.02 - Videos", images=0)
+    legacy = event / "__VIDEOS"
+    event_exif = event / "__EXIF"
+    legacy.mkdir()
+    event_exif.mkdir()
+    video = legacy / "MVI_0042.MOV"
+    video.write_bytes(b"video")
+    old_sidecar = event_exif / "MVI_0042.MOV._exif"
+    old_sidecar.write_text(
+        "Create Date                     : 2026:07:15 10:11:12\n",
+        encoding="iso-8859-1")
+    monkeypatch.setattr(
+        tool.exif_sidecars, "read_metadata_text",
+        lambda *_args: pytest.fail("the existing sidecar has the timestamp"))
+
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+
+    renamed = event / VIDEO_NAME.replace(".mp4", ".mov")
+    assert renamed.is_file()
+    assert not old_sidecar.exists()
+    assert (event_exif / f"{renamed.name}._exif").is_file()
+    assert (event.parent / "__EMPTY_SUBFOLDERS" / "__VIDEOS").is_dir()
+
+
+def test_filesystem_time_does_not_date_a_video_and_its_companions_follow(
+        tmp_path, config, monkeypatch, capsys):
+    root = make_archive(tmp_path)
+    event = make_event(root, "2026-07-15_(Wed)__08.14.02 - Videos", images=0)
+    legacy = event / "__VIDEOS"
+    legacy.mkdir()
+    video = legacy / "VID_unknown.MP4"
+    video.write_bytes(b"video")
+    preview = legacy / "VID_unknown.LRV"
+    preview.write_bytes(b"preview")
+    monkeypatch.setattr(
+        tool.exif_sidecars, "read_metadata_text",
+        lambda *_args: "File Modification Date/Time     : 2026:07:15 10:11:12\n")
+
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+
+    review = event / "__VIDEOS_TO_RENAME"
+    tagged = review / "__TO_RENAME__VID_unknown.MP4"
+    assert tagged.read_bytes() == b"video"
+    assert (review / "__PREVIEWS" / f"{tagged.name}.lrv").read_bytes() == b"preview"
+    assert (review / "__EXIF" / f"{tagged.name}._exif").is_file()
+    assert (event.parent / "__EMPTY_SUBFOLDERS" / "__VIDEOS").is_dir()
+    assert "no intrinsic capture time" in capsys.readouterr().out
+
+
+def test_an_already_empty_legacy_video_folder_is_parked_at_month_level(
+        tmp_path, config):
+    root = make_archive(tmp_path)
+    event = make_event(root, "2026-07-15_(Wed)__08.14.02 - Videos", images=0)
+    legacy = event / "__Videos"
+    (legacy / "an empty nested folder").mkdir(parents=True)
+
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+
+    parked = event.parent / "__EMPTY_SUBFOLDERS" / "__Videos"
+    assert (parked / "an empty nested folder").is_dir()
+    assert not legacy.exists()
+
+
+def test_an_exiftool_failure_never_means_a_video_is_undatable(
+        tmp_path, config, monkeypatch):
+    root = make_archive(tmp_path)
+    event = make_event(root, "2026-07-15_(Wed)__08.14.02 - Videos", images=0)
+    legacy = event / "__VIDEOS"
+    legacy.mkdir()
+    video = legacy / "unknown.mov"
+    video.write_bytes(b"video")
+
+    def unavailable(*_args):
+        raise FileNotFoundError("ExifTool missing")
+
+    monkeypatch.setattr(tool.exif_sidecars, "read_metadata_text", unavailable)
+
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 1
+    assert video.is_file()
+    assert not (event / "__VIDEOS_TO_RENAME").exists()
+    assert not (event.parent / "__EMPTY_SUBFOLDERS").exists()
+
+
+def test_legacy_video_migration_dry_run_reads_metadata_but_writes_nothing(
+        tmp_path, config, monkeypatch, capsys):
+    root = make_archive(tmp_path)
+    event = make_event(root, "2026-07-15_(Wed)__08.14.02 - Videos", images=0)
+    legacy = event / "__VIDEOS"
+    legacy.mkdir()
+    video = legacy / "MVI_0042.MOV"
+    video.write_bytes(b"video")
+    inspected = []
+
+    def metadata(target, _exiftool):
+        inspected.append(target)
+        return "Create Date                     : 2026:07:15 10:11:12\n"
+
+    monkeypatch.setattr(tool.exif_sidecars, "read_metadata_text", metadata)
+
+    assert run(str(root), "--steps", "2") == 1
+
+    assert inspected == [video]
+    assert video.is_file()
+    assert not (event / VIDEO_NAME.replace(".mp4", ".mov")).exists()
+    assert not (event / "__EXIF").exists()
+    assert not (event.parent / "__EMPTY_SUBFOLDERS").exists()
+    assert "Nothing was changed" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# Month-level parking (ARCHIVE_STANDARD.md H1-H6)
+# --------------------------------------------------------------------------
+
+def test_nested_parking_is_hoisted_to_the_month_and_its_shell_removed(
+        tmp_path, config):
+    root = make_archive(tmp_path)
+    event = make_event(
+        root, "2026-07-15_(Wed)__08.14.02 - ____GROUP____(d=1)", images=0)
+    nested = event / "__EMPTY_SUBFOLDERS"
+    parked = nested / "2026-07-15_(Wed)__09.00.00 - __TO_SPLIT__(EMPTY)"
+    parked.mkdir(parents=True)
+
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+
+    month_parking = event.parent / "__EMPTY_SUBFOLDERS"
+    assert (month_parking / parked.name).is_dir()
+    assert not nested.exists()
+
+
+def test_parking_hoist_is_recursive_and_flattens_every_area_into_the_month(
+        tmp_path, config):
+    root = make_archive(tmp_path)
+    event = make_event(root, "2026-07-15_(Wed)__08.14.02 - Group", images=0)
+    outer = event / "__EMPTY_SUBFOLDERS"
+    parked_day = outer / "2026-07-15_(Wed)__09.00.00 - old empty day"
+    inner = parked_day / "__EMPTY_SUBFOLDERS"
+    deepest = inner / "2026-07-15_(Wed)__10.00.00 - old empty sub-event"
+    deepest.mkdir(parents=True)
+
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+
+    month_parking = event.parent / "__EMPTY_SUBFOLDERS"
+    assert (month_parking / parked_day.name).is_dir()
+    assert (month_parking / deepest.name).is_dir()
+    assert not outer.exists()
+    assert not (month_parking / parked_day.name / "__EMPTY_SUBFOLDERS").exists()
+
+
+def test_parking_hoist_versions_a_name_collision_instead_of_overwriting(
+        tmp_path, config):
+    root = make_archive(tmp_path)
+    event = make_event(root, "2026-07-15_(Wed)__08.14.02 - Group", images=0)
+    name = "2026-07-15_(Wed)__09.00.00 - __TO_SPLIT__(EMPTY)"
+    existing = event.parent / "__EMPTY_SUBFOLDERS" / name
+    incoming = event / "__EMPTY_SUBFOLDERS" / name
+    existing.mkdir(parents=True)
+    incoming.mkdir(parents=True)
+    (existing / "keep.txt").write_text("existing", encoding="utf-8")
+
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+
+    month_parking = event.parent / "__EMPTY_SUBFOLDERS"
+    assert (month_parking / name / "keep.txt").read_text(encoding="utf-8") == "existing"
+    assert (month_parking / f"{name}_2").is_dir()
+
+
+def test_parking_hoist_dry_run_reports_but_changes_nothing(tmp_path, config, capsys):
+    root = make_archive(tmp_path)
+    event = make_event(root, "2026-07-15_(Wed)__08.14.02 - Group", images=0)
+    nested = event / "__EMPTY_SUBFOLDERS"
+    parked = nested / "2026-07-15_(Wed)__09.00.00 - __TO_SPLIT__(EMPTY)"
+    parked.mkdir(parents=True)
+
+    assert run(str(root), "--steps", "2") == 1
+
+    assert parked.is_dir()
+    assert not (event.parent / "__EMPTY_SUBFOLDERS").exists()
+    out = capsys.readouterr().out
+    assert "Nested parking areas" in out
+    assert "empty parking shell" in out
+
+
+def test_parked_dated_folders_never_reenter_the_grouper(tmp_path, config):
+    root = make_archive(tmp_path)
+    parked = (root / "2026" / "07. July" / "__EMPTY_SUBFOLDERS" /
+              "2026-07-15_(Wed)__09.00.00 - __TO_SPLIT__(i=1)")
+    parked.mkdir(parents=True)
+    (parked / "2026-07-15_(Wed)__09.00.00__f1.7.jpg").write_bytes(b"x")
+
+    run_state = tool.Run(
+        type("Args", (), {
+            "apply": False, "quiet": False, "yes": True,
+            "allow_network_tool": False, "max_folders": 0,
+            "open_all": False,
+        })(),
+        root, [root / "2026"], False)
+
+    assert tool.find_to_split_folders(run_state) == []
+
+
+# --------------------------------------------------------------------------
 # Steps, ordering and exit codes
 # --------------------------------------------------------------------------
 
 def test_steps_run_in_their_fixed_order_however_they_are_typed():
     assert tool.selected_steps("3,1") == [1, 3]
-    assert tool.selected_steps(None) == [1, 2, 3, 4, 5, 6, 7]
+    assert tool.selected_steps(None) == [1, 2, 3, 4, 5, 6, 7, 8]
     assert tool.selected_steps("2") == [2]
 
 
@@ -819,3 +1150,333 @@ def test_an_unwritable_journal_does_not_end_the_run(tmp_path, config, fake_group
     unwritable = tmp_path / "no such folder" / "journal.jsonl"
     assert run(str(root), "--apply", "--yes", "--journal", str(unwritable)) == 0
     assert opened_folders(fake_grouper) != []
+
+
+# --------------------------------------------------------------------------
+# Step 6 -- mark and time the groups (ARCHIVE_STANDARD.md section 3)
+# --------------------------------------------------------------------------
+
+def make_group(root, name, children, year="2026", month="07. July"):
+    """A dated parent folder holding dated children, each with stamped shots.
+
+    ``children`` maps a child folder name to the stamps its files carry, so a
+    test states exactly what the span it expects should be computed from.
+    """
+    parent = root / year / month / name
+    parent.mkdir(parents=True, exist_ok=True)
+    for child_name, file_stamps in children.items():
+        child = parent / child_name
+        child.mkdir(parents=True, exist_ok=True)
+        for stamp in file_stamps:
+            (child / ("%s__f1.7__SG23U.jpg" % stamp)).write_bytes(b"x")
+    return parent
+
+
+def month_entries(folder):
+    """What the month folder holds, so a rename can be read off it."""
+    return sorted(path.name for path in folder.parent.iterdir())
+
+
+def test_a_parent_of_dated_folders_is_marked_timed_and_spanned(tmp_path, config):
+    """C1, C5, C6: the marker, the start off the earliest file, the end off the last."""
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed) - Sopot weekend", {
+        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+        "2026-07-16_(Thu)__09.10.44": ["2026-07-16_(Thu)__19.02.44"],
+    })
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(group) == [
+        "2026-07-15_(Wed)__08.14.02#16__19.02.44 - ____GROUP____(d=2) - Sopot weekend"]
+
+
+def test_a_single_day_group_still_states_both_ends(tmp_path, config):
+    """C9: a day split into sub-events is the same shape as a fortnight."""
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-18_(Sat) - pier", {
+        "2026-07-18_(Sat)__11.03.27": ["2026-07-18_(Sat)__11.03.27"],
+        "2026-07-18_(Sat)__14.31.09": ["2026-07-18_(Sat)__22.14.09"],
+    })
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(group) == [
+        "2026-07-18_(Sat)__11.03.27#18__22.14.09 - ____GROUP____(d=2) - pier"]
+
+
+def test_a_leaf_folder_is_left_alone(tmp_path, config):
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__08.14.02 - Lens tests")
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(folder) == ["2026-07-15_(Wed)__08.14.02 - Lens tests"]
+
+
+def test_a_dry_run_changes_nothing_and_reports_pending(tmp_path, config, capsys):
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed) - Sopot weekend", {
+        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+    })
+    assert run(str(root), "--steps", "6") == 1
+    assert month_entries(group) == ["2026-07-15_(Wed) - Sopot weekend"]
+    assert "Nothing was changed" in capsys.readouterr().out
+
+
+def test_the_legacy_marker_is_converted_and_the_description_kept(tmp_path, config):
+    """C15: the pre-v0.9 spelling is read once and written back as the new one."""
+    root = make_archive(tmp_path)
+    group = make_group(
+        root, "2026-07-15_(Wed)__08.14.02#16 - __CONTAINER__(d=1) - Malbork trip", {
+            "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+            "2026-07-16_(Thu)__09.10.44": ["2026-07-16_(Thu)__17.40.11"],
+        })
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(group) == [
+        "2026-07-15_(Wed)__08.14.02#16__17.40.11 - ____GROUP____(d=2) - Malbork trip"]
+
+
+def test_a_stale_count_and_a_stale_span_are_both_rebuilt(tmp_path, config):
+    """C11: the stamps belong to the tool, and it corrects them where they lie."""
+    root = make_archive(tmp_path)
+    group = make_group(
+        root, "2026-07-15_(Wed)__08.14.02#20__23.59.59 - ____GROUP____(d=9) - Sopot", {
+            "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+            "2026-07-16_(Thu)__09.10.44": ["2026-07-16_(Thu)__19.02.44"],
+        })
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(group) == [
+        "2026-07-15_(Wed)__08.14.02#16__19.02.44 - ____GROUP____(d=2) - Sopot"]
+
+
+def test_a_folder_that_lost_its_children_loses_the_marker_and_the_span(
+        tmp_path, config):
+    """C2: adding or removing the last dated child flips the marker."""
+    root = make_archive(tmp_path)
+    group = make_group(
+        root, "2026-07-15_(Wed)__08.14.02#16__19.02.44 - ____GROUP____(d=2) - Sopot",
+        {})
+    (group / "2026-07-15_(Wed)__08.14.02__f1.7__SG23U.jpg").write_bytes(b"x")
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(group) == ["2026-07-15_(Wed)__08.14.02 - Sopot"]
+
+
+def test_a_nested_group_spans_everything_beneath_it(tmp_path, config):
+    """C6 over a nest: the outer end comes off the inner span, not the child's date."""
+    root = make_archive(tmp_path)
+    outer = make_group(root, "2026-07-15_(Wed) - Norway", {
+        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+    })
+    inner = outer / "2026-07-16_(Thu)__09.10.44 - the fjords"
+    first = inner / "2026-07-16_(Thu)__09.10.44"
+    last = inner / "2026-07-18_(Sat)__06.55.02"
+    first.mkdir(parents=True)
+    last.mkdir(parents=True)
+    (first / "2026-07-16_(Thu)__09.10.44__f1.7__SG23U.jpg").write_bytes(b"x")
+    (last / "2026-07-18_(Sat)__20.11.19__f1.7__SG23U.jpg").write_bytes(b"x")
+
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(outer) == [
+        "2026-07-15_(Wed)__08.14.02#18__20.11.19 - ____GROUP____(d=2) - Norway"]
+    renamed = outer.parent / month_entries(outer)[0]
+    assert sorted(path.name for path in renamed.iterdir()) == [
+        "2026-07-15_(Wed)__08.14.02",
+        "2026-07-16_(Thu)__09.10.44#18__20.11.19 - ____GROUP____(d=2) - the fjords",
+    ]
+
+
+def test_media_inside_a_group_is_reported_and_never_moved(tmp_path, config, capsys):
+    """C3 is reported; C4, which would move it down, is open question 5."""
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed) - Sopot", {
+        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+    })
+    loose = "2026-07-15_(Wed)__12.00.00__f1.7__SG23U.jpg"
+    (group / loose).write_bytes(b"x")
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert "open question 5" in capsys.readouterr().out
+    renamed = group.parent / month_entries(group)[0]
+    assert (renamed / loose).is_file()               # still exactly where it was
+
+
+def test_a_taxonomy_subfolder_inside_a_group_is_reported(tmp_path, config, capsys):
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed) - Sopot", {
+        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+    })
+    (group / "__RAW").mkdir()
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert "__RAW" in capsys.readouterr().out
+
+
+def test_a_parking_area_inside_a_group_is_allowed(tmp_path, config, capsys):
+    """H2: a group is a level dated folders sit on, so a parking area may too.
+
+    It holds the sub-events that group has emptied, beside the ones it still
+    has -- which is the whole of the sibling rule.
+    """
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed) - Sopot", {
+        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+    })
+    parking = group / "__EMPTY_SUBFOLDERS"
+    parking.mkdir()
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    out = capsys.readouterr().out
+    assert "neither a dated folder" not in out
+    assert "H2/H6" not in out
+    renamed = group.parent / month_entries(group)[0]
+    assert (renamed / "__EMPTY_SUBFOLDERS").is_dir()      # left exactly where it was
+
+
+def test_a_group_whose_earliest_file_predates_its_date_is_reported_not_moved(
+        tmp_path, config, capsys):
+    """C12 / open question 6: the month-folder move is nobody's to make yet."""
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed)__08.14.02 - Sopot", {
+        "2026-07-15_(Wed)__08.14.02": ["2026-06-30_(Tue)__08.14.02"],
+    })
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert "open question 6" in capsys.readouterr().out
+    assert group.is_dir()                            # untouched, still where it was
+
+
+def test_a_group_with_no_stamped_file_anywhere_is_reported_not_guessed_at(
+        tmp_path, config, capsys):
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed)__08.14.02 - Sopot", {
+        "2026-07-15_(Wed)__08.14.02": [],
+    })
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert "no file under it carries a capture stamp" in capsys.readouterr().out
+    assert group.is_dir()
+
+
+def test_a_split_day_with_nothing_left_at_its_top_level_becomes_a_group(
+        tmp_path, config):
+    """The ordinary case: the grouper split the day, so the parent is a group now.
+
+    The counts go with the marker -- "(i=79)" is what the day held before it
+    was split, not a name -- and the folder comes out unnamed, which is exactly
+    what it is.
+    """
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=2)", {
+        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+        "2026-07-15_(Wed)__14.31.09": ["2026-07-15_(Wed)__16.20.31"],
+    })
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(group) == [
+        "2026-07-15_(Wed)__08.14.02#15__16.20.31 - ____GROUP____(d=2)"]
+
+
+def test_a_half_split_day_keeps_its_marker_and_is_reported(tmp_path, config, capsys):
+    """A day with children AND shots of its own is both things at once.
+
+    Taking ``__TO_SPLIT__`` off would strand the loose media -- step 3 finds
+    folders by that marker -- and moving it down into a child is C4, open
+    question 5. So the folder is left exactly as it is and reported.
+    """
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=3)", {
+        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+    })
+    (group / "2026-07-15_(Wed)__12.00.00__f1.7__SG23U.jpg").write_bytes(b"x")
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(group) == [
+        "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=3)"]      # untouched
+    out = capsys.readouterr().out
+    assert "__TO_SPLIT__" in out and "open question 5" in out
+
+
+def test_a_name_a_person_wrote_survives_becoming_a_group(tmp_path, config):
+    """T7: the label is the same claim as a description, written before C1 existed."""
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed)__08.14.02 - 1. Sopot weekend", {
+        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+    })
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(group) == [
+        "2026-07-15_(Wed)__08.14.02#15__08.14.02 - ____GROUP____(d=1) - Sopot weekend"]
+
+
+def test_the_legacy_placeholder_is_not_mistaken_for_a_name(tmp_path, config):
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed)__08.14.02 - 1. ######", {
+        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+    })
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(group) == [
+        "2026-07-15_(Wed)__08.14.02#15__08.14.02 - ____GROUP____(d=1)"]
+
+
+# --------------------------------------------------------------------------
+# H2 -- a parking area is a sibling of what it parks, at whatever level
+# --------------------------------------------------------------------------
+
+def test_a_parking_area_inside_a_group_is_left_where_it_is(tmp_path, config):
+    """H2: a group holds dated children, so it is a level a parking area sits on.
+
+    This is the case that separates the sibling rule from a month-level one:
+    hoisting here would carry a sub-event out of the group it was emptied from
+    and drop it among the month's own days, where nothing says where it came
+    from.
+    """
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed)__08.14.02 - ____GROUP____(d=1)", {
+        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+    })
+    parked = group / "__EMPTY_SUBFOLDERS" / "2026-07-16_(Thu)__00.00.00 - __TO_SPLIT__(EMPTY)"
+    parked.mkdir(parents=True)
+
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+
+    assert parked.is_dir()                                   # untouched
+    assert not (group.parent / "__EMPTY_SUBFOLDERS").exists()  # nothing at month level
+
+
+def test_a_parking_area_inside_a_leaf_day_is_hoisted_one_level(tmp_path, config):
+    """H6: a leaf dated folder holds one event's files, and a parked folder is not one.
+
+    The legacy-container migration used to put a shell here. It belongs beside
+    the day, not inside it.
+    """
+    root = make_archive(tmp_path)
+    day = make_event(root, "2026-07-15_(Wed)__08.14.02 - Lens tests", images=1)
+    nested = day / "__EMPTY_SUBFOLDERS"
+    (nested / "##   EXIFs   ##").mkdir(parents=True)
+
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+
+    assert not nested.exists()
+    assert (day.parent / "__EMPTY_SUBFOLDERS" / "##   EXIFs   ##").is_dir()
+
+
+def test_a_parking_area_inside_a_leaf_day_inside_a_group_stops_at_the_group(
+        tmp_path, config):
+    """The two rules together: hoist out of the leaf, but no further than the group."""
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed)__08.14.02 - ____GROUP____(d=1)", {
+        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+    })
+    day = group / "2026-07-15_(Wed)__08.14.02"
+    nested = day / "__EMPTY_SUBFOLDERS"
+    (nested / "##   EXIFs   ##").mkdir(parents=True)
+
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+
+    assert not nested.exists()
+    assert (group / "__EMPTY_SUBFOLDERS" / "##   EXIFs   ##").is_dir()
+    assert not (group.parent / "__EMPTY_SUBFOLDERS").exists()
+
+
+def test_a_parking_area_above_its_level_is_left_alone(tmp_path, config):
+    """H7: one under a year folder is reported, never pushed down into a month.
+
+    Which month each folder in it belongs to is a different question, and
+    hoisting is not the pass that answers it.
+    """
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - Lens tests")
+    year_parking = root / "2026" / "__EMPTY_SUBFOLDERS"
+    parked = year_parking / "2026-07-19_(Sun)__00.00.00 - __TO_SPLIT__(EMPTY)"
+    parked.mkdir(parents=True)
+
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+
+    assert parked.is_dir()

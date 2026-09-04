@@ -1,6 +1,6 @@
 r"""Bring an existing archive onto the current conventions, in one pass.
 
-This is the front door for restructuring work: the seven steps that turn a tree
+This is the front door for restructuring work: the eight steps that turn a tree
 written by an older Photosorter, an older grouper or a third-party tool into
 the shape ``ARCHIVE_STANDARD.md`` describes, run in the one order that makes
 sense, over one target, with one set of safety rules.
@@ -10,8 +10,9 @@ sense, over one target, with one set of safety rules.
     3. Group the "__TO_SPLIT__" folders, one at a time, in the grouper GUI
     4. Reunite companions and sidecars     companion_matching.py
     5. Canonicalise names again    tools/canonicalise_timestamp_names.py
-    6. Check compliance with the archive standard      [not implemented]
-    7. Fix compliance with the archive standard        [not implemented]
+    6. Mark and time the groups    ARCHIVE_STANDARD.md section 3
+    7. Check compliance with the archive standard      [not implemented]
+    8. Fix compliance with the archive standard        [not implemented]
 
 Only the folders worth opening
 ------------------------------
@@ -58,15 +59,43 @@ moves files between folders, which changes those counts again. Running the
 canonicaliser last folds all of it back onto the canonical form and re-derives
 the audit markers from what is finally on disk.
 
+What step 6 does
+----------------
+Section 3 of the standard: a dated folder holding dated child folders is a
+*group*, it says so in its tail -- "____GROUP____" -- and its prefix states
+both ends of the span it covers, start stamp and "#end", each read off the
+subtree. A folder that stopped holding dated children loses the marker and the
+span again. It runs after step 5 because the grouper (step 3) creates and
+destroys exactly those parent/child relationships, and after the second
+canonicalise pass because that is what settles the child names the span is
+computed from.
+
+It rewrites only the marker and the two stamps. The date a group starts on is
+never derived from its contents (N6), media is never moved out of a group (C4)
+and no group is ever moved between month folders (C12): those are open
+questions 4-6 in the standard, and a folder that runs into one is reported with
+the rule number rather than changed.
+
 What reconciliation does
 ------------------------
-Three passes, in this order and no other:
+Six passes, in this order and no other:
 
+  * ``hoist_parking_areas`` -- every nested ``__EMPTY_SUBFOLDERS`` is merged
+    into the single parking area directly below its month folder. It runs
+    first so parked days cannot re-enter any of the active-archive passes.
+  * ``migrate_legacy_videos`` -- every video in a case-variant ``__VIDEOS``
+    moves up beside the images when its filename or intrinsic metadata dates
+    it. A genuinely undatable video is tagged and routed to
+    ``__VIDEOS_TO_RENAME``; a metadata-reader failure leaves it untouched.
+    Sidecars/previews travel with the subject, and the recursively verified
+    empty legacy folder is parked below the month (V12/L4).
   * ``migrate_legacy_containers`` -- "##   EXIFs   ##" becomes "__EXIF" and
     "##   RAWs   ##" becomes "__RAW". Renamed outright where nothing of that
     name is there yet; where one is, each file moves across and a collision is
     settled by checksum. An emptied container is parked in the
-    "__EMPTY_SUBFOLDERS" beside it, numbered when that name is taken. A
+    "__EMPTY_SUBFOLDERS" beside the dated folder it sat in -- one level up,
+    since a leaf day is not a level a parking area may sit on (H2) --
+    numbered when that name is taken. A
     container with no modern equivalent -- "old_EXIF", the three "FILES"
     holders -- is reported and never touched.
   * ``reconcile_folder`` -- a companion left in an event folder's taxonomy
@@ -75,14 +104,17 @@ Three passes, in this order and no other:
     renamed since.
   * ``place_companions`` -- X10 and X13: a companion goes into the folder
     directly inside the one that holds its subject -- an "._exif" sidecar into
-    "__EXIF", a ".thm" or ".lrv" preview into "__PREVIEWS". Matched on name,
-    because a companion carries its subject's full name (X1).
+    "__EXIF", a ".thm" or ".lrv" preview into "__PREVIEWS". Canonical X1
+    names match directly; historical EXIF names without the media extension
+    match by stem and X10 location, then are renamed onto X1 (X1a).
+  * ``generate_missing_raw_sidecars`` -- after tolerant matching has removed
+    the false positives, every genuinely uncovered RAW is passed to ExifTool.
+    Its canonical X1 sidecar is placed in the RAW folder's ``__EXIF`` (X14).
 
-The order is the dependency order. Migration first, so everything after it
-reads one set of folder names instead of two. Reconciliation next, because it
-moves *subjects*: a RAW still in the wrong event folder has no business having
-its sidecar placed beside it yet. Placement last, once every file is in the
-folder it belongs to.
+The order is the dependency order. Parking and legacy names are normalized
+first. Reconciliation moves subjects; placement then settles every sidecar it
+can read, including historical names. Only then is a RAW called genuinely
+missing and given a newly extracted sidecar.
 
 **A sidecar is looked for anywhere in the target**, at any depth and across
 year trees -- placement indexes every tree of the run at once before it moves
@@ -96,25 +128,21 @@ the answer to some sidecar's search. The date format is read loosely, as N1
 allows -- a leading "YYYY-MM-DD" is enough, with or without the weekday and
 the time. A day folder that never gained a time is still a day folder.
 
-For sidecars, placement is the migration section 6 asks for: everything that
-writes the archive already honours X10, so what is left over is the ones
-written before it. For previews it is the first routing they have ever had --
-nothing has moved a ".thm" anywhere -- so they are still lying where the camera
-wrote them, named after the subject's *stem* rather than its full name. Those
-are matched by stem and renamed onto X1 as they move: "GX010042.LRV" becomes
-"GX010042.MP4.lrv" in "__PREVIEWS". A stem shared by two subjects is not
-knowable, so that preview is left where it is.
+For sidecars, placement is the migration section 6 asks for. Older ``._exif``
+files may omit the media extension or differ in extension case; those are read
+case-insensitively, resolved by stem plus X10 location, and renamed onto X1.
+Previews use the same stem fallback. A stem still shared by multiple candidates
+at the same location is not knowable and is left for review.
 
 A companion whose subject cannot be found is **left exactly where it is** and
 reported. It is the only surviving record that the subject existed (X3), and
 moving it on a guess would lose the one thing it still says.
 
-None of the three is implemented here. All are ``companion_matching.py``, the
-same module the pipeline's companion-reconciliation stage runs -- see its
-docstring for why it is a module rather than part of the stage. This tool
-supplies only what a maintenance run needs and a pipeline run does not: a mover
-that records instead of writing so a dry run can report (T3), the project's
-chunked checksum, and pruning turned off while it reports.
+The parking migration is ``parking.py``; matching is
+``companion_matching.py``; legacy-video migration is ``legacy_videos.py``;
+ExifTool invocation is the shared leaf ``exiftool_sidecars.py``. This tool
+supplies only the archive-level ordering, dry-run/journal behavior and safe
+moves.
 
 Folders that fit no shape
 -------------------------
@@ -123,7 +151,7 @@ subfolder, nor a holding area, nor a recognised legacy container is collected
 and printed **at the end of the run, in red**. A structural problem noticed
 halfway through a rename report scrolls past; these are the one part of the
 output somebody has to act on by hand. Reported, never fixed -- what to do with
-a folder the standard does not describe is a decision, and steps 6 and 7 are
+a folder the standard does not describe is a decision, and steps 7 and 8 are
 where that will live once the standard leaves draft.
 
 A dry run does each thing once
@@ -136,7 +164,7 @@ before them to repeat.
 
 Steps 6 and 7 are placeholders
 ------------------------------
-``ARCHIVE_STANDARD.md`` is **v0.8, a draft, enforced by nothing** -- its S4
+``ARCHIVE_STANDARD.md`` is **v0.12, a draft, only partly enforced** -- its S4
 subfolder set and its T8 "defined more than once" list still carry open
 questions whose answers change what "compliant" means. Enforcing it now would
 migrate a live archive of hundreds of thousands of files to a shape that is
@@ -237,6 +265,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -307,6 +336,13 @@ grouper = load_module("photosorter_grouper_launch", GROUPER_LAUNCH_MODULE_PATH)
 matching = load_leaf_package()
 # The taxonomy folder names, read rather than spelled here (S4).
 taxonomy = importlib.import_module("src.pipeline_stages.taxonomy")
+# Where an emptied folder is parked, and the hoist for one sitting somewhere
+# H2 does not allow (H2/H6).
+parking = importlib.import_module("src.pipeline_stages.parking")
+# Dependency-free ExifTool command helpers used for missing RAW sidecars (X14).
+exif_sidecars = importlib.import_module("src.pipeline_stages.exiftool_sidecars")
+# The read-old/write-new migration for the legacy video container (S5/V1/V8).
+legacy_videos = importlib.import_module("src.pipeline_stages.legacy_videos")
 
 # The grouping marker's grammar, already loaded by the canonicaliser from
 # src/pipeline_stages/grouping_names.py.
@@ -506,7 +542,8 @@ def find_to_split_folders(run):
     for tree in run.trees:
         root_key = path_key(tree)
         for directory, _files in canonicalise.walk_bottom_up(tree, root_key, refused):
-            if TO_SPLIT_MARKER in directory.name:
+            if (TO_SPLIT_MARKER in directory.name
+                    and not parking.is_inside_parking_area(directory)):
                 found.append(directory)
     for path, reason in refused:
         run.report("warn", "REFUSED %s: %s" % (path, reason))
@@ -756,7 +793,8 @@ def dated_folders(run):
         for directory, _files in canonicalise.walk_bottom_up(tree, root_key, refused):
             if path_key(directory) == root_key:
                 continue
-            if canonicalise.stamps.day_prefix(directory.name):
+            if (canonicalise.stamps.day_prefix(directory.name)
+                    and not parking.is_inside_parking_area(directory)):
                 found.append(directory)
     for path, reason in refused:
         run.report("warn", "REFUSED %s: %s" % (path, reason))
@@ -804,6 +842,149 @@ def archive_checksum(run):
     return checksum
 
 
+def archive_sidecar_writer(run):
+    """Write ExifTool text once, exclusively, or record the dry-run action."""
+    if not run.apply:
+        def record(target, _text, source):
+            run.planned_video_sidecars.append((Path(source), Path(target)))
+        return record
+
+    def write(target, text, source):
+        target = Path(target)
+        os.makedirs(extended_path(target.parent), exist_ok=True)
+        # Exclusive creation is the sidecar-writing equivalent of T2's
+        # os.rename rule: an unexpected destination is never replaced.
+        with open(extended_path(target), "x", encoding="iso-8859-1") as output:
+            output.write(text)
+        run.journal.write("video_sidecar_generated", video=str(source),
+                          sidecar=str(target))
+    return write
+
+
+def generate_missing_raw_sidecars(run, placement, config, move):
+    """Generate canonical X1/X10 sidecars for RAW media still uncovered (X14)."""
+    if exif_sidecars.SIDECAR_SUFFIX not in matching.sidecar_extensions(config):
+        return 0, 0
+    raw_exts = {
+        extension.lower()
+        for extension in config.get("extensions", {}).get("raw_images", [])
+    }
+    raw_missing = [
+        path for path in placement.missing_sidecars
+        if path.suffix.lower() in raw_exts
+    ]
+    other_missing = [
+        path for path in placement.missing_sidecars
+        if path.suffix.lower() not in raw_exts
+    ]
+    settings = config.get("raw_sidecar_generation", {})
+    if not raw_missing or settings.get("enabled", True) is False:
+        return 0, 0
+
+    run.report("bold", "\nRAW sidecars: %d missing after tolerant matching"
+               % len(raw_missing))
+    for raw in raw_missing:
+        run.report("dim", "  %s" % raw)
+
+    if not run.apply:
+        run.planned_generations.extend(raw_missing)
+        placement.missing_sidecars = other_missing
+        placement.media_without_sidecar = len(other_missing)
+        run.report("ok", "  %d RAW sidecar(s) to generate with ExifTool "
+                         "under --apply." % len(raw_missing))
+        return len(raw_missing), 0
+
+    def log(message):
+        run.report("warn", "  %s" % message)
+
+    generated = exif_sidecars.generate_adjacent_sidecars(
+        raw_missing,
+        config.get("external_tools", {}).get("exiftool", "exiftool"),
+        log=log)
+    completed = set()
+    move_errors = 0
+    for temporary in generated.created:
+        raw = Path(str(temporary)[:-len(exif_sidecars.SIDECAR_SUFFIX)])
+        destination = (Path(taxonomy.sidecar_subdir(raw.parent, config, "exif"))
+                       / temporary.name)
+        try:
+            move(temporary, destination)
+        except Exception as error:
+            run.report(FAILED, "  ! could not place generated sidecar %s: %s"
+                       % (temporary, error))
+            move_errors += 1
+            continue
+        completed.add(os.path.normcase(os.path.abspath(str(raw))))
+        run.journal.write("raw_sidecar_generated", raw=str(raw),
+                          sidecar=str(destination))
+        run.report("dim", "  + %s" % destination)
+
+    failed_raws = [
+        raw for raw in raw_missing
+        if os.path.normcase(os.path.abspath(str(raw))) not in completed
+    ]
+    placement.missing_sidecars = other_missing + failed_raws
+    placement.media_without_sidecar = len(placement.missing_sidecars)
+    errors = generated.errors + move_errors
+    run.report("bold", "Generated and placed %d/%d RAW sidecar(s)%s."
+               % (len(completed), len(raw_missing),
+                  " with %d error(s)" % errors if errors else ""))
+    return len(completed), errors
+
+
+def find_parking_areas(run):
+    """Every ``__EMPTY_SUBFOLDERS`` in the target, safely and deepest first."""
+    found, refused = [], []
+    for tree in run.trees:
+        root_key = path_key(tree)
+        for directory, _files in canonicalise.walk_bottom_up(tree, root_key, refused):
+            if parking.is_parking_area(directory.name):
+                found.append(directory)
+    for path, reason in refused:
+        run.report("warn", "REFUSED %s: %s" % (path, reason))
+    found.sort(key=lambda path: (len(path.parts), str(path).lower()), reverse=True)
+    return found
+
+
+def archive_empty_dir_remover(run):
+    """Remove one verified-empty parking shell, or record that dry-run action."""
+    if not run.apply:
+        def record(folder):
+            run.planned_removals.append(Path(folder))
+        return record
+
+    attempts, delay_seconds = canonicalise.configured_retry()
+
+    def remove(folder):
+        folder = Path(folder)
+        canonicalise.with_retry(
+            lambda: os.rmdir(extended_path(folder)), attempts, delay_seconds)
+        run.journal.write("parking_shell_removed", folder=str(folder))
+    return remove
+
+
+def hoist_nested_parking(run, move):
+    """Apply H2/H6 before any reconciliation pass descends into the tree."""
+    areas = find_parking_areas(run)
+
+    def log(message):
+        run.report("dim", "  %s" % message.strip())
+
+    def journalled_move(source, target):
+        result = move(source, target)
+        if run.apply:
+            run.journal.write("parking_entry_hoisted", source=str(source),
+                              target=str(target))
+        return result
+
+    report = parking.hoist_parking_areas(
+        areas, log=log, move=journalled_move,
+        remove_empty=archive_empty_dir_remover(run), dry_run=not run.apply)
+    if report.misplaced:
+        run.report("bold", "Nested parking areas: %s" % report.summary())
+    return report
+
+
 def tree_of(folder, run):
     """The run tree ``folder`` sits in, or the first tree as a fallback."""
     key = path_key(folder)
@@ -832,49 +1013,84 @@ def duplicates_folder(folder, run, config):
 def step_reconcile(run, label):
     """Migrate the legacy containers, reunite companions, place every one of them.
 
-    Three passes, in this order and no other:
+    Six passes, in this order and no other:
 
-    1. ``migrate_legacy_containers`` -- ``##   EXIFs   ##`` becomes ``__EXIF``
+    1. Nested ``__EMPTY_SUBFOLDERS`` areas are hoisted and merged into the one
+       directly below their month folder (H2/H6). Parked folders are excluded
+       from every pass that follows.
+    2. Legacy ``__VIDEOS`` is drained: datable videos move up beside images;
+       undatable ones are tagged and routed for review (V1/V4/V8).
+    3. ``migrate_legacy_containers`` -- ``##   EXIFs   ##`` becomes ``__EXIF``
        and ``##   RAWs   ##`` becomes ``__RAW``, so everything after this reads
        one set of folder names instead of two.
-    2. ``reconcile_folder``, per dated folder -- the engine the pipeline stage
+    4. ``reconcile_folder``, per dated folder -- the engine the pipeline stage
        runs. A companion left behind in an event folder's taxonomy subdir
        follows the representative the grouper moved into a sibling sub-event,
        matched on capture time because the representative has been renamed
        since.
-    3. ``place_companions``, over the **whole target at once** -- gather every
+    5. ``place_companions``, over the **whole target at once** -- gather every
        subject and every companion, then distribute. A sidecar goes into the
        ``__EXIF`` directly inside the folder holding its subject (X10), a
        preview into that folder's ``__PREVIEWS`` (X13), matched on name because
        a companion carries its subject's full name (X1).
+    6. Generate a canonical sidecar from every RAW genuinely still uncovered
+       after historical stem/case matching, using ExifTool (X14).
 
-    The order is the dependency order. Migration first, because a companion
-    still sitting in ``##   EXIFs   ##`` is in a folder the later passes would
-    have to know two names for. Reconciliation next, because it moves
-    *subjects*: a RAW still in the wrong event folder has no business having
-    its sidecar placed beside it yet. Placement last, once every file is in the
-    folder it belongs to, to say where in that folder each companion goes.
+    The order is the dependency order. Parking is normalized first, then
+    legacy migration gives every later pass one set of folder names.
+    Reconciliation next moves *subjects*: a RAW still in the wrong event folder
+    has no business having its sidecar placed beside it yet. Placement is last,
+    once every file is in the folder it belongs to.
     """
-    folders = dated_folders(run)
-    if not folders:
-        run.report("ok", "No dated folder found; nothing to reconcile.")
-        return 0
-
     config = canonicalise._config()
     move = archive_mover(run)
     checksum = archive_checksum(run)
     run.planned = []
+    run.planned_removals = []
+    run.planned_generations = []
+    run.planned_video_sidecars = []
+    parking_report = hoist_nested_parking(run, move)
+    folders = dated_folders(run)
+    if not folders and not parking_report.misplaced:
+        run.report("ok", "No dated folder found; nothing to reconcile.")
+        return 0
+
     migration = matching.MigrationReport()
+    video_migration = legacy_videos.VideoMigrationReport()
     companions = matching.ReconcileReport()
     placement = matching.PlacementReport()
 
-    run.report("bold", "%s %d dated folder(s) in %d tree(s)"
+    run.report("bold", "%s %d live dated folder(s) in %d tree(s)"
                % (label, len(folders), len(run.trees)))
 
     def log(message):
         run.report("dim", "  %s" % message.strip())
 
-    # 1 -- the legacy containers. Found by the same walk that indexes the tree,
+    # 2 -- drain legacy videos before companion placement indexes subjects.
+    video_folders = legacy_videos.legacy_video_folders(folders, config)
+    if video_folders:
+        exiftool = config.get("external_tools", {}).get("exiftool", "exiftool")
+
+        def inspect_video(video):
+            return exif_sidecars.read_metadata_text(video, exiftool)
+
+        try:
+            video_migration = legacy_videos.migrate_legacy_videos(
+                video_folders, config,
+                lambda folder: duplicates_folder(folder, run, config),
+                inspect_video, log, move=move, checksum=checksum,
+                write_sidecar=archive_sidecar_writer(run))
+        except Exception as error:
+            run.report(FAILED, "  ! migrating legacy videos failed: %r" % error)
+            video_migration.errors += 1
+
+        # All recognized companions travel in the same operation. Park the
+        # shell now, before generic reconciliation prunes empty taxonomy dirs.
+        legacy_videos.park_empty_legacy_video_folders(
+            video_folders, video_migration, log, move=move,
+            dry_run=not run.apply)
+
+    # 3 -- the legacy containers. Found by the same walk that indexes the tree,
     # so this asks for an index first and then acts on what it named.
     survey = matching.survey_trees(run.trees, config, log)
     if survey.legacy_containers:
@@ -887,7 +1103,7 @@ def step_reconcile(run, label):
             run.report(FAILED, "  ! migrating legacy containers failed: %r" % error)
             migration.errors += 1
 
-    # 2 -- companions after their representative, per event folder.
+    # 4 -- companions after their representative, per event folder.
     for folder in folders:
         def folder_log(message, folder=folder):
             run.report("dim", "  %s: %s" % (folder.name, message.strip()))
@@ -898,7 +1114,7 @@ def step_reconcile(run, label):
             run.report(FAILED, "  ! reconciling %s failed: %r" % (folder.name, error))
             companions.errors += 1
 
-    # 3 -- placement, over every tree at once so a sidecar stranded anywhere in
+    # 5 -- placement, over every tree at once so a sidecar stranded anywhere in
     # the target can still find its subject.
     try:
         placement.merge(matching.place_companions(
@@ -908,12 +1124,24 @@ def step_reconcile(run, label):
         run.report(FAILED, "  ! placing companions failed: %r" % error)
         placement.errors += 1
 
+    # 6 -- only genuinely uncovered RAW media reach generation.
+    generated_raw_sidecars, generation_errors = generate_missing_raw_sidecars(
+        run, placement, config, move)
+
+    # Only genuinely uncovered media remain here. Historical stem-form and
+    # case-variant sidecars were resolved above; RAWs successfully generated
+    # here have also been removed from the audit.
+    for media in placement.missing_sidecars:
+        run.report("dim", "  - %s has no sidecar" % media)
+
     if not run.apply:
         for source, target in run.planned:
             run.report("dim", "    %s\n    ->  %s" % (source, target))
 
     if migration.seen:
         run.report("bold", "\nLegacy containers: %s" % migration.summary())
+    if video_migration.seen:
+        run.report("bold", "\nLegacy videos: %s" % video_migration.summary())
     run.report("bold", "\nCompanions following their representative: %s"
                % companions.summary())
     run.report("bold", "Companion placement (X10/X13): %s" % placement.summary())
@@ -941,9 +1169,21 @@ def step_reconcile(run, label):
                     ("errors", placement.errors),
                 ) if value)))
 
-    if not run.apply and run.planned:
-        run.report("ok", "\n%d file(s) to move. Nothing was changed. Re-run "
-                         "with --apply." % len(run.planned))
+    if not run.apply and (run.planned or run.planned_removals
+                          or run.planned_generations
+                          or run.planned_video_sidecars):
+        if run.planned_removals:
+            pending = ("%d path(s) to move and %d empty parking shell(s) to remove"
+                       % (len(run.planned), len(run.planned_removals)))
+        else:
+            pending = "%d file(s) to move" % len(run.planned)
+        if run.planned_generations:
+            pending += "; %d RAW sidecar(s) to generate" % len(run.planned_generations)
+        if run.planned_video_sidecars:
+            pending += "; %d video sidecar(s) to generate" % len(
+                run.planned_video_sidecars)
+        run.report("ok", "\n%s. Nothing was changed. Re-run with --apply."
+                         % pending)
 
     run.journal.write("reconcile", folders=len(folders),
                       legacy_renamed=migration.renamed,
@@ -960,29 +1200,386 @@ def step_reconcile(run, label):
                       ambiguous=placement.ambiguous,
                       media=placement.media,
                       media_without_sidecar=placement.media_without_sidecar,
+                      raw_sidecars_generated=generated_raw_sidecars,
+                      legacy_video_folders=video_migration.folders,
+                      legacy_videos_moved_up=video_migration.moved_up,
+                      legacy_videos_named_from_metadata=(
+                          video_migration.named_from_metadata),
+                      legacy_videos_unresolved=video_migration.unresolved,
+                      legacy_video_companions_moved=(
+                          video_migration.companions_moved),
+                      legacy_video_sidecars_created=(
+                          video_migration.sidecars_created),
+                      legacy_video_empty_folders_parked=(
+                          video_migration.empty_folders_parked),
+                      nested_parking_areas=parking_report.misplaced,
+                      parking_entries_hoisted=parking_report.entries_moved,
+                      parking_shells_removed=parking_report.shells_removed,
                       non_compliant=len(placement.non_compliant),
                       errors=(companions.errors + placement.errors
-                              + migration.errors))
+                              + migration.errors + parking_report.errors
+                              + video_migration.errors + generation_errors))
 
-    if companions.errors or placement.errors or migration.errors:
+    if (companions.errors or placement.errors or migration.errors
+            or parking_report.errors or video_migration.errors
+            or video_migration.left):
         return 1
-    if not run.apply and run.planned:
+    if generation_errors:
+        return 1
+    if not run.apply and (run.planned or run.planned_removals
+                          or run.planned_generations
+                          or run.planned_video_sidecars):
         return 1
     return 0
 
 
 # --------------------------------------------------------------------------
-# Steps 6 and 7 -- compliance with the archive standard
+# Step 6 -- mark and time the groups
+# --------------------------------------------------------------------------
+#
+# Section 3: a dated folder holding dated children carries "____GROUP____" as
+# the first element of its tail (C1), one that holds none carries no marker
+# (C2), and a group states both ends of its span in its prefix (C6), both read
+# off the subtree and rewritten whenever it changes (C11).
+#
+# What this step will NOT do, and why:
+#
+#   * It never rewrites the start **date**. N6 forbids deriving a date from
+#     contents -- rewriting it would move the folder out from under its month
+#     folder -- and C12's consequence, a group crossing into another month when
+#     its earliest child leaves, is open question 6 in the standard. A folder
+#     whose earliest file falls before its own date is reported instead.
+#   * It never moves media out of a group (C4, open question 5), and never
+#     moves a group between month folders (C12, open question 6).
+#
+# So this is the settled half of section 3: the marker and the two stamps.
+
+def dated_children(folder, refused):
+    """The direct dated child folders of ``folder``, or None if unreadable.
+
+    The same two refusals every walk here makes (T4): a reparse point is never
+    followed, and anything that cannot be inspected is reported rather than
+    assumed to be a file.
+    """
+    try:
+        with os.scandir(extended_path(folder)) as scan:
+            entries = sorted(scan, key=lambda entry: entry.name)
+    except OSError as error:
+        refused.append((str(folder), "cannot be listed: %s" % error))
+        return None
+    children = []
+    for entry in entries:
+        if canonicalise.is_reparse_point(entry):
+            refused.append((entry.path, "reparse point (junction/symlink) not followed"))
+            continue
+        try:
+            if not entry.is_dir(follow_symlinks=False):
+                continue
+        except OSError as error:
+            refused.append((entry.path, "cannot be inspected: %s" % error))
+            continue
+        if canonicalise.stamps.day_prefix(entry.name):
+            children.append(Path(folder) / entry.name)
+    return children
+
+
+class Subtree(NamedTuple):
+    """What a group's name is computed from: the two capture ends and the last day."""
+
+    earliest: object          # datetime, or None when nothing under it is stamped
+    latest: object            # datetime, likewise
+    last_day: str | None      # "YYYY-MM-DD" of the last dated folder beneath it
+
+
+def read_subtree(folder, refused):
+    """Walk ``folder`` once for everything its name depends on.
+
+    The capture ends come off **filenames**, never off the filesystem's own
+    timestamps: every file in the archive carries its capture time in its name
+    (F1), where a copy's mtime says only when it was copied. An unstamped file
+    is ignored rather than guessed at, which is why either end can be None.
+
+    The last day comes off the **dated folders** beneath it, at any depth,
+    rather than off the last capture time. Two reasons, and they are the same
+    reason twice: a day folder's date already has the day boundary applied
+    (N7), so a night running past midnight is one day and not two, and a nested
+    group's own span may be stale on the way in -- the run that fixes it is
+    this one. Reading the days themselves is immune to both.
+    """
+    stamps = canonicalise.stamps
+    grouping = canonicalise.grouping
+    root_key = path_key(folder)
+    names, days = [], []
+    for directory, files in canonicalise.walk_bottom_up(folder, root_key, refused):
+        if (parking.is_parking_area(directory.name)
+                or parking.is_inside_parking_area(directory)):
+            continue
+        names.extend(path.name for path in files)
+        if path_key(directory) == root_key:
+            continue
+        day = stamps.day_prefix(directory.name)
+        if day:
+            days.append(day)
+    return Subtree(grouping.earliest_capture_time(names),
+                   grouping.latest_capture_time(names),
+                   max(days) if days else None)
+
+
+def placeholder_tail(name, config):
+    """The marker a tool left on ``name`` saying the day is unfinished, or None.
+
+    ``__TO_SPLIT__`` means the day still has to be split, ``__TO_LABEL__`` that
+    it still has to be named, and " - 1. ######" is what folder-sorting wrote
+    before either existed. None of the three is a description, and the first of
+    them is load-bearing: step 3 opens the grouper on exactly those folders.
+    """
+    grouping = canonicalise.grouping
+    for marker in (grouping.TO_SPLIT_MARKER, grouping.TO_LABEL_MARKER):
+        if grouping.LABEL_SEPARATOR + marker in name:
+            return marker
+    suffix = grouping.date_folder_suffix(config)
+    return suffix if name.endswith(suffix) else None
+
+
+def description_to_keep(name, config):
+    """What a group about to be renamed should still be called, or None.
+
+    Three sources, in order: a group's existing description, which survives
+    every rewrite of the stamps (C11, T7); the label on a folder a person named
+    before it ever held children, which is the same claim written before the
+    marker existed; and nothing at all, for a folder still carrying a tool's
+    placeholder -- ``__TO_SPLIT__(i=79)`` is a count, not a name.
+    """
+    grouping = canonicalise.grouping
+    described = grouping.group_description(name)
+    if described is not None:
+        return described
+    if grouping.carries_group_marker(name):
+        return None                     # a bare marker: a group nobody has named
+    if placeholder_tail(name, config):
+        return None
+    labelled = grouping.split_labelled_name(name)
+    if labelled is None:
+        return None
+    return grouping.strip_label_numbering(labelled[1]) or None
+
+
+def date_of(text):
+    """``YYYY-MM-DD`` as a date, so a prefix can be rebuilt with its weekday (N1)."""
+    return datetime.date(int(text[:4]), int(text[5:7]), int(text[8:10]))
+
+
+def span_end_moment(end_day, latest):
+    """The instant a span end states: the last day, at the last capture time.
+
+    The two halves come from different places on purpose -- the day from the
+    children's names, which have the day boundary already applied (N7), the
+    time from the latest file anywhere in the subtree. A night that runs past
+    midnight is one event, so its last shot is timed 01.20.44 inside a folder
+    dated the evening before, and the span has to be able to say exactly that.
+    """
+    day = date_of(end_day)
+    return datetime.datetime(day.year, day.month, day.day,
+                             latest.hour, latest.minute, latest.second)
+
+
+def group_target_name(folder, children, run, config, refused):
+    """The name section 3 wants on ``folder``, or ``(None, reason)``.
+
+    No ``children`` means the marker has to come off (C2): the folder is a leaf
+    again, and a leaf carries neither marker nor span. Otherwise both stamps
+    are rebuilt from the subtree and whatever the folder was called is carried
+    across verbatim, legacy marker or not.
+    """
+    stamps = canonicalise.stamps
+    grouping = canonicalise.grouping
+    parsed = stamps.split_dated_folder(folder.name)
+    if parsed is None:
+        return None, "not a dated folder"
+    description = description_to_keep(folder.name, config)
+    base = stamps.format_day_prefix(date_of(parsed.date))
+
+    if not children:
+        if parsed.time:
+            base += "__" + parsed.time
+        return (base + (grouping.LABEL_SEPARATOR + description
+                        if description else ""),
+                None)
+
+    placeholder = placeholder_tail(folder.name, config)
+    if placeholder:
+        # A day that has been split but still has shots of its own at the top
+        # level is half-done, and the marker is how step 3 finds it again.
+        # Taking it off would strand that media for good -- and gathering it
+        # into a child of its own is C4, open question 5. Reported, not touched.
+        counts = top_level_media(folder, run.grouping_settings)
+        if counts is None or sum(counts) > 0:
+            return None, ("still carries %s with %s at its top level: it is a "
+                          "group by C1 and a day awaiting the grouper at once "
+                          "-- C4, open question 5"
+                          % (placeholder,
+                             "media" if counts is None
+                             else "%d image(s) and %d video(s)" % counts))
+
+    subtree = read_subtree(folder, refused)
+    if subtree.earliest is None or subtree.latest is None:
+        return None, "no file under it carries a capture stamp (C5, C8)"
+    if subtree.last_day is None:
+        return None, "no folder under it carries a readable date"
+    if subtree.last_day < parsed.date:
+        return None, ("a folder under it is dated %s, before its own %s (C13)"
+                      % (subtree.last_day, parsed.date))
+
+    earliest, latest = subtree.earliest, subtree.latest
+    if "%04d-%02d-%02d" % (earliest.year, earliest.month, earliest.day) < parsed.date:
+        # C12 / open question 6: the start belongs under an earlier month
+        # folder. Reported, never moved -- and the name is left alone, because
+        # a start time from a day the folder does not claim would be a lie.
+        return None, ("its earliest file is dated %04d-%02d-%02d, before the "
+                      "folder's own %s -- moving it is open question 6 (C12)"
+                      % (earliest.year, earliest.month, earliest.day, parsed.date))
+
+    base += "__%02d.%02d.%02d" % (earliest.hour, earliest.minute, earliest.second)
+    base += stamps.format_range_end(
+        parsed.date, span_end_moment(subtree.last_day, latest))
+    return grouping.group_name(base, len(children), description), None
+
+
+def group_violations(folder, config):
+    """What ``folder`` holds that C3 does not allow. Reported, never fixed.
+
+    Media, loose files of any kind and taxonomy subfolders are all outside the
+    closed set. None of it is touched: gathering loose media into a dated child
+    is C4, which is open question 5, and where a whole trip's ".gpx" belongs is
+    open question 4.
+    """
+    stamps = canonicalise.stamps
+    grouping = canonicalise.grouping
+    try:
+        with os.scandir(extended_path(folder)) as scan:
+            entries = sorted(scan, key=lambda entry: entry.name)
+    except OSError as error:
+        return ["cannot be listed: %s" % error]
+
+    files, folders_inside = [], []
+    for entry in entries:
+        if canonicalise.is_reparse_point(entry):
+            continue
+        try:
+            is_directory = entry.is_dir(follow_symlinks=False)
+        except OSError:
+            continue
+        (folders_inside if is_directory else files).append(entry.name)
+
+    reasons = []
+    if files:
+        images, videos = grouping.count_media(
+            files, *grouping.extension_sets(config))
+        if images or videos:
+            reasons.append("holds %d image(s) and %d video(s) of its own -- C3; "
+                           "moving them down is C4, open question 5"
+                           % (images, videos))
+        other = len(files) - images - videos
+        if other:
+            reasons.append("holds %d loose file(s) that are not media (C3)" % other)
+
+    parking_areas = 0
+    for name in folders_inside:
+        if stamps.day_prefix(name):
+            continue
+        if name == grouping.EMPTY_SUBFOLDERS_FOLDER:
+            # H2: a group is a level dated folders sit on, so it is a level a
+            # parking area may sit on -- it holds the children this group has
+            # emptied. C3 allows exactly one.
+            parking_areas += 1
+            if parking_areas > 1:
+                reasons.append("holds more than one %r (C3, H2)" % name)
+            continue
+        reasons.append("holds %r, which is neither a dated folder nor %s (C3)"
+                       % (name, grouping.EMPTY_SUBFOLDERS_FOLDER))
+    return reasons
+
+
+def step_group_markers(run):
+    """Mark, time and span every group; report what section 3 leaves open."""
+    grouping = canonicalise.grouping
+    config = canonicalise._config()
+    refused = []
+
+    folders = dated_folders(run)
+    # Deepest first, so renaming a child never invalidates a parent's recorded
+    # path -- the same reason every walk here is bottom-up.
+    folders.sort(key=lambda path: (len(path.parts), str(path).lower()), reverse=True)
+
+    renames, groups, unmarked = [], 0, 0
+    for folder in folders:
+        children = dated_children(folder, refused)
+        if children is None:
+            continue
+        carries = grouping.carries_group_marker(folder.name)
+        if not children and not carries:
+            continue                        # an ordinary leaf: nothing to say
+        if children:
+            groups += 1
+            for reason in group_violations(folder, config):
+                run.non_compliant.append((folder, reason))
+        else:
+            unmarked += 1
+
+        target, reason = group_target_name(folder, children, run, config, refused)
+        if target is None:
+            run.non_compliant.append((folder, reason))
+            continue
+        if target != folder.name:
+            renames.append((folder, folder.with_name(target)))
+
+    for path, reason in refused:
+        run.report("warn", "REFUSED %s: %s" % (path, reason))
+
+    run.report("ok", "\n%d group(s); %d folder(s) carrying the marker with no "
+                     "dated children left; %d name(s) to correct."
+                     % (groups, unmarked, len(renames)))
+    for source, target in renames:
+        run.report("dim", "  %s\n      -> %s" % (source, target.name))
+
+    failures = 0
+    if run.apply:
+        # Deepest first, as they were gathered: a child is renamed before the
+        # parent whose path was recorded when the child still had its old name.
+        attempts, delay_seconds = canonicalise.configured_retry()
+        for source, target in renames:
+            try:
+                canonicalise.rename_path(source, target, attempts, delay_seconds)
+            except OSError as error:
+                run.report(FAILED, "FAILED %s: %s" % (source, error))
+                failures += 1
+
+    run.journal.write("group_markers", groups=groups, unmarked=unmarked,
+                      renamed=len(renames), failures=failures,
+                      applied=bool(run.apply))
+
+    if failures:
+        return 2
+    if not run.apply and renames:
+        run.report("ok", "\n%d folder(s) to rename. Nothing was changed. "
+                         "Re-run with --apply." % len(renames))
+        return 1
+    return 0
+
+# --------------------------------------------------------------------------
+# Steps 7 and 8 -- compliance with the archive standard
 # --------------------------------------------------------------------------
 
 _STANDARD_NOTICE = (
-    "%s is v0.1, a DRAFT, enforced by nothing: its S4 subfolder set and its T8 "
+    "%s is a DRAFT: its S4 subfolder set and its T8 "
     "'defined more than once' list still carry open questions, and the answers "
     "change what counts as compliant. Enforcing it now would migrate a live "
     "archive to a shape that is still being argued about.\nThis step is a "
     "placeholder and does nothing. 'The fixing tool' under section 7 of that "
     "document is the specification it will be built to, and section 8 is the "
-    "machine-readable form it will parse." % STANDARD_PATH.name)
+    "machine-readable form it will parse.\nSection 3 is the one part already "
+    "settled and already enforced -- by step 6, which marks, times and spans "
+    "the groups." % STANDARD_PATH.name)
 
 
 def step_standard_check(run):
@@ -1019,8 +1616,9 @@ STEPS = (
      lambda run: step_reconcile(run, "Reconciling (again)"), 2),
     (5, "Canonicalise names again",
      lambda run: step_canonicalise(run, "Canonicalising (again)"), 1),
-    (6, "Check compliance with the archive standard", step_standard_check, None),
-    (7, "Fix compliance with the archive standard", step_standard_fix, None),
+    (6, "Mark and time the groups", step_group_markers, None),
+    (7, "Check compliance with the archive standard", step_standard_check, None),
+    (8, "Fix compliance with the archive standard", step_standard_fix, None),
 )
 
 
@@ -1032,7 +1630,7 @@ def report_non_compliant(run, colour):
     they are the one part of the output somebody has to act on by hand.
 
     Reported, never fixed. What to do with a folder the standard does not
-    describe is a decision, and steps 6 and 7 are where that will live once the
+    describe is a decision, and steps 7 and 8 are where that will live once the
     standard leaves draft.
     """
     if not run.non_compliant:
@@ -1067,6 +1665,8 @@ class Run:
         self.grouping_settings = canonicalise.GroupingSettings(canonicalise._config())
         # Where a dry run's reconcile step collects the moves it would make.
         self.planned = []
+        self.planned_removals = []
+        self.planned_generations = []
         # Folders that fit none of the shapes the standard allows, gathered as
         # the run goes and printed together at the end (in red) rather than
         # scrolling past in the middle of a rename report.

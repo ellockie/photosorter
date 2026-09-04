@@ -222,6 +222,11 @@ def default_config() -> dict:
         "companion_reconciliation": {
             "enabled": False,
         },
+        # Archive restructuring repairs genuinely missing RAW metadata after
+        # tolerant historical-name matching (ARCHIVE_STANDARD.md X14).
+        "raw_sidecar_generation": {
+            "enabled": True,
+        },
         # Two-timeline timezone & travel model (design.md Decision 9). Zones are
         # a small alias map over IANA names; offsets are derived, never typed.
         "zones": {},

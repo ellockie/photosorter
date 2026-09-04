@@ -347,15 +347,60 @@ def test_an_orphaned_preview_is_left_alone(tmp_path):
     assert orphan.is_file()
 
 
-def test_a_stem_match_is_never_accepted_for_an_exif_sidecar(tmp_path):
-    """Only previews arrive in camera form; an ._exif is always X1 already."""
+def test_a_historical_stem_form_exif_is_renamed_onto_x1(tmp_path):
+    """Older extraction omitted the media extension; read old, write X1."""
     day = build_video_day(tmp_path)
     stray = day / f"{Path(CLIP).stem}._exif"       # stem, not the full name
     stray.write_bytes(b"exif")
     report = relocate_sidecars(day, make_config())
-    assert report.orphaned == 1
-    assert report.moved == 0
-    assert stray.is_file()
+    assert report.orphaned == 0
+    assert report.moved == 1
+    assert report.renamed == 1
+    assert report.media_without_sidecar == 0
+    assert (day / "__EXIF" / f"{CLIP}._exif").is_file()
+
+
+def test_an_exif_name_is_normalized_to_the_subjects_real_extension_case(tmp_path):
+    day = tmp_path / "2026" / "07. July" / f"{STEM} - Case"
+    (day / "__EXIF").mkdir(parents=True)
+    media = day / f"{STEM}__f2.8__6D.JPG"
+    media.write_bytes(b"jpg")
+    old = day / "__EXIF" / f"{media.stem}.jpg._EXIF"
+    old.write_bytes(b"exif")
+
+    config = make_config()
+    config["extensions"]["lossy_images"] = [".jpg"]
+    report = relocate_sidecars(day, config)
+
+    assert report.orphaned == 0
+    assert report.media_without_sidecar == 0
+    assert report.renamed == 1
+    assert (day / "__EXIF" / f"{media.name}._exif").is_file()
+
+
+def test_a_stem_sidecar_beside_the_jpeg_does_not_claim_the_same_stem_raw(tmp_path):
+    """X10 location disambiguates the historical stem shared by JPG and RAW."""
+    day = tmp_path / "2026" / "07. July" / f"{STEM} - Same stem"
+    (day / "__EXIF").mkdir(parents=True)
+    (day / "__RAW").mkdir()
+    shared_stem = f"{STEM}__RAW__f8.0__6D"
+    jpg = f"{shared_stem}.JPG"
+    raw = f"{shared_stem}.ARW"
+    (day / jpg).write_bytes(b"jpg")
+    (day / "__RAW" / raw).write_bytes(b"raw")
+    old = day / "__EXIF" / f"{shared_stem}._EXIF"
+    old.write_bytes(b"jpg exif")
+
+    config = make_config()
+    config["extensions"].update(
+        {"lossy_images": [".jpg"], "raw_images": [".arw"]})
+    report = relocate_sidecars(day, config)
+
+    assert report.orphaned == 0
+    assert report.ambiguous == 0
+    assert report.media_without_sidecar == 1
+    assert report.missing_sidecars == [day / "__RAW" / raw]
+    assert (day / "__EXIF" / f"{jpg}._exif").is_file()
 
 
 def test_a_preview_is_never_treated_as_a_subject(tmp_path):

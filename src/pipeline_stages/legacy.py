@@ -175,39 +175,39 @@ def author_symbol_for_name(author_name: str | None, config: dict) -> str | None:
     return None
 
 
-def parse_legacy_exif_sidecar(path: Path, config: dict) -> dict:
+def parse_legacy_exif_text(text: str, config: dict) -> dict:
+    """Parse the human-readable ExifTool output used by legacy sidecars."""
     metadata = {}
     unformatted_datetime = None
 
-    with Path(path).open(encoding="iso-8859-1") as exif_file:
-        for line in exif_file:
-            if ": " not in line:
-                continue
-            key, value = line.split(": ", 1)
-            value = value.strip()
-            if key.startswith("Camera Model Name"):
-                metadata["camera_model"] = value
-                metadata["camera_symbol"] = camera_symbol_for_model(value, config)
-            elif key.startswith("Artist"):
-                # Some cameras carry the photographer's name. It is the one
-                # source of authorship a file can supply about itself; anything
-                # else has to come from where the batch was ingested from.
-                # An unmapped name resolves to None and is left for a person
-                # rather than silently filed as the owner's (G4/F8).
-                metadata["author_name"] = value
-                metadata["author_symbol"] = author_symbol_for_name(value, config)
-            elif key.startswith("File Modification Date/Time"):
-                unformatted_datetime = value
-            elif key.startswith("Date/Time Original"):
-                unformatted_datetime = value
-            elif key.startswith("Aperture"):
-                metadata["aperture"] = "f" + value
-            elif key.startswith("Exposure Time"):
-                metadata["exposure_time"] = "T" + reformat_exposure_time(value)
-            elif key.startswith("ISO  "):
-                metadata["iso"] = "I" + value
-            elif key.startswith("Focal Length"):
-                metadata["focal_length"] = "L" + reformat_focal_length(value)
+    for line in text.splitlines():
+        if ": " not in line:
+            continue
+        key, value = line.split(": ", 1)
+        value = value.strip()
+        if key.startswith("Camera Model Name"):
+            metadata["camera_model"] = value
+            metadata["camera_symbol"] = camera_symbol_for_model(value, config)
+        elif key.startswith("Artist"):
+            # Some cameras carry the photographer's name. It is the one
+            # source of authorship a file can supply about itself; anything
+            # else has to come from where the batch was ingested from.
+            # An unmapped name resolves to None and is left for a person
+            # rather than silently filed as the owner's (G4/F8).
+            metadata["author_name"] = value
+            metadata["author_symbol"] = author_symbol_for_name(value, config)
+        elif key.startswith("File Modification Date/Time"):
+            unformatted_datetime = value
+        elif key.startswith("Date/Time Original"):
+            unformatted_datetime = value
+        elif key.startswith("Aperture"):
+            metadata["aperture"] = "f" + value
+        elif key.startswith("Exposure Time"):
+            metadata["exposure_time"] = "T" + reformat_exposure_time(value)
+        elif key.startswith("ISO  "):
+            metadata["iso"] = "I" + value
+        elif key.startswith("Focal Length"):
+            metadata["focal_length"] = "L" + reformat_focal_length(value)
 
     if unformatted_datetime:
         metadata["captured_at"] = parse_exif_datetime(unformatted_datetime)
@@ -218,6 +218,46 @@ def parse_legacy_exif_sidecar(path: Path, config: dict) -> dict:
     metadata.setdefault("iso", "I---s")
     metadata.setdefault("camera_symbol", "NOID")
     return metadata
+
+
+def parse_legacy_exif_sidecar(path: Path, config: dict) -> dict:
+    with Path(path).open(encoding="iso-8859-1") as exif_file:
+        return parse_legacy_exif_text(exif_file.read(), config)
+
+
+INTRINSIC_CAPTURE_TIME_FIELDS = (
+    "Date/Time Original",
+    "Media Create Date",
+    "Track Create Date",
+    "Create Date",
+)
+
+
+def intrinsic_capture_datetime_from_exif_text(text: str) -> datetime.datetime | None:
+    """Return a camera/container capture time, never a filesystem timestamp.
+
+    ExifTool's text output also contains ``File Modification Date/Time`` and
+    similar system fields. Those are deliberately excluded: standard V4 says
+    an undatable video must be routed for review, not assigned a plausible
+    time from the filesystem.
+    """
+    values = {}
+    for line in text.splitlines():
+        if ": " not in line:
+            continue
+        key, value = line.split(": ", 1)
+        key = key.strip()
+        if key in INTRINSIC_CAPTURE_TIME_FIELDS and key not in values:
+            values[key] = value.strip()
+    for key in INTRINSIC_CAPTURE_TIME_FIELDS:
+        value = values.get(key)
+        if not value or value.startswith("0000:00:00"):
+            continue
+        try:
+            return parse_exif_datetime(value)
+        except (ValueError, IndexError):
+            continue
+    return None
 
 
 def date_folder_datetime(captured_at: datetime.datetime, config: dict) -> datetime.datetime:

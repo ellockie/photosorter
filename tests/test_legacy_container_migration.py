@@ -5,9 +5,10 @@ Either by renaming the container outright, when nothing of that name is there
 yet, or by moving files across one at a time when it is — and settling a name
 collision by checksum, exactly as companion placement settles one.
 
-A container left absolutely empty is parked in the ``__EMPTY_SUBFOLDERS``
-beside it, numbered when that name is taken. One still holding anything is left
-where it is: a folder that would not empty is a question, not a job.
+A container left absolutely empty is parked in the sibling
+``__EMPTY_SUBFOLDERS``, numbered when that name is taken. One still holding
+anything is left where it is: a folder that would not empty is a question, not
+a job.
 """
 
 import hashlib
@@ -166,14 +167,14 @@ def test_an_emptied_container_is_parked(tmp_path):
     report = migrate(year, make_config())
 
     assert report.parked == 1
-    assert (day / "__EMPTY_SUBFOLDERS" / LEGACY_EXIF).is_dir()
+    assert (day.parent / "__EMPTY_SUBFOLDERS" / LEGACY_EXIF).is_dir()
     assert not (day / LEGACY_EXIF).exists()
 
 
 def test_a_second_parking_of_one_name_is_numbered(tmp_path):
     """Recursively versioned: the discriminator N10a already uses."""
     year, day = build_year(tmp_path)
-    (day / "__EMPTY_SUBFOLDERS" / LEGACY_EXIF).mkdir(parents=True)
+    (day.parent / "__EMPTY_SUBFOLDERS" / LEGACY_EXIF).mkdir(parents=True)
     (day / "__EXIF").mkdir()
     (day / "__EXIF" / f"{JPG}._exif").write_bytes(b"e")
     (day / LEGACY_EXIF).mkdir()
@@ -181,7 +182,7 @@ def test_a_second_parking_of_one_name_is_numbered(tmp_path):
 
     migrate(year, make_config())
 
-    assert (day / "__EMPTY_SUBFOLDERS" / f"{LEGACY_EXIF}_2").is_dir()
+    assert (day.parent / "__EMPTY_SUBFOLDERS" / f"{LEGACY_EXIF}_2").is_dir()
 
 
 def test_a_container_that_would_not_empty_is_left_alone(tmp_path):
@@ -202,7 +203,7 @@ def test_a_container_that_would_not_empty_is_left_alone(tmp_path):
 
     assert report.errors
     assert (day / LEGACY_EXIF / f"{RAW}._exif").is_file()
-    assert not (day / "__EMPTY_SUBFOLDERS").exists()
+    assert not (day.parent / "__EMPTY_SUBFOLDERS").exists()
     assert any("still holds files" in line for line in logs)
 
 

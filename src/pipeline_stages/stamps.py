@@ -95,10 +95,19 @@ def day_prefix(name: str) -> str | None:
     return match.group(1) if match else None
 
 
-# The end of a multi-day span, written as the shortest tail of a date that
-# still says which day it is: "#22" (same year and month), "#09-11" (same year)
-# or "#2027-01-03". The number of fields disambiguates, so nothing is guessed.
-RANGE_END_PATTERN = r"#(?:(?:(\d{4})-)?(\d{2})-)?(\d{2})"
+# The end of a group's span (C6-C9): the shortest tail of a date that still
+# says which day it is -- "#22" (same year and month), "#09-11" (same year) or
+# "#2027-01-03" -- followed by the time of the subtree's latest file. The
+# number of date fields disambiguates, so nothing is guessed.
+#
+# The time is optional *to read* and required to write. A span written before
+# v0.9 carries a date and no time, and one typed by hand may too; both must
+# still parse, the same read-old/write-new rule as N5. ``format_range_end`` is
+# the only thing here that writes one, and it always writes the time.
+RANGE_END_PATTERN = (
+    r"#(?:(?:(\d{4})-)?(\d{2})-)?(\d{2})"
+    rf"(?:__({TIME_PATTERN}))?"
+)
 
 # A dated folder's whole prefix: the date, the decorative weekday, the canonical
 # time when the folder carries one, and the span end when it covers more than a
@@ -148,6 +157,37 @@ def resolve_range_end(start_date: str, range_end: str | None) -> str | None:
     match = re.fullmatch(RANGE_END_PATTERN, range_end)
     if not match:
         return None
-    year, month, day = match.groups()
+    year, month, day, _time = match.groups()
     start_year, start_month, _ = start_date.split("-")
     return f"{year or start_year}-{month or start_month}-{day}"
+
+
+def range_end_time(range_end: str | None) -> str | None:
+    """The ``HH.MM.SS`` half of a span end, or None when it carries none.
+
+    None means the name predates C6 (or was typed by hand), not that the span
+    ends at midnight -- which is why it is returned rather than defaulted.
+    """
+    if not range_end:
+        return None
+    match = re.fullmatch(RANGE_END_PATTERN, range_end)
+    return match.group(4) if match else None
+
+
+def format_range_end(start_date: str, end: datetime.datetime) -> str:
+    """The ``#`` span end for a group starting on ``start_date`` (C6-C9).
+
+    The date is trimmed to the shortest tail that still identifies the day --
+    the year goes when it matches the start's, then the month -- and the time
+    is always written. A span ending on the day it starts is written in full
+    all the same (C9): one shape for a reader and for a parser, whether the
+    group covers an afternoon or a fortnight.
+    """
+    start_year, start_month, _ = start_date.split("-")
+    if f"{end:%Y}" != start_year:
+        day = f"{end:%Y-%m-%d}"
+    elif f"{end:%m}" != start_month:
+        day = f"{end:%m-%d}"
+    else:
+        day = f"{end:%d}"
+    return f"#{day}__{end:%H.%M.%S}"

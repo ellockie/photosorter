@@ -59,6 +59,25 @@ from pathlib import Path
 
 TO_SPLIT_MARKER = "__TO_SPLIT__"
 
+# A day nobody has named yet (N11). Nothing writes one today -- the grouper
+# names a sub-event or leaves it to the counts -- but a tool converting a day
+# into a group has to know that a tail saying "still to be described" is not a
+# description, so the word belongs here rather than in the tool that reads it.
+TO_LABEL_MARKER = "__TO_LABEL__"
+
+# What a dated folder holding dated children carries, as the first element of
+# its tail (C1). Four underscores each side rather than the usual two: a group
+# is the one folder in the archive that holds no photographs, and the marker is
+# meant to be as loud as the root working folders' own "____" prefix, so a
+# person scrolling a month folder can see the structure without reading it.
+GROUP_MARKER = "____GROUP____"
+
+# What the standard called the same marker up to v0.8. No tool ever wrote one
+# -- it was a proposal, and README says so -- but the word is in the document,
+# in this repo's own AGENTS.md, and may well have been typed onto a folder by
+# hand. It is read and converted; it is never written (C15, N13).
+LEGACY_GROUP_MARKER = "__CONTAINER__"
+
 # Where a day folder holding no files is parked: a sibling of the folder
 # itself, so it leaves the month folder's working list without leaving the
 # month. Created on first use. Named here because the grouping stage moves
@@ -81,8 +100,8 @@ DEFAULT_SIDECAR_EXTENSIONS = ("._exif",)
 DEFAULT_PREVIEW_EXTENSIONS = (".thm", ".lrv")
 
 # The letters of the count bracket, in the order they are written, matching
-# ARCHIVE_STANDARD.md 2. "d" (direct dated children) is recognised so a
-# container name can be read, but nothing here writes one yet.
+# ARCHIVE_STANDARD.md 2. "d" (direct dated children) is the one letter a group
+# carries, and the only one it may (C14).
 # "c" sits next to "e" because it is the other half of the same question: "e"
 # says how many subjects here have a sidecar, "c" how many sidecars are fighting
 # over one.
@@ -96,7 +115,7 @@ COUNT_LETTERS = ("d", "i", "v", "e", "c", "s", "f")
 # "w" is in the standard's list and not here, for the same reason it is not in
 # COUNT_LETTERS: nothing writes it yet.
 COUNT_MEANINGS = {
-    "d": "direct dated child folders",
+    "d": "direct dated child folders -- the only count a group carries",
     "i": "top-level images -- the review job, what a grouper GUI will show",
     "v": "top-level videos -- likewise",
     "e": "media covered by a sidecar, counted by subject; shown only when it "
@@ -158,6 +177,16 @@ _COUNT_BRACKET_RE = re.compile(
                                DISCRIMINATOR_PATTERN))
 _EMPTY_BRACKET_RE = re.compile(
     r"\(%s\)(?:%s)?$" % (_EMPTY_COUNTS_PATTERN, DISCRIMINATOR_PATTERN))
+
+# A group's tail: the marker, the "(d=N)" it may carry, and the description a
+# human may have written after it (C1, C4 of the old numbering -- C14 now caps
+# the bracket at "d"). Both spellings are recognised; only GROUP_MARKER is
+# written. The description is captured so a rewrite of the counts can put it
+# back verbatim, which is what T7 means by a name a human wrote being finished.
+_GROUP_TAIL_RE = re.compile(
+    r"^%s(?P<marker>%s|%s)(?:\((?P<counts>d=\d+)\))?(?:%s(?P<description>.+))?$"
+    % (re.escape(LABEL_SEPARATOR), re.escape(GROUP_MARKER),
+       re.escape(LEGACY_GROUP_MARKER), re.escape(LABEL_SEPARATOR)))
 
 
 def count_letters_in(name: str) -> set[str]:
@@ -322,6 +351,27 @@ def earliest_capture_time(media) -> datetime.datetime | None:
     return min(moments) if moments else None
 
 
+def latest_capture_time(media) -> datetime.datetime | None:
+    """The latest LEADING stamp among ``media`` (paths or names), or None.
+
+    The other end of ``earliest_capture_time``, read the same way and with the
+    same reservations: only the leading stamp counts, and an unstamped file is
+    ignored rather than guessed at. A group needs both ends to state its span
+    (C6), and a span whose end came from a different source than its start
+    would be comparing two different clocks.
+    """
+    moments = []
+    for path in media:
+        match = _LEADING_STAMP_RE.match(Path(path).name)
+        if not match:
+            continue
+        try:
+            moments.append(datetime.datetime(*(int(part) for part in match.groups())))
+        except ValueError:
+            continue
+    return max(moments) if moments else None
+
+
 def with_earliest_time(base: str, media) -> str:
     """Give a day prefix the time of its earliest file: ``2026-07-03_(Fri)__09.12.53``.
 
@@ -482,3 +532,84 @@ def to_split_tail_is_only_counts(tail: str) -> bool:
     """
     remainder = tail[len(f" - {TO_SPLIT_MARKER}"):]
     return remainder == "" or bool(_COUNT_BRACKET_RE.fullmatch(remainder))
+
+
+# --------------------------------------------------------------------------
+# Groups (ARCHIVE_STANDARD.md section 3)
+# --------------------------------------------------------------------------
+#
+# A group is a dated folder whose contents are other dated folders, and the
+# archive's only nesting device: a day split into sub-events and a fortnight in
+# Norway are the same shape, differing only in how far the span runs. What it
+# holds is closed (C3) and what it is called is derived (C11) -- both ends of
+# the span are read off the subtree and rewritten whenever it changes, so the
+# only part of the name a person owns is the description after the marker.
+#
+# The span half of the name is stamps.py's grammar; only the tail is here.
+
+
+def group_suffix(children: int) -> str:
+    """The count bracket of a group: ``(d=7)``, or "" for none.
+
+    ``d`` is the only letter a group may carry (C14) -- the others count files,
+    and C3 leaves a group with none. Zero children is written as no bracket at
+    all rather than ``(d=0)``, for the same reason ``i``/``v`` are omitted when
+    zero, and because a folder with no dated children is not a group.
+    """
+    return f"(d={children})" if children else ""
+
+
+def group_name(base: str, children: int, description: str | None = None) -> str:
+    """The full group folder name for a dated ``base`` prefix.
+
+    ``base`` carries the whole prefix already -- start stamp and ``#`` span end
+    (see ``stamps.format_range_end``); this only appends the marker, its count
+    and whatever the folder was called. Written with ``GROUP_MARKER`` always,
+    which is how reading a legacy name and writing it back converts it (C15).
+    """
+    tail = f"{LABEL_SEPARATOR}{GROUP_MARKER}{group_suffix(children)}"
+    if description:
+        tail += f"{LABEL_SEPARATOR}{description}"
+    return f"{base}{tail}"
+
+
+def split_group_tail(tail: str) -> tuple[int | None, str | None] | None:
+    """``(children, description)`` of a group tail, or None if it is not one.
+
+    ``children`` is None when the tail carries no bracket -- an unknown count,
+    which is not the same claim as zero. Recognises both spellings of the
+    marker; ``carries_legacy_group_marker`` is what tells them apart.
+    """
+    match = _GROUP_TAIL_RE.match(tail)
+    if match is None:
+        return None
+    counts = match.group("counts")
+    return (int(counts[2:]) if counts else None), match.group("description")
+
+
+def carries_group_marker(name: str) -> bool:
+    """True when ``name``'s tail opens with either spelling of the marker."""
+    _, separator, tail = name.partition(LABEL_SEPARATOR)
+    return bool(separator) and split_group_tail(LABEL_SEPARATOR + tail) is not None
+
+
+def carries_legacy_group_marker(name: str) -> bool:
+    """True when ``name`` carries the pre-v0.9 spelling, and so wants converting."""
+    _, separator, tail = name.partition(LABEL_SEPARATOR)
+    if not separator:
+        return False
+    match = _GROUP_TAIL_RE.match(LABEL_SEPARATOR + tail)
+    return match is not None and match.group("marker") == LEGACY_GROUP_MARKER
+
+
+def group_description(name: str) -> str | None:
+    """What a human called a group, or None -- the one part of the name they own.
+
+    Kept verbatim across every rewrite of the stamps and the count (C11/T7),
+    including the rewrite that converts a legacy marker.
+    """
+    _, separator, tail = name.partition(LABEL_SEPARATOR)
+    if not separator:
+        return None
+    parsed = split_group_tail(LABEL_SEPARATOR + tail)
+    return parsed[1] if parsed else None

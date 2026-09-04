@@ -77,6 +77,9 @@
       "unsupported": "##   UNSUPPORTED EXTENSIONS   ##"
     }
   },
+  "raw_sidecar_generation": {
+    "enabled": true
+  },
   "paths": {
     "camera_uploads": "c:/Users/luxxa/Dropbox/Camera Uploads",
     "inbox_folder": "c:\\__PHOTOS\\____INGEST_PIPELINE\\INBOX",
