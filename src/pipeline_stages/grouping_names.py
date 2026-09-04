@@ -97,7 +97,22 @@ DEFAULT_SIDECAR_EXTENSIONS = ("._exif",)
 
 # Matches config.json extensions.previews, for the same reason. Previews are
 # sidecars by X6 and live in "__PREVIEWS", not in the media counts.
-DEFAULT_PREVIEW_EXTENSIONS = (".thm", ".lrv")
+#
+# Four forms, and the last two are why every match here is on the **longest
+# trailing extension** rather than on ``Path.suffix`` (X6a). A preview a tool
+# generates is a JPEG, and says what it is with a compound suffix --
+# "clip.mp4.THM.jpg", "shot.CR2.PREVIEW.jpg". Ask ``Path.suffix`` and the
+# answer is ".jpg", which would make the file media, put it at the top level,
+# and let a 320-pixel thumbnail be picked as the representative for the shot it
+# is a thumbnail OF. Matched on the whole tail, the compound forms are
+# unmistakable.
+DEFAULT_PREVIEW_EXTENSIONS = (".THM.jpg", ".PREVIEW.jpg", ".thm", ".lrv")
+
+# Matches config.json extensions.ocr. Recognised text is a sidecar too (X15),
+# and lives in "__OCR" rather than "__EXIF": that folder holds what a camera
+# recorded, where OCR text is a later reading of the picture, regenerable and
+# revisable as engines improve.
+DEFAULT_OCR_EXTENSIONS = (".OCR.txt",)
 
 # The letters of the count bracket, in the order they are written, matching
 # ARCHIVE_STANDARD.md 2. "d" (direct dated children) is the one letter a group
@@ -164,6 +179,15 @@ _LEADING_STAMP_RE = re.compile(rf"^{_STAMP_CAPTURE_PATTERN}")
 # dated folder from a month folder ("10. October"), which is all it is for.
 _DAY_PREFIX_RE = re.compile(rf"^{_DATE_PATTERN}")
 
+# A dated prefix and NOTHING ELSE -- anchored at both ends. What it is for is
+# telling a leaf's prefix from a group's: a group's prefix carries its span
+# ("...__08.14.02#16__21.40.55"), and both ends of that are maintained together
+# by whatever run touches the subtree (C11), never one end at a time by a
+# retiming pass. Both historical separators are read (N5); neither is written.
+_DATED_PREFIX_ONLY_RE = re.compile(
+    rf"^{_DATE_PATTERN}(?:[ _]+\([A-Za-z]{{3}}\))?"
+    rf"(?:[ _]+\d{{2}}\.\d{{2}}\.\d{{2}})?$")
+
 # The number folder-sorting wrote in front of every day folder: "1. ".
 _LABEL_NUMBERING_RE = re.compile(r"^\d+\.\s+")
 
@@ -218,6 +242,45 @@ def extension_sets(config: dict) -> tuple[set[str], set[str]]:
     return image_exts, video_exts
 
 
+# The config key each companion kind reads, and what it falls back to. One
+# tuple so the readers below and ``companion_extension_spellings`` cannot come
+# to disagree about which keys exist (T8).
+COMPANION_EXTENSION_KEYS = (
+    ("sidecars", DEFAULT_SIDECAR_EXTENSIONS),
+    ("previews", DEFAULT_PREVIEW_EXTENSIONS),
+    ("ocr", DEFAULT_OCR_EXTENSIONS),
+)
+
+
+def configured_extensions(config: dict, key: str, defaults) -> tuple:
+    """The extensions configured under ``key``, **exactly as written**.
+
+    Casing preserved, which is the whole point of it being separate from the
+    readers below: matching is case-insensitive, but the name a companion is
+    *renamed to* has to carry the spelling the standard documents --
+    ".THM.jpg", not ".thm.jpg" (X6a), ".OCR.txt", not ".ocr.txt" (X15).
+    """
+    extensions = config.get("extensions", {})
+    if key not in extensions:
+        return tuple(defaults)
+    return tuple(extensions[key])
+
+
+def companion_extension_spellings(config: dict) -> dict:
+    """``{lower-cased extension: the spelling to write}`` for every kind.
+
+    What turns a match back into a name. A companion arriving as ".thm.jpg" or
+    ".OCR.TXT" is recognised either way and comes to rest under the one
+    spelling this archive uses, so a later run has one form to look for rather
+    than however many a camera and three tools happened to write.
+    """
+    spellings = {}
+    for key, defaults in COMPANION_EXTENSION_KEYS:
+        for value in configured_extensions(config, key, defaults):
+            spellings[value.lower()] = value
+    return spellings
+
+
 def sidecar_extensions(config: dict) -> set[str]:
     """Sidecar suffixes (``._exif``), lower-cased, from config.
 
@@ -246,6 +309,40 @@ def preview_extensions(config: dict) -> set[str]:
     return {value.lower() for value in extensions["previews"]}
 
 
+def ocr_extensions(config: dict) -> set[str]:
+    """OCR suffixes (``.OCR.txt``), lower-cased, from config.
+
+    Its own key, and its own folder, for the reason X15 gives: what a camera
+    recorded and what an engine later read off the picture are different kinds
+    of claim, and a stale ``__OCR`` should be discardable wholesale without
+    touching a single piece of capture metadata.
+    """
+    extensions = config.get("extensions", {})
+    if "ocr" not in extensions:
+        return {value.lower() for value in DEFAULT_OCR_EXTENSIONS}
+    return {value.lower() for value in extensions["ocr"]}
+
+
+def companion_subject_name(name: str, extensions) -> str | None:
+    """The file ``name`` is a companion of, or None -- longest tail wins (X6a).
+
+    Longest first is the whole of the rule: "clip.mp4.THM.jpg" ends with
+    ".jpg" and with ".THM.jpg", and only the second answer is true. Testing the
+    compound forms before the plain ones is what keeps a generated preview from
+    reading as a JPEG of its own.
+    """
+    lowered = name.lower()
+    for extension in sorted(extensions, key=len, reverse=True):
+        if lowered.endswith(extension) and len(name) > len(extension):
+            return name[: -len(extension)]
+    return None
+
+
+def is_preview(name: str, preview_exts) -> bool:
+    """True when ``name`` is a preview of something and never media itself (X7)."""
+    return companion_subject_name(name, preview_exts) is not None
+
+
 def sidecar_subject_name(name: str, sidecar_exts: set[str]) -> str | None:
     """The name of the file a companion describes, or None if it is not one.
 
@@ -259,11 +356,7 @@ def sidecar_subject_name(name: str, sidecar_exts: set[str]) -> str | None:
     them. Two definitions of "which file is this a sidecar of" would let the
     counts and the placement disagree about the same folder.
     """
-    lowered = name.lower()
-    for extension in sidecar_exts:
-        if lowered.endswith(extension) and len(name) > len(extension):
-            return name[: -len(extension)]
-    return None
+    return companion_subject_name(name, sidecar_exts)
 
 
 def sidecar_subjects(paths, sidecar_exts: set[str]) -> dict[str, int]:
@@ -302,24 +395,53 @@ def count_sidecars(paths, sidecar_exts: set[str]) -> int:
     return len(select_sidecars(paths, sidecar_exts))
 
 
-def select_media(paths, image_exts: set[str], video_exts: set[str]) -> list:
+def select_media(paths, image_exts: set[str], video_exts: set[str],
+                 preview_exts: set[str] | None = None) -> list:
     """The image and video files among ``paths``, in order.
 
-    Sidecars fall out for free: "shot.mp4._exif" has the suffix "._exif",
-    which is in neither set.
+    Sidecars fall out for free: "shot.mp4._exif" has the suffix "._exif", which
+    is in neither set. **Previews do not**, and that is what ``preview_exts``
+    is for: a generated one is a real JPEG by extension (X6a) and would be
+    counted as an image, offered to a grouper GUI, and eligible to be picked as
+    a representative for the very shot it is a thumbnail of. X7 says a preview
+    is never media; this is where that is enforced.
+
+    ``preview_exts`` defaults to the module's own list rather than being
+    required, so a caller with no config in hand still excludes the forms every
+    config in this project sets.
     """
-    return [
-        path for path in paths
-        if Path(path).suffix.lower() in video_exts
-        or Path(path).suffix.lower() in image_exts
-    ]
+    preview_exts = _preview_set(preview_exts)
+    selected = []
+    for path in paths:
+        if is_preview(Path(path).name, preview_exts):
+            continue
+        suffix = Path(path).suffix.lower()
+        if suffix in video_exts or suffix in image_exts:
+            selected.append(path)
+    return selected
 
 
-def count_media(paths, image_exts: set[str], video_exts: set[str]) -> tuple[int, int]:
-    """Count images and videos among ``paths``, ignoring anything else."""
+def _preview_set(preview_exts) -> set[str]:
+    """The preview extensions to match on, lower-cased, defaulted if absent."""
+    if preview_exts is None:
+        return {value.lower() for value in DEFAULT_PREVIEW_EXTENSIONS}
+    return {value.lower() for value in preview_exts}
+
+
+def count_media(paths, image_exts: set[str], video_exts: set[str],
+                preview_exts: set[str] | None = None) -> tuple[int, int]:
+    """Count images and videos among ``paths``, ignoring anything else.
+
+    Previews are excluded on the same terms as ``select_media``: a name a
+    thumbnail carries is not a shot the folder holds, and counting one would
+    put "i=1" on a day whose only image is a proxy for a video (X7).
+    """
+    preview_exts = _preview_set(preview_exts)
     images = 0
     videos = 0
     for path in paths:
+        if is_preview(Path(path).name, preview_exts):
+            continue
         suffix = Path(path).suffix.lower()
         if suffix in video_exts:
             videos += 1
@@ -386,6 +508,80 @@ def with_earliest_time(base: str, media) -> str:
         return base
     earliest = earliest_capture_time(media)
     return f"{base}__{earliest:%H.%M.%S}" if earliest else base
+
+
+def prefix_day(base: str) -> datetime.date | None:
+    """The date a dated prefix opens with, or None when it opens with none."""
+    match = _DAY_PREFIX_RE.match(base)
+    if not match:
+        return None
+    try:
+        return datetime.date(*(int(part) for part in match.group(0).split("-")))
+    except ValueError:                  # "2026-02-31": a shape, not a date
+        return None
+
+
+def _days_after_prefix(base: str, moment: datetime.datetime) -> int | None:
+    """How many days ``moment`` falls after the day ``base`` is named for."""
+    day = prefix_day(base)
+    return None if day is None else (moment.date() - day).days
+
+
+def earliest_outside_its_day(base: str, media) -> datetime.datetime | None:
+    """The earliest stamp in ``media`` when it is not one this day may hold.
+
+    N7 puts a capture at or before the day boundary in the **previous** day's
+    folder, so a folder dated D legitimately holds files stamped D and D+1, and
+    nothing else. A stamp outside that pair is a file in the wrong folder, or a
+    folder under the wrong date -- either way something a person has to look
+    at, and never a time to rename the folder from.
+
+    ``None`` when the earliest file is one the folder may hold, when nothing in
+    ``media`` carries a stamp, or when ``base`` opens with no readable date.
+    """
+    earliest = earliest_capture_time(media)
+    if earliest is None:
+        return None
+    offset = _days_after_prefix(base, earliest)
+    if offset is None or offset in (0, 1):
+        return None
+    return earliest
+
+
+def with_corrected_time(base: str, media) -> str:
+    """``base`` carrying the capture time of its earliest file, whatever it said.
+
+    N3 is not "a folder gets a time", it is "the time **is** the capture time
+    of the folder's earliest file". ``with_earliest_time`` only ever fills a
+    blank, so a prefix stamped before its contents settled -- by an older
+    grouper, by a split that moved the early shots into a sibling, by a hand --
+    kept a time that named no photograph in it. This corrects one, and N6 is
+    why only the time half moves: rewriting the date would move the folder out
+    from under its month folder.
+
+    ``base`` comes back unchanged when there is nothing to correct it from --
+    an emptied folder keeps the real time it was named with (N10b) -- and in
+    two cases where reading its contents would be the wrong thing to do:
+
+      * ``base`` is not a dated prefix on its own. A group carries its span
+        there, and both ends of a span are recomputed together by the run that
+        changed the subtree (C11), not one end at a time by this.
+      * the earliest file is not one this day may hold (N7). Renaming a folder
+        onto a stray from another year is how one misfiled file rewrites the
+        name of a day that was right; ``earliest_outside_its_day`` is what
+        reports it instead.
+    """
+    if not _DATED_PREFIX_ONLY_RE.match(base):
+        return base
+    earliest = earliest_capture_time(media)
+    if earliest is None or earliest_outside_its_day(base, media) is not None:
+        return base
+    stamped = _LEADING_STAMP_RE.match(base)
+    if stamped is None:
+        return f"{base}__{earliest:%H.%M.%S}"
+    # Everything up to the hour: the date, the weekday and the separator
+    # between them, exactly as they are. Only the time is this function's.
+    return f"{base[:stamped.start(4)]}{earliest:%H.%M.%S}"
 
 
 def to_split_suffix(images: int, videos: int,

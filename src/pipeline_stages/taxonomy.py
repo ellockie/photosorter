@@ -32,9 +32,11 @@ DEFAULT_TAXONOMY = {
     "raw_extracted_jpgs": "__RAW_EXTRACTED_JPGS",
     "geolocations": "__GEOLOCATIONS",
     "hashes": "__HASHES",
+    "ocr": "__OCR",
     "panoramas": "__PANORAMAS",
     "people": "__PEOPLE",
     "previews": "__PREVIEWS",
+    "processed": "__PROCESSED",
     "raw": "__RAW",
     "resized": "__RESIZED",
     "shared": "__SHARED",
@@ -115,7 +117,8 @@ SIDECAR_KEYS = ("exif", "previews")
 
 # These folders are only ever created/recognized by the pipeline; their
 # contents are curated by hand and must never be populated automatically.
-MANUALLY_CURATED_KEYS = ("to_share", "shared", "people", "panoramas", "stereo_3d", "other")
+MANUALLY_CURATED_KEYS = ("to_share", "shared", "people", "panoramas", "stereo_3d",
+                         "other", "processed")
 
 # Defined in the taxonomy but intentionally not generated yet.
 FUTURE_KEYS = ("hashes", "videos_extracted", "videos_to_rename")

@@ -559,3 +559,104 @@ def test_an_unknown_folder_inside_a_dated_folder_is_reported(tmp_path):
 
     assert [path for path, _reason in report.non_compliant] == [odd]
     assert "allowed subfolders" in report.non_compliant[0][1]
+
+
+# --------------------------------------------------------------------------
+# X6a/X15 -- generated previews and OCR text, routed by their subject's folder
+# --------------------------------------------------------------------------
+
+OCR_CLIP = f"{STEM}__fNA__T---__LNA__I---s__SG23U.mp4"
+
+
+def make_full_config():
+    """The config as shipped: compound preview forms and OCR text included."""
+    config = make_config()
+    config["taxonomy"]["ocr"] = "__OCR"
+    config["extensions"]["previews"] = [".THM.jpg", ".PREVIEW.jpg", ".thm", ".lrv"]
+    config["extensions"]["ocr"] = [".OCR.txt"]
+    return config
+
+
+def build_ocr_clip_day(tmp_path):
+    """A day holding a video at the top level and a RAW in ``__RAW`` (V1, F2)."""
+    day = tmp_path / "2026" / "07. July" / f"{STEM} - Lens tests"
+    (day / "__RAW").mkdir(parents=True)
+    (day / OCR_CLIP).write_bytes(b"video")
+    (day / "__RAW" / RAW).write_bytes(b"raw")
+    return day
+
+
+def test_a_videos_generated_previews_land_beside_the_video(tmp_path):
+    """X6a/X13: the video is at the top level, so its previews are one below it."""
+    day = build_ocr_clip_day(tmp_path)
+    for extension in (".thm", ".THM.jpg", ".PREVIEW.jpg"):
+        (day / f"{OCR_CLIP}{extension}").write_bytes(b"preview")
+
+    relocate_sidecars(day, make_full_config())
+
+    assert sorted(path.name for path in (day / "__PREVIEWS").iterdir()) == [
+        f"{OCR_CLIP}.PREVIEW.jpg", f"{OCR_CLIP}.THM.jpg", f"{OCR_CLIP}.thm"]
+    assert [path.name for path in day.iterdir() if path.is_file()] == [OCR_CLIP]
+
+
+def test_a_raws_previews_land_under_the_raw_folder_not_the_days(tmp_path):
+    """X10/X13: the subject is in ``__RAW``, so its previews are in ``__RAW\\__PREVIEWS``.
+
+    Including one that starts out in the day's own ``__PREVIEWS`` -- being in a
+    preview folder is not the same as being in the right one.
+    """
+    day = build_ocr_clip_day(tmp_path)
+    (day / f"{RAW}.thm").write_bytes(b"camera thumb")
+    (day / "__PREVIEWS").mkdir()
+    (day / "__PREVIEWS" / f"{RAW}.PREVIEW.jpg").write_bytes(b"generated")
+
+    relocate_sidecars(day, make_full_config())
+
+    assert sorted(path.name for path in (day / "__RAW" / "__PREVIEWS").iterdir()) == [
+        f"{RAW}.PREVIEW.jpg", f"{RAW}.thm"]
+    day_previews = day / "__PREVIEWS"
+    assert not (day_previews.exists() and any(day_previews.iterdir()))
+
+
+def test_a_generated_preview_is_never_treated_as_the_image_it_looks_like(tmp_path):
+    """X7: ``Path.suffix`` says ".jpg", and it is still not media.
+
+    The failure this guards against is not cosmetic: counted as an image, a
+    thumbnail is offered to the grouper GUI and can be picked as the
+    representative for the very shot it is a thumbnail of.
+    """
+    from src.pipeline_stages.grouping_names import count_media, select_media
+
+    names = [OCR_CLIP, f"{OCR_CLIP}.THM.jpg", f"{OCR_CLIP}.PREVIEW.jpg"]
+    previews = {".thm.jpg", ".preview.jpg", ".thm", ".lrv"}
+    assert select_media(names, {".jpg"}, {".mp4"}, previews) == [OCR_CLIP]
+    assert count_media(names, {".jpg"}, {".mp4"}, previews) == (0, 1)
+
+
+def test_recognised_text_goes_to_its_own_folder(tmp_path):
+    """X15: OCR text is a sidecar, and not one that belongs in ``__EXIF``."""
+    day = build_ocr_clip_day(tmp_path)
+    (day / f"{OCR_CLIP}.OCR.txt").write_bytes(b"text")
+    (day / "__RAW" / f"{RAW}.OCR.txt").write_bytes(b"text")
+
+    relocate_sidecars(day, make_full_config())
+
+    assert (day / "__OCR" / f"{OCR_CLIP}.OCR.txt").is_file()
+    assert (day / "__RAW" / "__OCR" / f"{RAW}.OCR.txt").is_file()
+    assert not (day / "__EXIF").exists()
+
+
+def test_a_companion_is_renamed_to_the_one_spelling_the_archive_uses(tmp_path):
+    """Matched case-insensitively (X1a), written as the standard spells it.
+
+    A camera, a converter and an earlier run will each have written a different
+    case. Converging them means a later pass has one form to look for.
+    """
+    day = build_ocr_clip_day(tmp_path)
+    (day / f"{OCR_CLIP}.preview.jpg").write_bytes(b"lower")
+    (day / f"{OCR_CLIP}.ocr.TXT").write_bytes(b"mixed")
+
+    relocate_sidecars(day, make_full_config())
+
+    assert (day / "__PREVIEWS" / f"{OCR_CLIP}.PREVIEW.jpg").is_file()
+    assert (day / "__OCR" / f"{OCR_CLIP}.OCR.txt").is_file()

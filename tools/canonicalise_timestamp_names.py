@@ -32,6 +32,30 @@ folder-sorting wrote it, since a shot after midnight but before the day
 boundary belongs to the previous day's folder and rewriting the date would
 move the day out from under its month folder too.
 
+A time already there is CHECKED, not kept. N3 says the time **is** the capture
+time of the earliest file, so a prefix that disagrees with what the folder
+holds is corrected::
+
+    2026-07-15_(Wed)__08.00.00 - __TO_SPLIT__(i=1)  ->  ..._(Wed)__09.30.00 - ...
+    2026-07-16_(Thu)__08.00.00 - Sopot weekend      ->  ..._(Thu)__11.05.00 - ...
+
+A folder gets stamped before its contents have settled -- a later pass moves
+the early shots into a sibling, a split leaves the day starting an hour on --
+and the name goes on naming a photograph that is no longer in it. A label is no
+protection: a person's writing is the description, and the stamp in front of it
+is the tool's (C11). Two folders are never retimed:
+
+  * a **group**. Its prefix carries the span it covers, both ends are
+    recomputed together by whatever run changed the subtree (C11), and half a
+    span rewritten here would be a name saying two different things.
+  * one whose earliest file is not a capture that day may hold -- outside the
+    day itself and the small hours of the next (N7). One stray from another
+    year would otherwise rewrite the name of a day that was right, so the
+    folder is left alone and reported as MISTIMED.
+
+``--keep-times`` turns the correction off: a prefix with no time still gains
+one, a prefix with a time keeps it whatever the folder holds.
+
 A folder somebody has named ("... - Lens tests") gets the same dated half and
 nothing else: the label is their writing and is kept verbatim, bar the legacy
 number folder-sorting left in front of it ("- 1. Trip" becomes "- Trip"), and
@@ -256,10 +280,16 @@ def carries_impossible_stamp(name):
 class GroupingSettings:
     """What the placeholder rewrite needs from config, resolved once."""
 
-    def __init__(self, config):
+    def __init__(self, config, keep_times=False):
+        # ``--keep-times``: leave a prefix that already carries a time alone,
+        # however little it agrees with what the folder holds (N3).
+        self.keep_times = keep_times
         self.placeholder = grouping.date_folder_suffix(config)
         self.image_exts, self.video_exts = grouping.extension_sets(config)
         self.sidecar_exts = grouping.sidecar_extensions(config)
+        # X6a/X7: what must never be counted as media, however much its
+        # extension looks like one.
+        self.preview_exts = grouping.preview_extensions(config)
 
 
 def nested_contents(folder):
@@ -304,10 +334,12 @@ def folder_media(top_level_files, nested, settings):
     rather than pretend the day is empty.
     """
     media = grouping.select_media(
-        top_level_files or (), settings.image_exts, settings.video_exts)
+        top_level_files or (), settings.image_exts, settings.video_exts,
+        settings.preview_exts)
     if media:
         return media
-    return grouping.select_media(nested, settings.image_exts, settings.video_exts)
+    return grouping.select_media(nested, settings.image_exts,
+                                 settings.video_exts, settings.preview_exts)
 
 
 def folder_audit(everything, nested, settings):
@@ -339,7 +371,8 @@ def folder_audit(everything, nested, settings):
     An archive configured to keep no sidecars silences both outright: with no
     extension to look for, a count of zero would be saying nothing.
     """
-    media = grouping.select_media(everything, settings.image_exts, settings.video_exts)
+    media = grouping.select_media(everything, settings.image_exts,
+                                  settings.video_exts, settings.preview_exts)
     subjects = grouping.sidecar_subjects(everything, settings.sidecar_exts)
 
     covered = len(subjects)
@@ -372,18 +405,30 @@ def dating_files(everything, settings):
     folder keeps a bare date, and two of them on one day collide on a single
     name -- which is the whole reason the time is there.
     """
-    media = grouping.select_media(everything, settings.image_exts, settings.video_exts)
+    media = grouping.select_media(everything, settings.image_exts,
+                                  settings.video_exts, settings.preview_exts)
     return media or grouping.select_sidecars(everything, settings.sidecar_exts)
 
 
-def canonical_event_folder_name(folder, name, media_files, settings):
+def canonical_event_folder_name(folder, name, media_files, settings,
+                                mistimed=None):
     """The canonical name of one event folder, whatever shape it arrived in.
 
-    Every event folder gets the same dated half: the prefix gains the time of
+    Every event folder gets the same dated half: the prefix carries the time of
     its earliest file, or of the earliest sidecar left behind when the media
-    has gone. That time comes from ``grouping.with_earliest_time`` -- the same
-    function the live screenshot-grouping stage uses -- so this tool cannot
-    drift from it.
+    has gone. N3 makes that an equality rather than a default, so the time is
+    **checked and corrected**, not merely filled in when absent -- a folder
+    stamped before an earlier pass moved its early shots into a sibling names a
+    photograph that is no longer in it. ``grouping.with_corrected_time`` owns
+    the rule, including the two folders it must not retime: a group, whose
+    prefix carries a span that is maintained at both ends together (C11), and
+    one whose earliest file is not a file that day may hold (N7). The second is
+    appended to ``mistimed`` when a list is passed, and reported rather than
+    renamed -- one misfiled stray must not rewrite the name of a day that was
+    right.
+
+    ``--keep-times`` turns the correction off, leaving the older behaviour: a
+    prefix with no time gains one, a prefix with a time keeps it.
 
     What follows the date depends on what the folder is:
 
@@ -412,7 +457,14 @@ def canonical_event_folder_name(folder, name, media_files, settings):
 
     nested, nested_folders = nested_contents(folder)
     everything = list(media_files or ()) + nested
-    dated = grouping.with_earliest_time(base, dating_files(everything, settings))
+    dating = dating_files(everything, settings)
+    if settings.keep_times:
+        dated = grouping.with_earliest_time(base, dating)
+    else:
+        dated = grouping.with_corrected_time(base, dating)
+        stray = grouping.earliest_outside_its_day(base, dating)
+        if stray is not None and mistimed is not None:
+            mistimed.append((folder, stray))
 
     if label is not None:
         return dated + grouping.LABEL_SEPARATOR + grouping.strip_label_numbering(label)
@@ -430,7 +482,7 @@ def canonical_event_folder_name(folder, name, media_files, settings):
 
     media = folder_media(media_files, nested, settings)
     images, videos = grouping.count_media(
-        media, settings.image_exts, settings.video_exts)
+        media, settings.image_exts, settings.video_exts, settings.preview_exts)
     sidecars, clashes, subfolder_files = folder_audit(everything, nested, settings)
     return grouping.to_split_name(
         dated, images, videos, sidecars, clashes, subfolder_files)
@@ -613,12 +665,13 @@ def rename_path(source, target, attempts, delay_seconds):
     return with_retry(operation, attempts, delay_seconds)
 
 
-def plan_for(path, media_files=None, grouping_settings=None):
+def plan_for(path, media_files=None, grouping_settings=None, mistimed=None):
     """The canonical target path for one entry, or None when already correct."""
     name = Path(path).name
     wanted = canonical_name(name)
     if grouping_settings is not None and media_files is not None:
-        wanted = canonical_event_folder_name(path, wanted, media_files, grouping_settings)
+        wanted = canonical_event_folder_name(path, wanted, media_files,
+                                             grouping_settings, mistimed)
     if wanted == name:
         return None
     return Path(path).with_name(wanted)
@@ -674,7 +727,7 @@ def count_legend(letters, colour):
 
 
 def apply_plan(entries, apply_changes, attempts, delay_seconds, journal, report,
-               grouping_settings=None, claimed=None, letters=None):
+               grouping_settings=None, claimed=None, letters=None, mistimed=None):
     """Walk the planned renames, reporting each outcome. Returns counters.
 
     ``entries`` pairs each path with the top-level files of the folder it *is*
@@ -690,7 +743,7 @@ def apply_plan(entries, apply_changes, attempts, delay_seconds, journal, report,
             report(UNPARSEABLE, "%s  (names a date that does not exist)" % path)
             continue
 
-        target = plan_for(path, media_files, grouping_settings)
+        target = plan_for(path, media_files, grouping_settings, mistimed)
         if target is None:
             continue
         target = free_name(path, target, claimed)
@@ -814,6 +867,9 @@ def build_parser():
                              "(default: a dated file inside the target)")
     parser.add_argument("--undo", default=None, metavar="JOURNAL",
                         help="revert the renames recorded in a journal")
+    parser.add_argument("--keep-times", action="store_true",
+                        help="do not correct a folder time that disagrees with "
+                             "its earliest file; only fill in a missing one")
     parser.add_argument("--skip-placeholders", action="store_true",
                         help="rewrite timestamps only; leave event-folder "
                              "names alone")
@@ -870,7 +926,8 @@ def main(argv=None):
 
     root_key = path_key(target)
     refused = []
-    grouping_settings = None if args.skip_placeholders else GroupingSettings(_config())
+    grouping_settings = (None if args.skip_placeholders
+                         else GroupingSettings(_config(), args.keep_times))
 
     report("bold", "%s %s" % ("Renaming in" if args.apply else "Dry run over", target))
 
@@ -903,6 +960,9 @@ def main(argv=None):
     # Which count letters this run actually wrote, so the legend below explains
     # those and no others.
     letters = set()
+    # Folders whose earliest file is not one that day may hold (N7): reported
+    # at the end beside the refusals, never renamed from.
+    mistimed = []
     try:
         for directory, files in walk_bottom_up(target, root_key, refused, skip_keys):
             # Files first, then the directory itself: renaming the directory
@@ -912,7 +972,7 @@ def main(argv=None):
                 entries.append((directory, files))
             counters = apply_plan(entries, args.apply, attempts, delay_seconds,
                                   journal_handle, report, grouping_settings,
-                                  claimed, letters)
+                                  claimed, letters, mistimed)
             for key, value in counters.items():
                 totals[key] += value
     finally:
@@ -921,13 +981,18 @@ def main(argv=None):
 
     for path, reason in refused:
         report(REFUSED, "REFUSED %s: %s" % (path, reason))
+    for path, stray in mistimed:
+        report("warn", "MISTIMED %s: its earliest file is %s, which is not a "
+                       "capture this day holds (N7); its time is left as found"
+                       % (path, stamps.format_stamp(stray)))
 
     print()
     verb = "renamed" if args.apply else "to rename"
     print(colourise(
-        "%d %s, %d conflict(s), %d failure(s), %d unparseable, %d refused."
+        "%d %s, %d conflict(s), %d failure(s), %d unparseable, %d refused, "
+        "%d mistimed."
         % (totals[CHANGED], verb, totals[CONFLICT], totals[FAILED],
-           totals[UNPARSEABLE], len(refused)), "bold", colour))
+           totals[UNPARSEABLE], len(refused), len(mistimed)), "bold", colour))
 
     if not args.quiet:
         for line in count_legend(letters, colour):

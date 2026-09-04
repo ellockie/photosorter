@@ -553,6 +553,111 @@ def test_media_still_outranks_a_sidecar_when_dating_a_folder(tmp_path):
 
 
 # --------------------------------------------------------------------------
+# A time that no longer names anything in the folder (N3)
+# --------------------------------------------------------------------------
+
+def test_a_stamp_that_disagrees_with_the_earliest_file_is_corrected(tmp_path):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-15_(Wed)__08.00.00 - __TO_SPLIT__(i=1)",
+                        [_stamped("2026-07-15_(Wed)", "09.30.00")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-15_(Wed)__09.30.00 - __TO_SPLIT__(i=1)").is_dir()
+
+
+def test_a_labelled_folder_is_retimed_and_its_label_is_not_touched(tmp_path):
+    """C11: T7 protects the description in the tail, never the stamp."""
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-16_(Thu)__08.00.00 - Sopot weekend",
+                        [_stamped("2026-07-16_(Thu)", "11.05.00")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-16_(Thu)__11.05.00 - Sopot weekend").is_dir()
+
+
+def test_a_tail_somebody_wrote_survives_the_retiming(tmp_path):
+    year = tmp_path / "2026"
+    _placeholder_folder(
+        year, "2026-07-16_(Thu)__08.00.00 - __TO_SPLIT__(i=1) check the RAWs",
+        [_stamped("2026-07-16_(Thu)", "11.05.00")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-16_(Thu)__11.05.00 - __TO_SPLIT__(i=1) check the "
+                   "RAWs").is_dir()
+
+
+def test_a_capture_after_midnight_still_times_the_day_it_belongs_to(tmp_path):
+    """N7: a folder dated D legitimately holds the small hours of D+1."""
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-17_(Fri)__08.00.00 - __TO_SPLIT__(i=1)",
+                        [_stamped("2026-07-18_(Sat)", "02.15.00")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-17_(Fri)__02.15.00 - __TO_SPLIT__(i=1)").is_dir()
+
+
+def test_a_stray_from_another_year_is_reported_and_renames_nothing(tmp_path,
+                                                                   capsys):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-19_(Sun)__08.00.00 - __TO_SPLIT__(i=1)",
+                        [_stamped("2019-03-02_(Sat)", "11.00.00")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-19_(Sun)__08.00.00 - __TO_SPLIT__(i=1)").is_dir()
+    out = capsys.readouterr().out
+    assert "MISTIMED" in out
+    assert "2019-03-02_(Sat)__11.00.00" in out
+    assert "1 mistimed" in out
+
+
+def test_a_group_keeps_the_span_in_its_prefix(tmp_path):
+    """C11: both ends move together, and never from a retiming pass."""
+    year = tmp_path / "2026"
+    group = year / "2026-07-20_(Mon)__08.00.00#21__20.00.00 - ____GROUP____(d=1) - Norway"
+    _placeholder_folder(group, "2026-07-20_(Mon)__09.00.00 - day one",
+                        [_stamped("2026-07-20_(Mon)", "09.00.00")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert group.is_dir()
+
+
+def test_an_emptied_folder_keeps_the_real_time_it_was_named_with(tmp_path):
+    """N10b: there is nothing left in it to read a time off."""
+    year = tmp_path / "2026"
+    (year / "2026-07-21_(Tue)__08.00.00 - __TO_SPLIT__(EMPTY)").mkdir(parents=True)
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-21_(Tue)__08.00.00 - __TO_SPLIT__(EMPTY)").is_dir()
+
+
+def test_keep_times_leaves_a_disagreeing_stamp_alone(tmp_path):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-15_(Wed)__08.00.00 - __TO_SPLIT__(i=1)",
+                        [_stamped("2026-07-15_(Wed)", "09.30.00")])
+
+    assert tool.main([str(year), "--apply", "--keep-times", "--no-colour"]) == 0
+
+    assert (year / "2026-07-15_(Wed)__08.00.00 - __TO_SPLIT__(i=1)").is_dir()
+
+
+def test_keep_times_still_fills_a_prefix_that_carries_none(tmp_path):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######",
+                        [_stamped("2026-07-15_(Wed)", "09.30.00")])
+
+    assert tool.main([str(year), "--apply", "--keep-times", "--no-colour"]) == 0
+
+    assert (year / "2026-07-15_(Wed)__09.30.00 - __TO_SPLIT__(i=1)").is_dir()
+
+
+# --------------------------------------------------------------------------
 # The count-bracket legend
 # --------------------------------------------------------------------------
 

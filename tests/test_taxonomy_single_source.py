@@ -14,6 +14,7 @@ from src.core import default_config
 from src.pipeline_stages.taxonomy import \
     DEFAULT_TAXONOMY, \
     LEGACY_TAXONOMY, \
+    MANUALLY_CURATED_KEYS, \
     taxonomy_dir_names, \
     taxonomy_folder
 
@@ -83,6 +84,19 @@ def test_retired_video_folders_are_read_but_never_written():
     recognised = taxonomy_dir_names({})
     assert {"__VIDEOS", "__EXTRACTED_VIDEOS"} <= recognised
     assert {"__VIDEOS_TO_RENAME", "__VIDEOS_EXTRACTED"} <= recognised
+
+
+def test_every_hand_curated_key_is_one_the_standard_calls_hand_curated():
+    """S3: the module's own list and the document's must not drift (T8)."""
+    assert {DEFAULT_TAXONOMY[key] for key in MANUALLY_CURATED_KEYS} == \
+        _standard_list("hand_curated")
+
+
+def test_processed_is_a_recognised_subfolder_a_tool_never_populates():
+    """S6: a person's resting place for derivatives, inside the event."""
+    assert taxonomy_folder({}, "processed") == "__PROCESSED"
+    assert "__PROCESSED" in taxonomy_dir_names({})
+    assert "processed" in MANUALLY_CURATED_KEYS
 
 
 def _docstring_nodes(tree: ast.AST) -> set[int]:

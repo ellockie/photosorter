@@ -374,6 +374,171 @@ def test_list_to_split_separates_the_two(tmp_path, config, capsys):
 
 
 # --------------------------------------------------------------------------
+# Steps 1 and 5 -- parking what the canonicaliser marked EMPTY (H4)
+# --------------------------------------------------------------------------
+
+PARKING = "__EMPTY_SUBFOLDERS"
+
+
+def july_of(root, year="2026"):
+    return root / year / "07. July"
+
+
+def test_an_empty_marked_folder_is_parked_by_the_step_that_marked_it(tmp_path,
+                                                                     config):
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)",
+                        images=0)
+    assert run(str(root), "--steps", "1", "--apply", "--yes") == 0
+    assert not folder.exists()
+    assert (july_of(root) / PARKING / folder.name).is_dir()
+
+
+def test_a_placeholder_holding_nothing_is_marked_and_parked_in_one_run(tmp_path,
+                                                                      config):
+    """The whole point: noticing and acting on it are the same step."""
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed) - 1. ######", images=0)
+    assert run(str(root), "--steps", "1", "--apply", "--yes") == 0
+    july = july_of(root)
+    assert [path.name for path in july.iterdir()] == [PARKING]
+    assert [path.name for path in (july / PARKING).iterdir()] == [
+        "2026-07-15_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)"]
+
+
+def test_hollow_subfolders_travel_with_the_folder_they_are_in(tmp_path, config):
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)",
+                        images=0)
+    (folder / "__RAW").mkdir()
+    assert run(str(root), "--steps", "1", "--apply", "--yes") == 0
+    parked = july_of(root) / PARKING / "2026-07-15_(Wed)__00.00.00 - __TO_SPLIT__(f=1_EMPTY)"
+    assert (parked / "__RAW").is_dir()
+
+
+def test_a_folder_with_a_file_anywhere_below_it_is_not_parked(tmp_path, config):
+    """Emptiness is read off the disk, not off the bracket somebody wrote."""
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)",
+                        images=0)
+    (folder / "__VIDEOS").mkdir()
+    (folder / "__VIDEOS" / "clip.mp4").write_bytes(b"x")
+    assert run(str(root), "--steps", "1", "--apply", "--yes") == 0
+    assert not (july_of(root) / PARKING).exists()
+    assert list(july_of(root).iterdir()) != []
+
+
+def test_a_folder_somebody_named_is_parked_too_under_its_own_name(tmp_path,
+                                                                  config):
+    """What a folder is called decides nothing; H3 parks it as it is called."""
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-16_(Thu)__10.00.00 - Sopot weekend",
+                        images=0)
+    assert run(str(root), "--steps", "1", "--apply", "--yes") == 0
+    assert not folder.exists()
+    assert (july_of(root) / PARKING / folder.name).is_dir()
+
+
+def test_a_named_folder_with_one_photo_in_it_stays(tmp_path, config):
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-16_(Thu)__08.14.00 - Sopot weekend")
+    assert run(str(root), "--steps", "1", "--apply", "--yes") == 0
+    assert folder.is_dir()
+    assert not (july_of(root) / PARKING).exists()
+
+
+def test_a_folder_holding_only_a_sidecar_is_not_empty(tmp_path, config):
+    """X3: the sidecar is the only record its subject existed. A file is a file."""
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(e=1)",
+                        images=0)
+    exif = folder / "__EXIF"
+    exif.mkdir()
+    (exif / "2026-07-15_(Wed)__08.14.02__f1.7.jpg._exif").write_text(
+        "", encoding="utf-8")
+    assert run(str(root), "--steps", "1", "--apply", "--yes") == 0
+    assert not (july_of(root) / PARKING).exists()
+
+
+def test_a_dry_run_says_what_it_would_park_and_moves_nothing(tmp_path, config,
+                                                             capsys):
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)",
+                        images=0)
+    assert run(str(root), "--steps", "1") == 1
+    out = capsys.readouterr().out
+    assert "1 empty folder(s) to park in %s" % PARKING in out
+    assert folder.is_dir()
+    assert not (july_of(root) / PARKING).exists()
+
+
+def test_a_name_already_parked_gains_a_discriminator(tmp_path, config):
+    """N4 keeps both records; N10a's "_2" is what the second one is called."""
+    root = make_archive(tmp_path)
+    name = "2026-07-15_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)"
+    (july_of(root) / PARKING / name).mkdir(parents=True)
+    make_event(root, name, images=0)
+    assert run(str(root), "--steps", "1", "--apply", "--yes") == 0
+    assert sorted(path.name for path in (july_of(root) / PARKING).iterdir()) == [
+        name, name + "_2"]
+
+
+def test_an_emptied_sub_event_is_parked_inside_its_group(tmp_path, config):
+    """H2: a parking area sits where dated folders sit, so it never leaves the level."""
+    root = make_archive(tmp_path)
+    group = make_event(root, "2026-07-15_(Wed)__08.00.00 - Sopot weekend", images=0)
+    child = group / "2026-07-15_(Wed)__09.00.00 - __TO_SPLIT__(EMPTY)"
+    child.mkdir()
+    assert run(str(root), "--steps", "1", "--apply", "--yes") == 0
+    assert (group / PARKING / child.name).is_dir()
+    assert not (july_of(root) / PARKING).exists()
+
+
+def test_a_folder_still_holding_a_dated_child_waits_for_the_next_run(tmp_path,
+                                                                     config):
+    """H8: parking the children is what makes it a leaf, and a leaf is parkable."""
+    root = make_archive(tmp_path)
+    parent = make_event(root, "2026-07-15_(Wed)__08.00.00 - __TO_SPLIT__(i=1)",
+                        images=0)
+    child = parent / "2026-07-15_(Wed)__09.00.00 - __TO_SPLIT__(EMPTY)"
+    child.mkdir()
+    assert run(str(root), "--steps", "1", "--apply", "--yes") == 0
+    # Still in the month, under the name the canonicaliser has just rebuilt --
+    # what moved is the child, into the parking area of the folder above it.
+    still_there = [path for path in july_of(root).iterdir() if path.is_dir()]
+    assert [path.name for path in still_there] == [
+        "2026-07-15_(Wed)__08.00.00 - __TO_SPLIT__(f=1_EMPTY)"]
+    assert (still_there[0] / PARKING / child.name).is_dir()
+
+    # The next run finds a leaf, and parks it.
+    assert run(str(root), "--steps", "1", "--apply", "--yes") == 0
+    assert [path.name for path in july_of(root).iterdir()] == [PARKING]
+    assert len(list((july_of(root) / PARKING).iterdir())) == 1
+
+
+def test_parking_is_idempotent(tmp_path, config):
+    root = make_archive(tmp_path)
+    name = "2026-07-15_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)"
+    make_event(root, name, images=0)
+    assert run(str(root), "--steps", "1", "--apply", "--yes") == 0
+    assert run(str(root), "--steps", "1", "--apply", "--yes") == 0
+    assert [path.name for path in (july_of(root) / PARKING).iterdir()] == [name]
+
+
+def test_an_empty_folder_with_no_level_above_it_is_reported_not_moved(tmp_path,
+                                                                     config,
+                                                                     capsys):
+    """H2 has nowhere to put it, so it is left exactly where it is."""
+    root = tmp_path / "loose"
+    folder = root / "2026-07-15_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)"
+    folder.mkdir(parents=True)
+    assert run(str(root), "--force-target", "--steps", "1", "--apply",
+               "--yes") == 1
+    assert folder.is_dir()
+    assert "no month folder or group above it" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
 # Step 3 -- launching the grouper
 # --------------------------------------------------------------------------
 

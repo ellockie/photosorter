@@ -160,3 +160,65 @@ def test_only_the_leading_stamp_counts_at_either_end():
 def test_an_unstamped_file_is_ignored_rather_than_guessed_at():
     assert grouping.latest_capture_time(["__TO_RENAME__VID_0034.mp4"]) is None
     assert grouping.earliest_capture_time([]) is None
+
+
+# --------------------------------------------------------------------------
+# Correcting a prefix time that no longer names anything in the folder (N3)
+# --------------------------------------------------------------------------
+
+MORNING = ["2026-07-15_(Wed)__09.30.00__f1.7__SG23U.jpg"]
+
+
+def test_a_time_that_disagrees_with_the_earliest_file_is_replaced():
+    assert grouping.with_corrected_time(
+        "2026-07-15_(Wed)__08.00.00", MORNING) == "2026-07-15_(Wed)__09.30.00"
+
+
+def test_a_prefix_with_no_time_still_gains_one():
+    assert grouping.with_corrected_time(
+        "2026-07-15_(Wed)", MORNING) == "2026-07-15_(Wed)__09.30.00"
+
+
+def test_the_date_and_the_weekday_are_never_touched():
+    """N6: only the time half may ever be derived from the contents."""
+    assert grouping.with_corrected_time(
+        "2026-07-15_(Wed)__08.00.00",
+        ["2026-07-16_(Thu)__02.15.00__f1.7.jpg"]) == "2026-07-15_(Wed)__02.15.00"
+
+
+def test_a_prefix_carrying_a_span_is_left_to_the_run_that_owns_both_ends():
+    """C11: a group's start and end move together, never one at a time."""
+    span = "2026-08-20_(Thu)__09.14.02#27__18.31.50"
+    assert grouping.with_corrected_time(span, MORNING) == span
+
+
+def test_a_folder_with_nothing_stamped_in_it_keeps_what_it_says():
+    assert grouping.with_corrected_time(
+        "2026-07-15_(Wed)__08.00.00", []) == "2026-07-15_(Wed)__08.00.00"
+
+
+def test_a_capture_the_day_after_is_one_the_folder_may_hold():
+    """N7: the small hours belong to the previous day's folder."""
+    assert grouping.earliest_outside_its_day(
+        "2026-07-15_(Wed)__08.00.00", ["2026-07-16_(Thu)__02.15.00.jpg"]) is None
+
+
+def test_a_capture_from_another_year_is_not_one_it_may_hold():
+    stray = ["2019-03-02_(Sat)__11.00.00.jpg"]
+    assert grouping.earliest_outside_its_day(
+        "2026-07-15_(Wed)__08.00.00", stray) == datetime.datetime(2019, 3, 2, 11, 0)
+    # And it renames nothing: one misfiled file must not retime a whole day.
+    assert grouping.with_corrected_time(
+        "2026-07-15_(Wed)__08.00.00", stray) == "2026-07-15_(Wed)__08.00.00"
+
+
+def test_a_capture_the_day_before_is_not_one_it_may_hold_either():
+    assert grouping.earliest_outside_its_day(
+        "2026-07-15_(Wed)__08.00.00",
+        ["2026-07-14_(Tue)__23.00.00.jpg"]) == datetime.datetime(2026, 7, 14, 23, 0)
+
+
+def test_the_day_a_prefix_names_is_read_off_it():
+    assert grouping.prefix_day("2026-07-15_(Wed)__08.00.00") == datetime.date(2026, 7, 15)
+    assert grouping.prefix_day("2026-02-31_(Wed)") is None
+    assert grouping.prefix_day("07. July") is None

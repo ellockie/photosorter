@@ -5,6 +5,7 @@ from src.core import     PipelineContext,     PipelineStage
 from src.pipeline_stages.legacy import date_folder_suffix
 from src.pipeline_stages.grouper_launch import     grouper_command as _grouper_command,     grouper_install,     run_grouper as _run_grouper,     stderr_tail as _stderr_tail
 from src.pipeline_stages.parking import parking_area_for as _parking_area_for
+from src.pipeline_stages.grouping_names import preview_extensions as _preview_extensions
 from src.pipeline_stages.grouping_names import     EMPTY_SUBFOLDERS_FOLDER as _EMPTY_SUBFOLDERS_FOLDER,     TO_SPLIT_MARKER as _TO_SPLIT_MARKER,     count_media as _count_media,     extension_sets as _extension_sets,     select_media as _select_media,     to_split_name as _to_split_name,     with_earliest_time as _with_earliest_time
 
 # grouper_install is re-exported: the dashboard (src/server.py) imports it
@@ -206,8 +207,9 @@ class ScreenshotGroupingStage(PipelineStage):
             return None
 
         top_level_files = [path for path in folder.iterdir() if path.is_file()]
-        media = _select_media(top_level_files, image_exts, video_exts)
-        images, videos = _count_media(media, image_exts, video_exts)
+        preview_exts = _preview_extensions(context.config)
+        media = _select_media(top_level_files, image_exts, video_exts, preview_exts)
+        images, videos = _count_media(media, image_exts, video_exts, preview_exts)
         if images == 0 and videos == 0:
             context.log(f"Skipping {folder.name}: no top-level media to group")
             return None

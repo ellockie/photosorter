@@ -97,6 +97,19 @@ prefix:  YYYY-MM-DD_(Ddd)__HH.MM.SS      canonical — DOUBLE underscore before 
 | N6 | Only the **time** half of a prefix may ever be derived from folder contents. The **date** MUST NOT — rewriting it would move the folder out from under its month folder. A date that cannot exist (`2026-02-31`) is reported, never invented. |
 | N7 | **Day boundary.** A capture at or before `04.44.44` (configurable) belongs to the **previous** day's folder. A night running past midnight is one event. Consequence: a folder's date may legitimately be one day earlier than some of its files. |
 
+**Implemented (N3)** — `with_corrected_time` in `grouping_names.py`, applied to
+every event folder by `tools/canonicalise_timestamp_names.py`. N3 is an
+equality, not a default: a prefix whose time disagrees with the folder's
+earliest file is **corrected**, not left standing, since a folder stamped
+before a later pass moved its early shots into a sibling names a photograph
+that is no longer in it. Only the time moves (N6), and T7 does not shield it —
+a labelled folder is retimed and its description kept (C11 says the same for a
+group). Two folders are never retimed this way: a group, whose prefix carries a
+span maintained at both ends together (C11), and one whose earliest file is
+outside the pair of days N7 allows it — that one is reported as `MISTIMED`,
+because one misfiled stray must not rewrite the name of a day that was right.
+`--keep-times` restores the older behaviour of filling a blank only.
+
 ### Tails
 
 | ID | Tail | Meaning |
@@ -257,6 +270,7 @@ Inside a dated folder, exactly these are permitted. All optional.
 | `__PANORAMAS` | Panorama sources and stitches | hand |
 | `__PEOPLE` | Per-person crops / selections | hand |
 | `__PREVIEWS` | Camera thumbnails and low-res proxies — `.thm`, `.lrv`, `.THM.jpg`, `.PREVIEW.jpg`. See X6 | tool |
+| `__PROCESSED` | Edits and derivatives of this event's shots, made outside the pipeline. Same contents as the root folder of that name (§0.1), already attributed to one event | hand |
 | `__RAW` | RAW originals, untouched | tool |
 | `__RAW_EXTRACTED_JPGS` | JPEGs extracted from a RAW for a shot that already has a camera JPEG | tool |
 | `__RESIZED` | Downscaled derivatives for web, social, email | tool |
@@ -271,6 +285,7 @@ Inside a dated folder, exactly these are permitted. All optional.
 | S3 | Folders marked *hand* are recognised and preserved but MUST NEVER be populated automatically. |
 | S4 | A tool MUST read these names from §8, not restate them as literals. |
 | S5 | **No video folder in the ordinary case.** A datable video is a representative at the top level (V1). `__VIDEOS` and `__EXTRACTED_VIDEOS` were an earlier arrangement: they are **read** — recognised case-insensitively as taxonomy folders so an existing Windows archive is not reported as malformed and its companions can still be reunited — and **never written**, the same read-old/write-new rule N5 applies to timestamps. The restructure migration drains `__VIDEOS` per V12; `__EXTRACTED_VIDEOS` remains only recognised. |
+| S6 | `__PROCESSED` inside a dated folder is the **resting place a person chose** for derivatives the root `__PROCESSED` held (§0.1). It is recognised and preserved and, being *hand* (S3), never written to: D3 still routes what a tool can key automatically into `__EDITED`. Its files travel with their subject like any other subfolder's when an event is split. |
 
 ### Implemented
 
@@ -309,6 +324,22 @@ the place things go to stop being offered for review.
 reconciliation pass by `tools/restructure_archive.py`. The same module owns
 `parking_area_for`, the one answer to "where does this go", used by the grouper
 stage and by the legacy-container migration alike (T8).
+
+H4's own case — a day folder emptied of every file — is applied by
+`park_empty_dated_folders` in `tools/restructure_archive.py`, in the same step
+that marks it: the canonicaliser is what establishes that a folder holds no
+file anywhere (N10a), so the folder is parked there and then rather than left
+in the month for every later run to notice again.
+
+**Empty means no files**, at any depth; subfolders below it are not files and
+do not keep a folder out — they travel with it, which is what `f=N` in the
+name is still counting after the move. **Every dated folder is a candidate**,
+whatever it is called: marked, placeholdered, or named by a person. H4 is about
+what a folder holds, and H3 parks it under its own name, so nothing a name
+recorded is lost by moving it. Emptiness is re-read off the disk before
+anything moves, never taken from the `EMPTY` bracket, and a name already taken
+in the parking area gains N10a’s discriminator. A folder still holding a dated
+child is left for the next run, which is H8.
 
 ### 4.2 Legacy containers — read, migrated, never written
 
@@ -806,6 +837,7 @@ subfolders:
     - "___OTHER"
     - "__PANORAMAS"
     - "__PEOPLE"
+    - "__PROCESSED"                 # S6; the root folder of that name is §0.1
     - "__SHARED"
 
 files:

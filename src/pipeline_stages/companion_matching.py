@@ -59,6 +59,8 @@ from src.pipeline_stages.parking import \
 from src.pipeline_stages.grouping_names import \
     EMPTY_SUBFOLDERS_FOLDER, \
     extension_sets, \
+    companion_extension_spellings, \
+    ocr_extensions, \
     preview_extensions, \
     sidecar_extensions, \
     sidecar_subject_name
@@ -485,7 +487,12 @@ def _prune_empty_taxonomy_dirs(tax_dirs: list[Path], reporter: _Reporter) -> Non
 # The two kinds of companion that live one level below their subject, each with
 # the taxonomy key naming the folder it goes in. Both follow X10-X13; they are
 # separated only because they land in different folders.
-COMPANION_KINDS = (("exif", sidecar_extensions), ("previews", preview_extensions))
+# The three kinds of companion and the taxonomy key each is filed under.
+# One tuple, walked in order, so adding a kind is adding a line here rather
+# than a branch in the placement engine (X10/X13/X15).
+COMPANION_KINDS = (("exif", sidecar_extensions),
+                   ("previews", preview_extensions),
+                   ("ocr", ocr_extensions))
 
 
 def default_checksum(path: Path, chunk_size: int = 1024 * 1024) -> str:
@@ -902,6 +909,9 @@ def place_companions(roots, config: dict, duplicates_for,
     report.legacy_containers = list(index.legacy_containers)
 
     keeps_exif_sidecars = bool(sidecar_extensions(config))
+    # X6a/X15: matched case-insensitively, written in the one spelling
+    # this archive uses.
+    spellings = companion_extension_spellings(config)
     covered = set()
     emptied: list[Path] = []
 
@@ -924,7 +934,8 @@ def place_companions(roots, config: dict, duplicates_for,
             continue
 
         media_name, subject_folder = candidates[0]
-        wanted_name = media_name + extension.lower()
+        wanted_name = media_name + spellings.get(extension.lower(),
+                                                 extension.lower())
         if key == "exif":
             covered.add((media_name.lower(), _path_key(subject_folder)))
         wanted = Path(sidecar_subdir(subject_folder, config, key))

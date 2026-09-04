@@ -35,6 +35,8 @@
       ".heif"
     ],
     "previews": [
+      ".THM.jpg",
+      ".PREVIEW.jpg",
       ".thm",
       ".lrv"
     ],
@@ -53,6 +55,9 @@
       ".mp4",
       ".mov",
       ".avi"
+    ],
+    "ocr": [
+      ".OCR.txt"
     ]
   },
   "external_tools": {

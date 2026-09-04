@@ -5,27 +5,60 @@ written by an older Photosorter, an older grouper or a third-party tool into
 the shape ``ARCHIVE_STANDARD.md`` describes, run in the one order that makes
 sense, over one target, with one set of safety rules.
 
-    1. Canonicalise names          tools/canonicalise_timestamp_names.py
+    1. Canonicalise names and park the empty
+                                   tools/canonicalise_timestamp_names.py
     2. Reunite companions and sidecars     companion_matching.py
     3. Group the "__TO_SPLIT__" folders, one at a time, in the grouper GUI
     4. Reunite companions and sidecars     companion_matching.py
-    5. Canonicalise names again    tools/canonicalise_timestamp_names.py
+    5. Canonicalise names and park again
+                                   tools/canonicalise_timestamp_names.py
     6. Mark and time the groups    ARCHIVE_STANDARD.md section 3
     7. Check compliance with the archive standard      [not implemented]
     8. Fix compliance with the archive standard        [not implemented]
+
+What steps 1 and 5 settle about a folder
+----------------------------------------
+Its **time**, and whether it still belongs in the month at all. Both come off
+the same reading of what the folder holds, so they happen together.
+
+N3 makes a folder's time an equality -- it *is* the capture time of the
+folder's earliest file -- rather than a default, so a prefix that disagrees is
+corrected and not merely filled in when blank. A day stamped before an earlier
+pass moved its early shots into a sibling goes on naming a photograph that is
+no longer in it. A group is not retimed here (C11 maintains both ends of its
+span together), and neither is a folder whose earliest file is not a capture
+that day may hold (N7) -- that one is reported MISTIMED, because one stray from
+another year must not rewrite the name of a day that was right.
+
+A folder that turns out to hold **no file anywhere** is parked in the
+"__EMPTY_SUBFOLDERS" on its own level, which is where H4 says it belongs:
+"parked rather than offered to a grouper", rather than left in the month for
+every later run to notice again and pass over again. Empty means no files;
+subfolders below it are not files, do not keep it out, and travel with it. What
+the folder is called decides nothing -- marked, placeholdered or named by a
+person, H3 parks it under its own name, so nothing a name recorded is lost.
+
+The name is never the evidence for either. It records what some earlier run
+found, so the folder is read off the disk before anything moves, over the same
+walk that refuses a reparse point everywhere else (T4); a folder that cannot be
+read in full is not called empty. Reading the disk is also what makes the park
+visible in a dry run, before any "(EMPTY)" has been written: "--apply" is still
+what moves anything.
 
 Only the folders worth opening
 ------------------------------
 Step 3 opens a marked folder only when it has an image or a video **at its top
 level**, which is the whole of what the grouper's thumbnail grid shows. A
 folder can carry the marker and still have nothing for it to do: an earlier
-pass already split the day into sub-events, the day's files all sit in
-"__RAW" or a legacy "__VIDEOS", or it is one of the hollow folders parked in
-"__EMPTY_SUBFOLDERS" that the canonicaliser marks "(EMPTY)". Opening one of
-those puts an empty grid in front of the reviewer and waits for them to close
-it, and on a batch of ninety that is the difference between a job and an
-afternoon. They are listed, with the reason, rather than dropped silently;
-"--open-all" opens them anyway.
+pass already split the day into sub-events, or the day's files all sit in
+"__RAW" or a legacy "__VIDEOS". Opening one of those puts an empty grid in
+front of the reviewer and waits for them to close it, and on a batch of ninety
+that is the difference between a job and an afternoon. They are listed, with
+the reason, rather than dropped silently; "--open-all" opens them anyway.
+
+A folder holding nothing at all reaches step 3 only when step 1 was skipped or
+could not park it -- a run of "--steps 3" alone, a folder with no level above
+it allowed to hold a parking area (H2). It is passed over on the same grounds.
 
 The count is taken off the disk, never off the folder's own name: the
 canonicaliser counts the whole subtree when a top level is bare, so a day
@@ -502,7 +535,15 @@ class Journal:
 # --------------------------------------------------------------------------
 
 def step_canonicalise(run, label):
-    """Run the canonicaliser over each tree; return the worst exit code."""
+    """Canonicalise each tree, then park what that marked EMPTY (H4).
+
+    The park is part of the step rather than a step of its own because it is
+    the other half of the same finding: the canonicaliser is what establishes
+    that a folder holds nothing anywhere, and a folder that holds nothing is
+    not one to leave in the month for the next run to notice again.
+
+    Returns the worst exit code of the two.
+    """
     worst = 0
     for tree in run.trees:
         run.report("bold", "\n%s  %s" % (label, tree))
@@ -525,6 +566,11 @@ def step_canonicalise(run, label):
             code = 2
         run.journal.write("canonicalise", tree=str(tree), exit_code=code)
         worst = max(worst, code)
+    if worst < 2:
+        # A canonicalise that could not run has not established anything about
+        # what these folders hold, so nothing is moved on the strength of it.
+        run.report("bold", "\nParking empty folders")
+        worst = max(worst, park_empty_dated_folders(run))
     return worst
 
 
@@ -584,7 +630,7 @@ def top_level_media(folder, settings):
     except OSError:
         return None
     return canonicalise.grouping.count_media(
-        names, settings.image_exts, settings.video_exts)
+        names, settings.image_exts, settings.video_exts, settings.preview_exts)
 
 
 def partition_groupable(folders, run):
@@ -594,12 +640,13 @@ def partition_groupable(folders, run):
     ``[(folder, reason)]``.
 
     A folder can carry the marker and still have nothing for the GUI to do.
-    The grouper was emptied into sub-events on an earlier pass; the day's
-    files all sit in "__RAW" or a legacy "__VIDEOS"; the folder is one of the hollow
-    ones parked in "__EMPTY_SUBFOLDERS" that the canonicaliser marks
-    ``(EMPTY)``. Opening any of those puts an empty grid in front of the
-    reviewer and waits for them to close it, which on a batch of ninety is the
-    difference between a job and an afternoon.
+    The grouper was emptied into sub-events on an earlier pass; the day's files
+    all sit in "__RAW" or a legacy "__VIDEOS"; the folder holds nothing at all
+    and step 1 has not parked it, because it was skipped or because there is no
+    level above it allowed to hold a parking area (H2). Opening any of those
+    puts an empty grid in front of the reviewer and waits for them to close it,
+    which on a batch of ninety is the difference between a job and an
+    afternoon.
 
     **Images and videos both count.** The grouper's own README describes its
     grid as "every image and video as a thumbnail", and the ``v`` half of the
@@ -983,6 +1030,144 @@ def hoist_nested_parking(run, move):
     if report.misplaced:
         run.report("bold", "Nested parking areas: %s" % report.summary())
     return report
+
+
+# --------------------------------------------------------------------------
+# Steps 1 and 5 -- park every dated folder that holds no file
+# --------------------------------------------------------------------------
+#
+# H4: an "__EMPTY_SUBFOLDERS" is where a day folder emptied of every file goes,
+# "parked rather than offered to a grouper". The canonicaliser is what notices
+# a folder holds nothing -- it writes the "(EMPTY)" bracket on it -- and until
+# now that was the whole of what happened: the folder kept its place in the
+# month, was counted among the day's work, and was passed over by step 3 one
+# folder at a time, every run, for good.
+#
+# So the park happens where the notice does, in the same step.
+#
+# Empty means NO FILES, anywhere below it. Folders below it are not files and
+# do not keep it out: a day drained down to a hollow "__RAW" and "__EXIF" is a
+# day with nothing in it, which is why the canonicaliser writes "(f=2_EMPTY)"
+# on that one rather than a count. The shells travel with it, so what it still
+# says about itself survives the move.
+#
+# What the folder is CALLED decides nothing. Every dated folder is a candidate
+# -- marked, placeholdered, or named by a person -- because H4 is about what a
+# folder holds, and a name that no longer describes anything is not a reason to
+# leave it in the month. Nothing is lost either way: H3 parks a folder under
+# its own name, so the record of the day and what it was called goes with it.
+#
+# The disk is the evidence, never the name: a bracket says what some earlier
+# run found, and re-reading is also what lets a dry run show the parks before
+# any "(EMPTY)" has been written.
+
+
+def folder_holds_no_files(folder, run):
+    """True when nothing anywhere below ``folder`` is a file; None if unsure.
+
+    The canonicaliser's walk, so a reparse point is refused here exactly as it
+    is everywhere else (T4) -- and a folder hiding one is ``None`` rather than
+    empty, because what a junction leads to is not something this may look at
+    and so not something it may call nothing.
+
+    Every dated folder in the archive is asked this, so the top level is read
+    first and on its own: a day with photographs in it answers in one
+    ``scandir``, and only a folder that might really be empty is walked to the
+    bottom. Over a share that is the difference between one pass and two.
+    """
+    try:
+        with os.scandir(extended_path(folder)) as entries:
+            for entry in entries:
+                if not entry.is_dir(follow_symlinks=False):
+                    return False
+    except OSError as error:
+        run.report("warn", "  ! %s cannot be listed: %s" % (folder, error))
+        return None
+
+    refused = []
+    for _directory, files in canonicalise.walk_bottom_up(
+            folder, path_key(folder), refused):
+        if files:
+            return False
+    if refused:
+        for path, reason in refused:
+            run.report("warn", "  REFUSED %s: %s" % (path, reason))
+        return None
+    return True
+
+
+def park_empty_dated_folders(run):
+    """Move every dated folder holding no file into its level's parking area (H2/H4).
+
+    Deepest first, and a folder still holding a dated child is left alone this
+    run: parking its children is what makes it a leaf, and a leaf is what the
+    next pass may park (H8 settles the two in that order). The guard is read
+    before anything moves, so one run never both empties a group and parks it.
+    """
+    candidates = [
+        folder for folder in dated_folders(run)
+        if not parking.holds_dated_child(folder)
+    ]
+    candidates.sort(key=lambda path: (len(path.parts), str(path).lower()),
+                    reverse=True)
+
+    # Only the applying half of ``archive_mover``: a park a dry run planned is
+    # collected on its own below rather than in ``run.planned``, so the
+    # reconcile step's "N file(s) to move" goes on counting files.
+    move = archive_mover(run) if run.apply else None
+    reserved = set()
+    parked = errors = 0
+    planned = []
+    for folder in candidates:
+        empty = folder_holds_no_files(folder, run)
+        if empty is None:
+            errors += 1
+            run.report(FAILED, "  ! left %s: cannot read all of it, so it "
+                               "cannot be called empty" % folder)
+            continue
+        if not empty:
+            continue
+        area = parking.parking_area_for(folder)
+        if area is None:
+            errors += 1
+            run.report("warn", "  ! left %s: no month folder or group above it "
+                               "to park it in (H2)" % folder)
+            run.non_compliant.append(
+                (folder, "empty, but nothing above it may hold a parking area (H2)"))
+            continue
+        # A name already parked gains "_2", "_3" ... which is exactly the
+        # discriminator N10a allows on an EMPTY name: two days emptied out of
+        # one month keep both records rather than one overwriting the other.
+        target = parking.free_versioned_name(area, folder.name, reserved)
+        if not run.apply:
+            planned.append((folder, target))
+            run.report("dim", "  %s -> %s" % (folder, target))
+            continue
+        try:
+            move(folder, target)
+        except Exception as error:
+            errors += 1
+            run.report(FAILED, "  ! could not park empty %s: %s" % (folder, error))
+            continue
+        parked += 1
+        run.journal.write("empty_folder_parked", folder=str(folder),
+                          target=str(target))
+        run.report("ok", "  * parked empty %s in %s"
+                   % (folder.name, parking.EMPTY_SUBFOLDERS_FOLDER))
+
+    if planned:
+        run.planned_parkings.extend(planned)
+        run.report("bold", "\n%d empty folder(s) to park in %s. Nothing was "
+                           "changed. Re-run with --apply."
+                   % (len(planned), parking.EMPTY_SUBFOLDERS_FOLDER))
+    elif parked or errors:
+        run.report("bold", "\nParked %d empty folder(s)%s."
+                   % (parked, " with %d error(s)" % errors if errors else ""))
+    if parked or errors:
+        run.journal.write("park_empty", parked=parked, errors=errors)
+    if errors:
+        return 1
+    return 1 if planned else 0
 
 
 def tree_of(folder, run):
@@ -1474,7 +1659,8 @@ def group_violations(folder, config):
     reasons = []
     if files:
         images, videos = grouping.count_media(
-            files, *grouping.extension_sets(config))
+            files, *grouping.extension_sets(config),
+            grouping.preview_extensions(config))
         if images or videos:
             reasons.append("holds %d image(s) and %d video(s) of its own -- C3; "
                            "moving them down is C4, open question 5"
@@ -1607,14 +1793,14 @@ def step_standard_fix(run):
 # and the second would print the first's report word for word. Those are
 # skipped, with a line saying why, unless asked for on their own.
 STEPS = (
-    (1, "Canonicalise names",
+    (1, "Canonicalise names and park the empty",
      lambda run: step_canonicalise(run, "Canonicalising"), None),
     (2, "Reunite companions and sidecars",
      lambda run: step_reconcile(run, "Reconciling"), None),
     (3, "Group the %s folders" % TO_SPLIT_MARKER, step_group, None),
     (4, "Reunite companions and sidecars again",
      lambda run: step_reconcile(run, "Reconciling (again)"), 2),
-    (5, "Canonicalise names again",
+    (5, "Canonicalise names and park again",
      lambda run: step_canonicalise(run, "Canonicalising (again)"), 1),
     (6, "Mark and time the groups", step_group_markers, None),
     (7, "Check compliance with the archive standard", step_standard_check, None),
@@ -1667,6 +1853,10 @@ class Run:
         self.planned = []
         self.planned_removals = []
         self.planned_generations = []
+        # And where a dry run's canonicalise step collects the empty folders it
+        # would park -- kept apart from ``planned`` so the reconcile step's
+        # "N file(s) to move" still counts only files (H4).
+        self.planned_parkings = []
         # Folders that fit none of the shapes the standard allows, gathered as
         # the run goes and printed together at the end (in red) rather than
         # scrolling past in the middle of a rename report.
