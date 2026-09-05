@@ -1,0 +1,253 @@
+:root {
+  color-scheme: dark;
+  --bg: #12130f;
+  --panel: #1b1d18;
+  --ink: #f3f1e8;
+  --muted: #aaa690;
+  --line: #39392e;
+  --green: #63d471;
+  --amber: #f4b942;
+  --red: #ff5c5c;
+  --cyan: #54d6d6;
+  --plum: #b989ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--line);
+  background: #171812;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 24px;
+  font-weight: 650;
+}
+
+h2 {
+  font-size: 15px;
+  margin: 18px 0 10px;
+}
+
+#statusLine {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
+}
+
+.controls button {
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  background: #24261f;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.controls button:hover {
+  border-color: var(--cyan);
+}
+
+.critical {
+  padding: 12px 22px;
+  background: #431d1d;
+  border-bottom: 1px solid var(--red);
+  color: #ffe5e5;
+  font-weight: 650;
+}
+
+.hidden {
+  display: none;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  min-height: 0;
+}
+
+.graph-band {
+  overflow: auto;
+  padding: 24px;
+}
+
+#graph {
+  width: 100%;
+  min-width: 760px;
+  height: 520px;
+}
+
+.node rect {
+  fill: #22251e;
+  stroke: var(--line);
+  stroke-width: 1.4;
+}
+
+.node text {
+  fill: var(--ink);
+  font-size: 13px;
+}
+
+.node.pending rect {
+  stroke: #4a4a3a;
+}
+
+.node.active rect {
+  stroke: var(--cyan);
+  stroke-width: 3;
+}
+
+.node.paused rect {
+  stroke: var(--amber);
+  stroke-width: 3;
+}
+
+.node.complete rect {
+  stroke: var(--green);
+  stroke-width: 3;
+}
+
+.node.failed rect {
+  stroke: var(--red);
+  stroke-width: 3;
+}
+
+.edge {
+  stroke: #575744;
+  stroke-width: 2;
+}
+
+.status-panel {
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  padding: 22px;
+  overflow: auto;
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 38px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.metric-row strong {
+  color: var(--ink);
+  font-size: 18px;
+}
+
+#logs {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+dialog {
+  width: min(560px, calc(100vw - 32px));
+  border: 1px solid var(--line);
+  background: #20221b;
+  color: var(--ink);
+  padding: 0;
+}
+
+dialog::backdrop {
+  background: rgb(0 0 0 / 0.58);
+}
+
+#promptForm {
+  padding: 20px;
+}
+
+#promptBody {
+  margin-top: 14px;
+  color: var(--muted);
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.field input,
+.field select {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  background: #151711;
+  color: var(--ink);
+  padding: 7px 9px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 18px 0 0;
+  padding: 0;
+}
+
+.dialog-actions button {
+  min-width: 88px;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  background: #292b23;
+  color: var(--ink);
+}
+
+@media (max-width: 860px) {
+  .topbar,
+  .workspace {
+    display: block;
+  }
+
+  .controls {
+    margin-top: 14px;
+  }
+
+  .status-panel {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}

@@ -1,0 +1,1 @@
+exiftool -csv -ext jpg "h:\\__ Photos\\____Photos to be sorted\\2. JPG (przed usunieciem .0mm)\\2015-09-16_(Wed) - 1. ######\\" > _output.csv

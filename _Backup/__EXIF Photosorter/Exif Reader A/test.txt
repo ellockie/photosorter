@@ -1,0 +1,290 @@
+---- ExifTool ----
+ExifTool Version Number         : 10.02
+---- System ----
+File Name                       : test.jpg
+Directory                       : F:/__ File Sharing/Dropbox/[ Scripts ]/[_  Python  _]/Exif Reader A
+File Size                       : 3.6 MB
+File Modification Date/Time     : 2014:04:13 06:50:30+01:00
+File Access Date/Time           : 2014:12:12 12:05:56+00:00
+File Creation Date/Time         : 2014:05:05 04:21:21+01:00
+File Permissions                : rw-rw-rw-
+---- File ----
+File Type                       : JPEG
+File Type Extension             : jpg
+MIME Type                       : image/jpeg
+Exif Byte Order                 : Little-endian (Intel, II)
+Current IPTC Digest             : a75214ce44c0da8be94c353a6acd959d
+Image Width                     : 4141
+Image Height                    : 2761
+Encoding Process                : Baseline DCT, Huffman coding
+Bits Per Sample                 : 8
+Color Components                : 3
+Y Cb Cr Sub Sampling            : YCbCr4:4:4 (1 1)
+---- IFD0 ----
+Make                            : Canon
+Camera Model Name               : Canon EOS 5D
+X Resolution                    : 240
+Y Resolution                    : 240
+Resolution Unit                 : inches
+Software                        : Adobe Photoshop Lightroom 5.3 (Windows)
+Modify Date                     : 2014:04:13 06:50:29
+---- ExifIFD ----
+Exposure Time                   : 1/20
+F Number                        : 4.0
+Exposure Program                : Aperture-priority AE
+ISO                             : 1000
+Exif Version                    : 0230
+Date/Time Original              : 2014:04:12 18:22:10
+Create Date                     : 2014:04:12 18:22:10
+Shutter Speed Value             : 1/20
+Aperture Value                  : 4.0
+Exposure Compensation           : -2
+Max Aperture Value              : 4.0
+Metering Mode                   : Unknown
+Flash                           : Off, Did not fire
+Focal Length                    : 60.0 mm
+Focal Plane X Resolution        : 3086.925795
+Focal Plane Y Resolution        : 3091.295117
+Focal Plane Resolution Unit     : inches
+Custom Rendered                 : Normal
+Exposure Mode                   : Auto
+White Balance                   : Auto
+Scene Capture Type              : Standard
+Serial Number                   : 3221300909
+Lens Info                       : 24-105mm f/?
+Lens Model                      : EF24-105mm f/4L IS USM
+---- IFD1 ----
+Compression                     : JPEG (old-style)
+X Resolution                    : 72
+Y Resolution                    : 72
+Resolution Unit                 : inches
+Thumbnail Offset                : 786
+Thumbnail Length                : 11014
+---- Photoshop ----
+X Resolution                    : 240
+Displayed Units X               : inches
+Y Resolution                    : 240
+Displayed Units Y               : inches
+Photoshop Thumbnail             : (Binary data 11014 bytes, use -b option to extract)
+IPTC Digest                     : a75214ce44c0da8be94c353a6acd959d
+---- IPTC ----
+Coded Character Set             : UTF8
+Application Record Version      : 4
+Date Created                    : 2014:04:12
+Time Created                    : 18:22:10
+Digital Creation Date           : 2014:04:12
+Digital Creation Time           : 18:22:10
+---- ICC-header ----
+Profile CMM Type                : ADBE
+Profile Version                 : 2.1.0
+Profile Class                   : Display Device Profile
+Color Space Data                : RGB
+Profile Connection Space        : XYZ
+Profile Date Time               : 1999:06:03 00:00:00
+Profile File Signature          : acsp
+Primary Platform                : Apple Computer Inc.
+CMM Flags                       : Not Embedded, Independent
+Device Manufacturer             : none
+Device Model                    : 
+Device Attributes               : Reflective, Glossy, Positive, Color
+Rendering Intent                : Perceptual
+Connection Space Illuminant     : 0.9642 1 0.82491
+Profile Creator                 : ADBE
+Profile ID                      : 0
+---- ICC_Profile ----
+Profile Copyright               : Copyright 1999 Adobe Systems Incorporated
+Profile Description             : Adobe RGB (1998)
+Media White Point               : 0.95045 1 1.08905
+Media Black Point               : 0 0 0
+Red Tone Reproduction Curve     : (Binary data 14 bytes, use -b option to extract)
+Green Tone Reproduction Curve   : (Binary data 14 bytes, use -b option to extract)
+Blue Tone Reproduction Curve    : (Binary data 14 bytes, use -b option to extract)
+Red Matrix Column               : 0.60974 0.31111 0.01947
+Green Matrix Column             : 0.20528 0.62567 0.06087
+Blue Matrix Column              : 0.14919 0.06322 0.74457
+---- XMP-x ----
+XMP Toolkit                     : Adobe XMP Core 5.5-c002 1.148022, 2012/07/15-18:06:45
+---- XMP-aux ----
+Serial Number                   : 3221300909
+Lens Info                       : 24-105mm f/?
+Lens                            : EF24-105mm f/4L IS USM
+Lens ID                         : 237
+Image Number                    : 3
+Flash Compensation              : 0
+Firmware                        : 1.1.1
+---- XMP-xmp ----
+Modify Date                     : 2014:04:13 06:50:29+01:00
+Create Date                     : 2014:04:12 18:22:10
+Metadata Date                   : 2014:04:13 06:50:29+01:00
+Creator Tool                    : Adobe Photoshop Lightroom 5.3 (Windows)
+---- XMP-photoshop ----
+Date Created                    : 2014:04:12 18:22:10
+---- XMP-xmpMM ----
+Document ID                     : xmp.did:251f90b7-e084-604d-9b8f-9350b97c9b05
+Original Document ID            : 3974BA4A952FE34032D3947994F3702F
+Instance ID                     : xmp.iid:251f90b7-e084-604d-9b8f-9350b97c9b05
+History Action                  : derived, saved
+History Parameters              : converted from image/x-canon-cr2 to image/jpeg, saved to new location
+History Instance ID             : xmp.iid:251f90b7-e084-604d-9b8f-9350b97c9b05
+History When                    : 2014:04:13 06:50:29+01:00
+History Software Agent          : Adobe Photoshop Lightroom 5.3 (Windows)
+History Changed                 : /
+Derived From Document ID        : 3974BA4A952FE34032D3947994F3702F
+Derived From Original Document ID: 3974BA4A952FE34032D3947994F3702F
+---- XMP-dc ----
+Format                          : image/jpeg
+---- XMP-crs ----
+Version                         : 8.3
+Process Version                 : 6.7
+White Balance                   : As Shot
+Auto White Version              : 134348800
+Color Temperature               : 3550
+Tint                            : +4
+Saturation                      : 0
+Sharpness                       : 48
+Luminance Smoothing             : 20
+Color Noise Reduction           : 25
+Vignette Amount                 : 0
+Shadow Tint                     : 0
+Red Hue                         : 0
+Red Saturation                  : 0
+Green Hue                       : 0
+Green Saturation                : 0
+Blue Hue                        : 0
+Blue Saturation                 : 0
+Vibrance                        : 0
+Hue Adjustment Red              : 0
+Hue Adjustment Orange           : 0
+Hue Adjustment Yellow           : 0
+Hue Adjustment Green            : 0
+Hue Adjustment Aqua             : 0
+Hue Adjustment Blue             : 0
+Hue Adjustment Purple           : 0
+Hue Adjustment Magenta          : 0
+Saturation Adjustment Red       : 0
+Saturation Adjustment Orange    : 0
+Saturation Adjustment Yellow    : 0
+Saturation Adjustment Green     : 0
+Saturation Adjustment Aqua      : 0
+Saturation Adjustment Blue      : 0
+Saturation Adjustment Purple    : 0
+Saturation Adjustment Magenta   : 0
+Luminance Adjustment Red        : 0
+Luminance Adjustment Orange     : 0
+Luminance Adjustment Yellow     : 0
+Luminance Adjustment Green      : 0
+Luminance Adjustment Aqua       : 0
+Luminance Adjustment Blue       : 0
+Luminance Adjustment Purple     : 0
+Luminance Adjustment Magenta    : 0
+Split Toning Shadow Hue         : 0
+Split Toning Shadow Saturation  : 0
+Split Toning Highlight Hue      : 0
+Split Toning Highlight Saturation: 0
+Split Toning Balance            : 0
+Parametric Shadows              : 0
+Parametric Darks                : 0
+Parametric Lights               : 0
+Parametric Highlights           : 0
+Parametric Shadow Split         : 25
+Parametric Midtone Split        : 50
+Parametric Highlight Split      : 75
+Sharpen Radius                  : +1.0
+Sharpen Detail                  : 33
+Sharpen Edge Masking            : 0
+Post Crop Vignette Amount       : 0
+Grain Amount                    : 0
+Luminance Noise Reduction Detail: 50
+Color Noise Reduction Detail    : 50
+Luminance Noise Reduction Contrast: 0
+Color Noise Reduction Smoothness: 50
+Lens Profile Enable             : 0
+Lens Manual Distortion Amount   : 0
+Perspective Vertical            : 0
+Perspective Horizontal          : 0
+Perspective Rotate              : 0.0
+Perspective Scale               : 100
+Perspective Aspect              : 0
+Perspective Upright             : 0
+Auto Lateral CA                 : 0
+Exposure 2012                   : 0.00
+Contrast 2012                   : 0
+Highlights 2012                 : 0
+Shadows 2012                    : 0
+Whites 2012                     : 0
+Blacks 2012                     : 0
+Clarity 2012                    : 0
+Defringe Purple Amount          : 0
+Defringe Purple Hue Lo          : 30
+Defringe Purple Hue Hi          : 70
+Defringe Green Amount           : 0
+Defringe Green Hue Lo           : 40
+Defringe Green Hue Hi           : 60
+Convert To Grayscale            : False
+Tone Curve Name 2012            : Linear
+Camera Profile                  : Adobe Standard
+Lens Profile Setup              : LensDefaults
+Has Settings                    : True
+Crop Top                        : 0.009559
+Crop Left                       : 0.044612
+Crop Bottom                     : 0.948179
+Crop Right                      : 0.997039
+Crop Angle                      : -0.385088
+Crop Constrain To Warp          : 0
+Has Crop                        : True
+Already Applied                 : True
+Tone Curve PV2012               : 0, 0, 255, 255
+Tone Curve PV2012 Red           : 0, 0, 255, 255
+Tone Curve PV2012 Green         : 0, 0, 255, 255
+Tone Curve PV2012 Blue          : 0, 0, 255, 255
+Paint Correction What           : Correction
+Paint Correction Amount         : 1.000000
+Paint Correction Active         : true
+Paint Correction Saturation     : 0.000000
+Paint Correction Sharpness      : 0.000000
+Paint Correction Brightness     : 0.000000
+Paint Correction Hue            : 0.000000
+Paint Correction Saturation     : 0.000000
+Paint Correction Exposure 2012  : 0.225750
+Paint Correction Contrast 2012  : 0.000000
+Paint Correction Highlights 2012: 0.000000
+Paint Correction Shadows 2012   : 0.000000
+Paint Correction Clarity 2012   : 0.000000
+Paint Correction Luminance Noise: 0.000000
+Paint Correction Moire          : 0.000000
+Paint Correction Defringe       : 0.000000
+Paint Correction Temperature    : 0.000000
+Paint Correction Tint           : 0.000000
+Paint Correction Mask What      : Mask/Paint
+Paint Correction Mask Value     : 1.000000
+Paint Correction Mask Radius    : 0.074425
+Paint Correction Mask Flow      : 1.000000
+Paint Correction Mask Center Weight: 0.000000
+Paint Correction Mask Dabs      : d 0.531168 0.142292
+Paint Correction Mask Dabs      : d 0.521840 0.119895
+Paint Correction Mask Dabs      : d 0.520096 0.088775
+Paint Correction Mask Dabs      : d 0.522821 0.093460
+Paint Correction Mask Dabs      : d 0.528534 0.122030
+Paint Correction Mask Dabs      : d 0.531168 0.113361
+Paint Correction Mask Dabs      : d 0.528570 0.092118
+Paint Correction Mask Dabs      : d 0.522388 0.123186
+---- Adobe ----
+DCT Encode Version              : 100
+APP14 Flags 0                   : [14]
+APP14 Flags 1                   : (none)
+Color Transform                 : YCbCr
+---- Composite ----
+Aperture                        : 4.0
+Date/Time Created               : 2014:04:12 18:22:10
+Digital Creation Date/Time      : 2014:04:12 18:22:10
+Image Size                      : 4141x2761
+Megapixels                      : 11.4
+Scale Factor To 35 mm Equivalent: 1.0
+Shutter Speed                   : 1/20
+Thumbnail Image                 : (Binary data 11014 bytes, use -b option to extract)
+Circle Of Confusion             : 0.030 mm
+Field Of View                   : 33.3 deg
+Focal Length                    : 60.0 mm (35 mm equivalent: 60.1 mm)
+Hyperfocal Distance             : 30.02 m
+Lens ID                         : Canon EF 24-105mm f/4L IS
+Light Value                     : 5.0

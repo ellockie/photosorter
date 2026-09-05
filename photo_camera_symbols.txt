@@ -1,0 +1,2 @@
+    ("Galaxy S23 Ultra", "SG23U"),
+    ("Galaxy S23 Ultra", "SG23U"),

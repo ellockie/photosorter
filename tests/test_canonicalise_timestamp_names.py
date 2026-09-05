@@ -1,0 +1,1061 @@
+"""The bulk renamer: every historical name shape converges on the canonical one.
+
+Every test here passes an explicit ``--target`` under ``tmp_path``. The tool's
+default target is the real archive (``c:\\__PHOTOS\\2026``) and it renames with
+bare ``os.rename``, so it is not covered by the ``src.core`` sandbox guard in
+conftest: a test that omitted the target would rename the live archive.
+"""
+
+import importlib.util
+import json
+from pathlib import Path
+
+import pytest
+
+TOOL_PATH = Path(__file__).resolve().parent.parent / "tools" / "canonicalise_timestamp_names.py"
+
+
+def _load_tool():
+    spec = importlib.util.spec_from_file_location("canonicalise_timestamp_names", TOOL_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+tool = _load_tool()
+
+# The grammar the tool loaded, so a test asserts against the one definition
+# rather than a second copy of the letters.
+grouping = tool.grouping
+
+
+# --------------------------------------------------------------------------
+# Name transformation
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("original, expected", [
+    # Already canonical: untouched.
+    ("2026-08-25_(Tue)__10.23.12.JPG", "2026-08-25_(Tue)__10.23.12.JPG"),
+    # Previous Photosorter form: single underscore before the time.
+    ("2026-08-25_(Tue)_10.23.12.JPG", "2026-08-25_(Tue)__10.23.12.JPG"),
+    # Legacy grouper form: no weekday at all.
+    ("2026-08-25__10.23.12.JPG", "2026-08-25_(Tue)__10.23.12.JPG"),
+    # Space separators.
+    ("2026-08-25 (Tue) 10.23.12.JPG", "2026-08-25_(Tue)__10.23.12.JPG"),
+])
+def test_every_historical_shape_becomes_the_canonical_one(original, expected):
+    assert tool.canonical_name(original) == expected
+
+
+def test_a_wrong_weekday_is_corrected_from_the_date():
+    # 2026-08-25 is a Tuesday; a stale name claiming Friday is repaired.
+    assert tool.canonical_name("2026-08-25_(Fri)__10.23.12.JPG") == \
+        "2026-08-25_(Tue)__10.23.12.JPG"
+
+
+def test_weekday_case_is_normalised():
+    assert tool.canonical_name("2026-08-25_(tue)__10.23.12.JPG") == \
+        "2026-08-25_(Tue)__10.23.12.JPG"
+
+
+def test_the_rest_of_the_name_survives_byte_for_byte():
+    original = "2015-11-23_(Mon)_09.26.27__RAW__f4.0__T1_20..50mm1250__DUPL_(3).CRW"
+    assert tool.canonical_name(original) == \
+        "2015-11-23_(Mon)__09.26.27__RAW__f4.0__T1_20..50mm1250__DUPL_(3).CRW"
+
+
+def test_both_timestamps_in_a_grouper_name_are_rewritten():
+    original = "2026-07-19__21.29.04__SCR__2026-07-19_(Sun)_15.37.10__f1.7.png"
+    assert tool.canonical_name(original) == \
+        "2026-07-19_(Sun)__21.29.04__SCR__2026-07-19_(Sun)__15.37.10__f1.7.png"
+
+
+def test_a_day_folder_without_a_weekday_gains_one():
+    assert tool.canonical_name("2014-05-08 - 1. ######") == \
+        "2014-05-08_(Thu) - 1. ######"
+
+
+def test_a_day_folder_that_is_already_canonical_is_untouched():
+    assert tool.canonical_name("2014-05-08_(Thu) - 1. ######") == \
+        "2014-05-08_(Thu) - 1. ######"
+
+
+def test_a_name_carrying_no_timestamp_is_untouched():
+    for name in ("##   RAWs   ##", "holiday pictures", "notes.txt", "__DONT_MOVE"):
+        assert tool.canonical_name(name) == name
+
+
+def test_an_impossible_date_is_left_alone_rather_than_invented():
+    # The shape matches the grammar; the calendar rejects it. Renaming it would
+    # have to guess a real date, so the name stays exactly as found.
+    for name in ("2026-02-31__10.00.00.JPG", "2026-08-25__25.99.99.JPG"):
+        assert tool.canonical_name(name) == name
+        assert tool.carries_impossible_stamp(name)
+
+
+# --------------------------------------------------------------------------
+# The grouping placeholder
+# --------------------------------------------------------------------------
+
+CONFIG = {
+    "legacy": {"date_folder_suffix": " - 1. ######"},
+    "extensions": {
+        "lossy_images": [".jpg", ".jpeg", ".thm"],
+        "other_images": [".png", ".heic"],
+        "raw_images": [".arw", ".cr2", ".crw"],
+        "videos": [".mp4", ".mov"],
+        "sidecars": ["._exif"],
+    },
+}
+
+MEDIA_EXTENSIONS = {
+    extension
+    for group in ("lossy_images", "other_images", "raw_images", "videos")
+    for extension in CONFIG["extensions"][group]
+}
+
+
+def _placeholder_folder(root, name, files, sidecars=True):
+    """A day folder holding ``files``.
+
+    By default every media file also gets its "._exif" in "__EXIF", which is
+    how the pipeline leaves a real day. That matters now that the folder name
+    reports what the media counts do not account for: a day set up this way is
+    in order, and must come out carrying no audit markers at all.
+    """
+    folder = root / name
+    folder.mkdir(parents=True)
+    for filename in files:
+        (folder / filename).write_text("x", encoding="utf-8")
+    if sidecars:
+        _sidecars_for(folder, files)
+    return folder
+
+
+def _sidecars_for(folder, filenames):
+    media = [name for name in filenames
+             if Path(name).suffix.lower() in MEDIA_EXTENSIONS]
+    if not media:
+        return
+    exif = folder / "__EXIF"
+    exif.mkdir(exist_ok=True)
+    for name in media:
+        (exif / (name + "._exif")).write_text("x", encoding="utf-8")
+
+
+def _stamped(day, time, extension=".jpg"):
+    return f"{day}__{time}__f2.8__SG23U{extension}"
+
+
+def test_a_placeholder_folder_takes_the_to_split_convention(tmp_path):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######", [
+        _stamped("2026-07-15_(Wed)", "09.12.53"),
+        _stamped("2026-07-15_(Wed)", "11.04.02"),
+        _stamped("2026-07-15_(Wed)", "14.22.10"),
+    ])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-15_(Wed)__09.12.53 - __TO_SPLIT__(i=3)").is_dir()
+
+
+def test_the_name_takes_the_earliest_time_not_the_first_listed(tmp_path):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-03_(Fri) - 1. ######", [
+        _stamped("2026-07-03_(Fri)", "23.59.59"),
+        _stamped("2026-07-03_(Fri)", "06.01.02"),
+        _stamped("2026-07-03_(Fri)", "12.00.00"),
+    ])
+
+    tool.main([str(year), "--apply", "--no-colour"])
+
+    assert (year / "2026-07-03_(Fri)__06.01.02 - __TO_SPLIT__(i=3)").is_dir()
+
+
+def test_images_and_videos_are_counted_separately(tmp_path):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######", [
+        _stamped("2026-07-15_(Wed)", "09.12.53"),
+        _stamped("2026-07-15_(Wed)", "10.00.00", ".crw"),
+        _stamped("2026-07-15_(Wed)", "11.00.00", ".mp4"),
+    ])
+
+    tool.main([str(year), "--apply", "--no-colour"])
+
+    assert (year / "2026-07-15_(Wed)__09.12.53 - __TO_SPLIT__(i=2_v=1)").is_dir()
+
+
+def test_top_level_media_wins_over_nested(tmp_path):
+    # The count states what the grouper GUI will show, and it shows the top
+    # level only -- sidecars and EXIF subfolders must not inflate it.
+    year = tmp_path / "2026"
+    folder = _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######", [
+        _stamped("2026-07-15_(Wed)", "09.12.53"),
+        "notes.txt",
+    ])
+    nested = folder / "##   EXIFs   ##"
+    nested.mkdir()
+    (nested / _stamped("2026-07-15_(Wed)", "05.00.00")).write_text("x", encoding="utf-8")
+
+    tool.main([str(year), "--apply", "--no-colour"])
+
+    # i=1: the nested image is not counted, because the grouper will not show
+    # it. s=1/e=1: it is still reported, for exactly the same reason. And the
+    # time is 05.00.00, not 09.12.53 -- counts state the review job, which is
+    # the top level, while the time states when the day began, wherever the
+    # earliest file happens to sit.
+    assert (year / "2026-07-15_(Wed)__05.00.00 - __TO_SPLIT__(i=1_e=1_s=1)").is_dir()
+
+
+def test_a_video_only_day_is_counted_from_its_subfolders(tmp_path):
+    # Every file routed into __VIDEOS/, sidecars into __EXIF/, nothing at the
+    # top level. These are real days and must not be treated as empty.
+    year = tmp_path / "2026"
+    folder = _placeholder_folder(year, "2026-06-08_(Mon) - 1. ######", [])
+    videos = folder / "__VIDEOS"
+    videos.mkdir()
+    exif = folder / "__EXIF"
+    exif.mkdir()
+    for time in ("21.21.43", "22.30.00"):
+        (videos / _stamped("2026-06-08_(Mon)", time, ".mp4")).write_text("x", encoding="utf-8")
+        (exif / (_stamped("2026-06-08_(Mon)", time, ".mp4") + "._exif")).write_text(
+            "x", encoding="utf-8")
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    # s=2: the videos counted by v=2 are the very files the GUI cannot show.
+    assert (year / "2026-06-08_(Mon)__21.21.43 - __TO_SPLIT__(v=2_s=2)").is_dir()
+
+
+def test_a_completely_empty_day_folder_says_so(tmp_path):
+    # No files anywhere, so no counts and no time to take.
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-06-09_(Tue) - 1. ######", [])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    # Nothing to date it by, so midnight stands in: a dated prefix without a
+    # time is the one shape the convention would rather not see.
+    assert (year / "2026-06-09_(Tue)__00.00.00 - __TO_SPLIT__(EMPTY)").is_dir()
+
+
+def test_hollow_subfolders_are_counted_in_the_empty_bracket(tmp_path):
+    # The day's files have gone and left the structure standing. f counts
+    # every subfolder in the subtree, not just the direct ones.
+    year = tmp_path / "2026"
+    folder = _placeholder_folder(year, "2026-06-09_(Tue) - __TO_SPLIT__(i=8)", [])
+    (folder / "__EXIF").mkdir()
+    (folder / "__VIDEOS").mkdir()
+    (folder / "__VIDEOS" / "__EXTRACTED").mkdir()
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-06-09_(Tue)__00.00.00 - __TO_SPLIT__(f=3_EMPTY)").is_dir()
+
+
+def test_an_existing_marked_folder_is_recounted_from_what_is_on_disk(tmp_path):
+    # The stale count is the reason to run this tool: 111 images were named,
+    # 2 are there. The name has to say what the folder holds now.
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-18_(Sat) - __TO_SPLIT__(i=111)", [
+        _stamped("2026-07-18_(Sat)", "11.04.02"),
+        _stamped("2026-07-18_(Sat)", "08.15.00"),
+    ])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-18_(Sat)__08.15.00 - __TO_SPLIT__(i=2)").is_dir()
+
+
+def test_a_marked_folder_whose_name_is_already_right_is_untouched(tmp_path):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-18_(Sat)__08.15.00 - __TO_SPLIT__(i=2)", [
+        _stamped("2026-07-18_(Sat)", "08.15.00"),
+        _stamped("2026-07-18_(Sat)", "09.00.00"),
+    ])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-18_(Sat)__08.15.00 - __TO_SPLIT__(i=2)").is_dir()
+
+
+def test_text_written_after_the_marker_survives_the_recount(tmp_path):
+    # Rebuilding the counts rewrites the whole tail. A tail somebody has
+    # written in is therefore left alone, and the folder only gains its time.
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-18_(Sat) - __TO_SPLIT__(i=111) ask Ana", [
+        _stamped("2026-07-18_(Sat)", "08.15.00"),
+    ])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-18_(Sat)__08.15.00 - __TO_SPLIT__(i=111) ask Ana").is_dir()
+
+
+def test_two_marked_folders_on_one_day_stop_colliding(tmp_path):
+    # The whole point of the time: same day, same marker, different events.
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-24_(Fri) - __TO_SPLIT__(i=6)",
+                        [_stamped("2026-07-24_(Fri)", "09.12.53")])
+    _placeholder_folder(year, "2026-07-24_(Fri) - __TO_SPLIT__(i=79)",
+                        [_stamped("2026-07-24_(Fri)", "18.34.56")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-24_(Fri)__09.12.53 - __TO_SPLIT__(i=1)").is_dir()
+    assert (year / "2026-07-24_(Fri)__18.34.56 - __TO_SPLIT__(i=1)").is_dir()
+
+
+def test_the_folder_date_survives_a_file_past_the_day_boundary(tmp_path):
+    # Folder-sorting puts a 00:49 shot in the previous day's folder. Taking the
+    # date from the file would undo that and move the day to another month.
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-05-31_(Sun) - 1. ######",
+                        [_stamped("2026-06-01_(Mon)", "00.49.28")])
+
+    tool.main([str(year), "--apply", "--no-colour"])
+
+    assert (year / "2026-05-31_(Sun)__00.49.28 - __TO_SPLIT__(i=1)").is_dir()
+
+
+def test_a_labelled_folder_that_is_already_canonical_is_untouched(tmp_path):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-24_(Fri)__18.34.56 - Lens tests",
+                        [_stamped("2026-07-24_(Fri)", "18.34.56")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-24_(Fri)__18.34.56 - Lens tests").is_dir()
+
+
+def test_a_labelled_folder_gains_the_time_and_keeps_its_label(tmp_path):
+    # The dated half is the tool's business wherever it appears; the label is
+    # somebody's writing and survives byte for byte.
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-24_(Fri) - Lens tests - flowers",
+                        [_stamped("2026-07-24_(Fri)", "18.34.56"),
+                         _stamped("2026-07-24_(Fri)", "09.12.53")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    # Split on the first separator only, so a label carrying one survives whole.
+    assert (year / "2026-07-24_(Fri)__09.12.53 - Lens tests - flowers").is_dir()
+
+
+def test_a_labelled_folder_sheds_the_legacy_number(tmp_path):
+    # Folder-sorting wrote "- 1. ######" and a human typed over the "######",
+    # leaving the "1. " standing. It never counted anything.
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-24_(Fri) - 1. Natsumi in Burnham Beeches",
+                        [_stamped("2026-07-24_(Fri)", "17.28.25")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-24_(Fri)__17.28.25 - Natsumi in Burnham Beeches").is_dir()
+
+
+def test_a_labelled_folder_never_gets_counts(tmp_path):
+    # A bracket says a folder is still waiting to be reviewed. A named one is
+    # not, however much sits in its subfolders.
+    year = tmp_path / "2026"
+    folder = _placeholder_folder(year, "2026-07-24_(Fri) - Lens tests",
+                                 [_stamped("2026-07-24_(Fri)", "18.34.56")])
+    videos = folder / "__VIDEOS"
+    videos.mkdir()
+    (videos / _stamped("2026-07-24_(Fri)", "19.00.00", ".mp4")).write_text(
+        "x", encoding="utf-8")
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-24_(Fri)__18.34.56 - Lens tests").is_dir()
+
+
+def test_a_month_folder_is_not_mistaken_for_a_label(tmp_path):
+    # "10. October" has a number and no date, and must not be read as a name.
+    year = tmp_path / "2026"
+    month = year / "10. October"
+    _placeholder_folder(month, "2026-10-14_(Wed) - Kew Gardens",
+                        [_stamped("2026-10-14_(Wed)", "11.00.00")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert month.is_dir()
+    assert (month / "2026-10-14_(Wed)__11.00.00 - Kew Gardens").is_dir()
+
+
+def test_the_timestamp_and_the_placeholder_are_fixed_in_one_pass(tmp_path):
+    # An old day folder needs both halves: the weekday added and the
+    # placeholder converted.
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2014-05-08 - 1. ######", [
+        "2014-05-08_(Thu)_07.30.00__f2.8.jpg",       # also a legacy stamp
+        _stamped("2014-05-08_(Thu)", "09.00.00", ".mp4"),
+    ])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2014-05-08_(Thu)__07.30.00 - __TO_SPLIT__(i=1_v=1)").is_dir()
+
+
+def test_skip_placeholders_rewrites_timestamps_only(tmp_path):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2014-05-08 - 1. ######",
+                        [_stamped("2014-05-08_(Thu)", "09.00.00")])
+
+    tool.main([str(year), "--apply", "--skip-placeholders", "--no-colour"])
+
+    assert (year / "2014-05-08_(Thu) - 1. ######").is_dir()
+
+
+def test_an_emptied_folder_keeps_a_real_time_over_the_placeholder(tmp_path):
+    # Midnight stands in only where there is nothing to stand in for. A folder
+    # emptied after it was named still knows when its day began.
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-08-17_(Mon)__11.46.15 - __TO_SPLIT__(i=65)", [])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-08-17_(Mon)__11.46.15 - __TO_SPLIT__(EMPTY)").is_dir()
+
+
+def test_emptied_folders_sharing_a_date_are_numbered_apart(tmp_path):
+    # "__EMPTY_SUBFOLDERS" parks day folders whose files have all moved on.
+    # Several can share a date, and dropping their counts for (EMPTY) drops
+    # the only thing telling them apart -- so the discriminator puts it back.
+    year = tmp_path / "2026"
+    archive = year / "__EMPTY_SUBFOLDERS"
+    for count in ("12", "184", "198"):
+        _placeholder_folder(archive, "2026-08-19_(Wed) - __TO_SPLIT__(i=%s)" % count, [])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (archive / "2026-08-19_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)").is_dir()
+    assert (archive / "2026-08-19_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)_2").is_dir()
+    assert (archive / "2026-08-19_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)_3").is_dir()
+
+
+def test_the_numbering_settles_and_does_not_walk_on_a_second_run(tmp_path):
+    # Every folder recomputes to plain "(EMPTY)", so each has to recognise the
+    # number it already holds as its own rather than queue up behind the first.
+    year = tmp_path / "2026"
+    archive = year / "__EMPTY_SUBFOLDERS"
+    for count in ("12", "184", "198"):
+        _placeholder_folder(archive, "2026-08-19_(Wed) - __TO_SPLIT__(i=%s)" % count, [])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+    settled = sorted(path.name for path in archive.iterdir())
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+    assert sorted(path.name for path in archive.iterdir()) == settled
+
+
+def test_a_dry_run_predicts_the_numbering_it_would_write(tmp_path, capsys):
+    # Nothing is renamed, so the filesystem cannot be what tells the second
+    # folder that "(EMPTY)" is taken. The run has to remember what it promised.
+    year = tmp_path / "2026"
+    archive = year / "__EMPTY_SUBFOLDERS"
+    for count in ("12", "184"):
+        _placeholder_folder(archive, "2026-08-19_(Wed) - __TO_SPLIT__(i=%s)" % count, [])
+
+    tool.main([str(year), "--no-colour"])
+
+    out = capsys.readouterr().out
+    assert "2026-08-19_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)\n" in out
+    assert "2026-08-19_(Wed)__00.00.00 - __TO_SPLIT__(EMPTY)_2\n" in out
+
+
+def test_a_folder_the_pipeline_left_in_order_carries_no_audit_markers(tmp_path):
+    # One sidecar per image, nothing below the top level: nothing to report,
+    # so the name stays as short as it has always been.
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######", [
+        _stamped("2026-07-15_(Wed)", "09.12.53"),
+        _stamped("2026-07-15_(Wed)", "10.00.00"),
+    ])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-15_(Wed)__09.12.53 - __TO_SPLIT__(i=2)").is_dir()
+
+
+def test_files_hidden_in_subfolders_are_reported(tmp_path):
+    # The day the marker is for: 2 images to review, and 3 videos the GUI will
+    # never put in front of anyone because they were routed into __VIDEOS.
+    year = tmp_path / "2026"
+    files = [_stamped("2026-07-15_(Wed)", "09.12.53"),
+             _stamped("2026-07-15_(Wed)", "10.00.00")]
+    folder = _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######", files)
+    videos = folder / "__VIDEOS"
+    videos.mkdir()
+    for time in ("11.00.00", "12.00.00", "13.00.00"):
+        name = _stamped("2026-07-15_(Wed)", time, ".mp4")
+        (videos / name).write_text("x", encoding="utf-8")
+        (folder / "__EXIF" / (name + "._exif")).write_text("x", encoding="utf-8")
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    # i=2 still states the review job; s=3 states what is not part of it.
+    # e= stays quiet: all five media files do have their sidecar.
+    assert (year / "2026-07-15_(Wed)__09.12.53 - __TO_SPLIT__(i=2_s=3)").is_dir()
+
+
+def _emptied_folder(root, name, times):
+    """A day whose images have gone, leaving only their "._exif" files."""
+    folder = _placeholder_folder(root, name, [])
+    exif = folder / "__EXIF"
+    exif.mkdir()
+    for time in times:
+        (exif / (_stamped("2026-07-25_(Sat)", time) + "._exif")).write_text(
+            "x", encoding="utf-8")
+    return folder
+
+
+def test_sidecars_left_behind_by_their_images_are_reported(tmp_path):
+    # The grouper moved the day's photos out; the __EXIF folder stayed put.
+    year = tmp_path / "2026"
+    _emptied_folder(year, "2026-07-25_(Sat) - __TO_SPLIT__(i=7)",
+                    ("06.19.06", "15.26.28", "18.01.39"))
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-25_(Sat)__06.19.06 - __TO_SPLIT__(e=3)").is_dir()
+
+
+def test_a_folder_with_no_media_is_dated_from_its_earliest_sidecar(tmp_path):
+    # A sidecar is named after the image it described, so it carries that
+    # image's capture time. Without reading it these two would both come out
+    # as a bare "2026-07-25_(Sat) - __TO_SPLIT__" and collide on one name.
+    year = tmp_path / "2026"
+    _emptied_folder(year, "2026-07-25_(Sat) - __TO_SPLIT__(i=2)",
+                    ("06.19.06", "07.00.00"))
+    _emptied_folder(year, "2026-07-25_(Sat) - __TO_SPLIT__(i=3)",
+                    ("18.01.39", "19.00.00", "20.00.00"))
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-25_(Sat)__06.19.06 - __TO_SPLIT__(e=2)").is_dir()
+    assert (year / "2026-07-25_(Sat)__18.01.39 - __TO_SPLIT__(e=3)").is_dir()
+
+
+def test_media_still_outranks_a_sidecar_when_dating_a_folder(tmp_path):
+    # The sidecars are only a fallback: an image at the top level dates the
+    # folder even when a sidecar in __EXIF carries an earlier stamp.
+    year = tmp_path / "2026"
+    folder = _placeholder_folder(year, "2026-07-25_(Sat) - 1. ######",
+                                 [_stamped("2026-07-25_(Sat)", "09.30.00")])
+    (folder / "__EXIF" / (_stamped("2026-07-25_(Sat)", "04.00.00") + "._exif")).write_text(
+        "x", encoding="utf-8")
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-25_(Sat)__09.30.00 - __TO_SPLIT__(i=1_e=2)").is_dir()
+
+
+# --------------------------------------------------------------------------
+# A time that no longer names anything in the folder (N3)
+# --------------------------------------------------------------------------
+
+def test_a_stamp_that_disagrees_with_the_earliest_file_is_corrected(tmp_path):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-15_(Wed)__08.00.00 - __TO_SPLIT__(i=1)",
+                        [_stamped("2026-07-15_(Wed)", "09.30.00")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-15_(Wed)__09.30.00 - __TO_SPLIT__(i=1)").is_dir()
+
+
+def test_a_labelled_folder_is_retimed_and_its_label_is_not_touched(tmp_path):
+    """C11: T7 protects the description in the tail, never the stamp."""
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-16_(Thu)__08.00.00 - Sopot weekend",
+                        [_stamped("2026-07-16_(Thu)", "11.05.00")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-16_(Thu)__11.05.00 - Sopot weekend").is_dir()
+
+
+def test_a_tail_somebody_wrote_survives_the_retiming(tmp_path):
+    year = tmp_path / "2026"
+    _placeholder_folder(
+        year, "2026-07-16_(Thu)__08.00.00 - __TO_SPLIT__(i=1) check the RAWs",
+        [_stamped("2026-07-16_(Thu)", "11.05.00")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-16_(Thu)__11.05.00 - __TO_SPLIT__(i=1) check the "
+                   "RAWs").is_dir()
+
+
+def test_a_capture_after_midnight_still_times_the_day_it_belongs_to(tmp_path):
+    """N7: a folder dated D legitimately holds the small hours of D+1."""
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-17_(Fri)__08.00.00 - __TO_SPLIT__(i=1)",
+                        [_stamped("2026-07-18_(Sat)", "02.15.00")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-17_(Fri)__02.15.00 - __TO_SPLIT__(i=1)").is_dir()
+
+
+def test_a_stray_from_another_year_is_reported_and_renames_nothing(tmp_path,
+                                                                   capsys):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-19_(Sun)__08.00.00 - __TO_SPLIT__(i=1)",
+                        [_stamped("2019-03-02_(Sat)", "11.00.00")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-19_(Sun)__08.00.00 - __TO_SPLIT__(i=1)").is_dir()
+    out = capsys.readouterr().out
+    assert "MISTIMED" in out
+    assert "2019-03-02_(Sat)__11.00.00" in out
+    assert "1 mistimed" in out
+
+
+def test_a_group_keeps_the_span_in_its_prefix(tmp_path):
+    """C11: both ends move together, and never from a retiming pass."""
+    year = tmp_path / "2026"
+    group = year / "2026-07-20_(Mon)__08.00.00#21__20.00.00 - ____GROUP____(d=1) - Norway"
+    _placeholder_folder(group, "2026-07-20_(Mon)__09.00.00 - day one",
+                        [_stamped("2026-07-20_(Mon)", "09.00.00")])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert group.is_dir()
+
+
+def test_an_emptied_folder_keeps_the_real_time_it_was_named_with(tmp_path):
+    """N10b: there is nothing left in it to read a time off."""
+    year = tmp_path / "2026"
+    (year / "2026-07-21_(Tue)__08.00.00 - __TO_SPLIT__(EMPTY)").mkdir(parents=True)
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-21_(Tue)__08.00.00 - __TO_SPLIT__(EMPTY)").is_dir()
+
+
+def test_keep_times_leaves_a_disagreeing_stamp_alone(tmp_path):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-15_(Wed)__08.00.00 - __TO_SPLIT__(i=1)",
+                        [_stamped("2026-07-15_(Wed)", "09.30.00")])
+
+    assert tool.main([str(year), "--apply", "--keep-times", "--no-colour"]) == 0
+
+    assert (year / "2026-07-15_(Wed)__08.00.00 - __TO_SPLIT__(i=1)").is_dir()
+
+
+def test_keep_times_still_fills_a_prefix_that_carries_none(tmp_path):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######",
+                        [_stamped("2026-07-15_(Wed)", "09.30.00")])
+
+    assert tool.main([str(year), "--apply", "--keep-times", "--no-colour"]) == 0
+
+    assert (year / "2026-07-15_(Wed)__09.30.00 - __TO_SPLIT__(i=1)").is_dir()
+
+
+# --------------------------------------------------------------------------
+# The count-bracket legend
+# --------------------------------------------------------------------------
+
+def test_the_legend_explains_the_letters_this_run_wrote(tmp_path, capsys):
+    year = tmp_path / "2026"
+    image = _stamped("2026-07-15_(Wed)", "09.12.53")
+    folder = _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######", [image])
+    (folder / "__RAW").mkdir()
+    (folder / "__RAW" / (image + "._exif")).write_text("x", encoding="utf-8")
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    out = capsys.readouterr().out
+    assert "What the counts in those names mean:" in out
+    # The name written is "(i=1_c=1)" — the second "._exif" is a sidecar, so it
+    # counts into "c" and never into "s". Those two are explained ...
+    for letter in ("i", "c"):
+        assert ("  %s=" % letter) in out
+        assert grouping.COUNT_MEANINGS[letter] in out
+    # ... and the letters it did not write are not.
+    for letter in ("d", "e", "s", "f"):
+        assert ("  %s=" % letter) not in out
+
+
+def test_no_legend_when_no_name_carries_a_bracket(tmp_path, capsys):
+    # A file rename only: nothing gained a count bracket, so nothing to explain.
+    year = tmp_path / "2026"
+    folder = year / "2026-07-15_(Wed)__09.12.53 - Lens tests"
+    folder.mkdir(parents=True)
+    (folder / "2026-07-15_(Wed)_09.12.53__f2.8__SG23U.jpg").write_text(
+        "x", encoding="utf-8")
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert "What the counts" not in capsys.readouterr().out
+
+
+def test_quiet_suppresses_the_legend(tmp_path, capsys):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######",
+                        [_stamped("2026-07-15_(Wed)", "09.12.53")])
+
+    assert tool.main([str(year), "--apply", "--no-colour", "--quiet"]) == 0
+
+    assert "What the counts" not in capsys.readouterr().out
+
+
+def test_a_dry_run_still_explains_what_it_would_write(tmp_path, capsys):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######",
+                        [_stamped("2026-07-15_(Wed)", "09.12.53")])
+
+    assert tool.main([str(year), "--no-colour"]) == 1
+
+    assert "What the counts in those names mean:" in capsys.readouterr().out
+
+
+def test_every_letter_the_grammar_writes_has_a_meaning(tmp_path):
+    """A letter added to COUNT_LETTERS without a meaning would print nothing."""
+    assert set(grouping.COUNT_MEANINGS) == set(grouping.COUNT_LETTERS)
+
+
+def test_a_second_sidecar_for_one_subject_is_counted_as_a_clash(tmp_path):
+    # Two files claiming to describe one shot. "e" stays silent because every
+    # subject is covered; "c" says one file too many.
+    year = tmp_path / "2026"
+    image = _stamped("2026-07-15_(Wed)", "09.12.53")
+    folder = _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######", [image])
+    # The same sidecar again, a level down, which is where placement finds them.
+    (folder / "__RAW").mkdir()
+    (folder / "__RAW" / (image + "._exif")).write_text("x", encoding="utf-8")
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-15_(Wed)__09.12.53 - __TO_SPLIT__(i=1_c=1)").is_dir()
+
+
+def test_a_clash_no_longer_masks_a_missing_sidecar(tmp_path):
+    """The bug counting subjects rather than files fixes.
+
+    Two media, two sidecars -- but both sidecars name the JPG, so the RAW has
+    none. Comparing totals said 2 == 2 and reported nothing at all.
+    """
+    year = tmp_path / "2026"
+    image = _stamped("2026-07-15_(Wed)", "09.12.53")
+    raw = _stamped("2026-07-15_(Wed)", "09.12.53", ".CR2")
+    folder = _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######", [image],
+                                 sidecars=False)
+    (folder / "__RAW").mkdir()
+    (folder / "__RAW" / raw).write_text("x", encoding="utf-8")
+    (folder / "__EXIF").mkdir()
+    (folder / "__EXIF" / (image + "._exif")).write_text("x", encoding="utf-8")
+    (folder / "__RAW" / (image + "._exif")).write_text("x", encoding="utf-8")
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    # e=1: one of the two media has a sidecar. c=1: one file too many.
+    assert (year / "2026-07-15_(Wed)__09.12.53 - __TO_SPLIT__(i=1_e=1_c=1_s=1)").is_dir()
+
+
+def test_a_folder_in_order_carries_no_clash_marker(tmp_path):
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######", [
+        _stamped("2026-07-15_(Wed)", "09.12.53"),
+        _stamped("2026-07-15_(Wed)", "10.00.00"),
+    ])
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-15_(Wed)__09.12.53 - __TO_SPLIT__(i=2)").is_dir()
+
+
+def test_images_that_lost_every_sidecar_are_reported_as_zero(tmp_path):
+    # "e=0" beside a folder full of images is the point of reporting zero.
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######", [
+        _stamped("2026-07-15_(Wed)", "09.12.53"),
+        _stamped("2026-07-15_(Wed)", "10.00.00"),
+    ], sidecars=False)
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-15_(Wed)__09.12.53 - __TO_SPLIT__(i=2_e=0)").is_dir()
+
+
+def test_an_archive_that_keeps_no_sidecars_never_reports_them(tmp_path, monkeypatch):
+    config = json.loads(json.dumps(CONFIG))
+    config["extensions"]["sidecars"] = []
+    monkeypatch.setattr(tool, "_config", lambda: config)
+
+    year = tmp_path / "2026"
+    _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######",
+                        [_stamped("2026-07-15_(Wed)", "09.12.53")], sidecars=False)
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert (year / "2026-07-15_(Wed)__09.12.53 - __TO_SPLIT__(i=1)").is_dir()
+
+
+def test_the_audit_markers_settle_after_one_pass(tmp_path):
+    # The markers are part of the name, so a second run must read them back
+    # and agree -- otherwise the tool would rename the same folder forever.
+    year = tmp_path / "2026"
+    folder = _placeholder_folder(year, "2026-07-15_(Wed) - 1. ######",
+                                 [_stamped("2026-07-15_(Wed)", "09.12.53")],
+                                 sidecars=False)
+    videos = folder / "__VIDEOS"
+    videos.mkdir()
+    (videos / _stamped("2026-07-15_(Wed)", "11.00.00", ".mp4")).write_text(
+        "x", encoding="utf-8")
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+    settled = "2026-07-15_(Wed)__09.12.53 - __TO_SPLIT__(i=1_e=0_s=1)"
+    assert (year / settled).is_dir()
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+    assert (year / settled).is_dir()
+
+
+def test_the_tool_and_the_grouping_stage_build_the_same_name(tmp_path):
+    """The tool must not drift from the stage it is standing in for."""
+    from src.pipeline_stages.grouping_names import to_split_name
+
+    settings = tool.GroupingSettings(CONFIG)
+    for files, images, videos in (
+        (["a.jpg", "b.jpg"], 2, 0),
+        (["a.mp4"], 0, 1),
+        (["a.jpg", "b.mp4"], 1, 1),
+    ):
+        # Unstamped names, so no time is added and the two must agree exactly.
+        folder = _placeholder_folder(tmp_path / str(len(files) + images * 10),
+                                     "2026-07-15_(Wed) - 1. ######", files)
+        assert tool.canonical_event_folder_name(
+            folder, folder.name, [folder / name for name in files], settings) == \
+            to_split_name("2026-07-15_(Wed)", images, videos)
+
+
+# --------------------------------------------------------------------------
+# End to end
+# --------------------------------------------------------------------------
+
+def _tree(root):
+    """A year folder holding one old-style day folder and its files."""
+    day = root / "2026-08-25_(Fri)"          # wrong weekday: really a Tuesday
+    day.mkdir(parents=True)
+    (day / "2026-08-25_(Tue)_10.23.12__f2.8.JPG").write_text("a", encoding="utf-8")
+    (day / "2026-08-25__10.24.00__RAW.CRW").write_text("b", encoding="utf-8")
+    (day / "read me.txt").write_text("c", encoding="utf-8")
+    return day
+
+
+def test_a_dry_run_changes_nothing_and_reports_work_pending(tmp_path, capsys):
+    year = tmp_path / "2026"
+    day = _tree(year)
+    before = sorted(path.name for path in year.rglob("*"))
+
+    exit_code = tool.main([str(year), "--no-colour"])
+
+    assert exit_code == 1                     # pending changes
+    assert sorted(path.name for path in year.rglob("*")) == before
+    assert day.is_dir()
+    assert "Re-run with --apply" in capsys.readouterr().out
+
+
+def test_a_rename_prints_its_two_paths_in_one_column(tmp_path, capsys):
+    # The report is read by running an eye down it, so the old and the new
+    # path have to start at the same character.
+    year = tmp_path / "2026"
+    _tree(year)
+
+    tool.main([str(year), "--no-colour"])
+
+    pairs = [line for line in capsys.readouterr().out.splitlines()
+             if line.startswith((tool.RENAME_FROM_PREFIX, tool.RENAME_TO_PREFIX))]
+    assert pairs
+    assert len(tool.RENAME_FROM_PREFIX) == len(tool.RENAME_TO_PREFIX)
+    column = len(tool.RENAME_FROM_PREFIX)
+    assert all(not line[column].isspace() for line in pairs)
+
+
+def test_a_rename_is_coloured_only_where_the_two_names_part():
+    source = r"c:\photos\2026-07-01_(Wed) - __TO_SPLIT__(i=129)"
+    target = r"c:\photos\2026-07-01_(Wed) - __TO_SPLIT__(i=129_s=6)"
+
+    was, now, _rule = tool.rename_report(
+        source, target, tool.CHANGED, "", True).split("\n")
+
+    shared = r"c:\photos\2026-07-01_(Wed) - __TO_SPLIT__(i=129"
+    off = tool.COLOURS["off"]
+    # Everything the two share keeps the outcome's own colour ...
+    assert tool.COLOURS[tool.CHANGED] + shared + off in was
+    assert tool.COLOURS[tool.CHANGED] + shared + off in now
+    # ... and only past that point do they differ: white going, red coming.
+    assert was.endswith(tool.COLOURS["old"] + ")" + off)
+    assert now.endswith(tool.COLOURS["new"] + "_s=6)" + off)
+
+
+def test_the_report_carries_no_escape_codes_when_colour_is_off():
+    plain = tool.rename_report("a/one.jpg", "a/two.jpg", tool.CHANGED, "note", False)
+
+    assert "\033" not in plain
+    assert plain.split("\n") == [
+        tool.RENAME_FROM_PREFIX + "a/one.jpg",
+        tool.RENAME_TO_PREFIX + "a/two.jpg" + "  note",
+        tool.RENAME_FROM_PREFIX + tool.RENAME_RULE_CHAR * tool.RENAME_RULE_WIDTH,
+    ]
+
+
+def test_a_rule_closes_each_pair_at_one_width_and_barely_shows():
+    # Same width every time: a ragged right edge down the report would read as
+    # content, and the rule is meant to read as nothing.
+    short = tool.rename_report("a/one.jpg", "a/two.jpg", tool.CHANGED, "", True)
+    deep = tool.rename_report("a/" + "down/" * 20 + "one.jpg",
+                              "a/" + "down/" * 20 + "two.jpg", tool.CHANGED, "", True)
+
+    rules = [report.split("\n")[-1] for report in (short, deep)]
+    assert rules[0] == rules[1]
+    assert rules[0] == (tool.RENAME_FROM_PREFIX
+                        + tool.COLOURS["rule"]
+                        + tool.RENAME_RULE_CHAR * tool.RENAME_RULE_WIDTH
+                        + tool.COLOURS["off"])
+    assert tool.COLOURS["rule"] == "\033[2;90m"        # faint *and* grey
+
+
+def test_apply_renames_folder_and_files_and_leaves_the_rest_alone(tmp_path):
+    year = tmp_path / "2026"
+    _tree(year)
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    day = year / "2026-08-25_(Tue)"
+    assert day.is_dir()
+    assert (day / "2026-08-25_(Tue)__10.23.12__f2.8.JPG").read_text(encoding="utf-8") == "a"
+    assert (day / "2026-08-25_(Tue)__10.24.00__RAW.CRW").read_text(encoding="utf-8") == "b"
+    assert (day / "read me.txt").read_text(encoding="utf-8") == "c"
+
+
+def test_a_second_run_finds_nothing_left_to_do(tmp_path):
+    year = tmp_path / "2026"
+    _tree(year)
+    tool.main([str(year), "--apply", "--no-colour"])
+
+    assert tool.main([str(year), "--no-colour"]) == 0
+
+
+def test_the_journal_replays_backwards_and_restores_every_name(tmp_path):
+    year = tmp_path / "2026"
+    _tree(year)
+    before = sorted(str(path.relative_to(year)) for path in year.rglob("*"))
+    journal = tmp_path / "journal.jsonl"
+
+    tool.main([str(year), "--apply", "--journal", str(journal), "--no-colour"])
+    assert sorted(str(path.relative_to(year)) for path in year.rglob("*")) != before
+
+    assert tool.main(["--undo", str(journal), "--apply", "--no-colour"]) == 0
+    assert sorted(str(path.relative_to(year)) for path in year.rglob("*")) == before
+
+
+def test_the_journal_records_one_line_per_rename(tmp_path):
+    year = tmp_path / "2026"
+    _tree(year)
+    journal = tmp_path / "journal.jsonl"
+
+    tool.main([str(year), "--apply", "--journal", str(journal), "--no-colour"])
+
+    records = [json.loads(line) for line in
+               journal.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(records) == 3          # two files and the day folder
+    assert all("from" in record and "to" in record for record in records)
+
+
+def test_the_journal_is_not_itself_a_rename_candidate(tmp_path):
+    # The default journal lives in __LOGS beside the year folder (PS-3), never
+    # inside it -- a year folder's only permitted children are month folders.
+    year = tmp_path / "2026"
+    _tree(year)
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert list(year.glob("_rename_journal_*.jsonl")) == []
+    journals = list((tmp_path / "__LOGS").glob("_rename_journal_*.jsonl"))
+    assert len(journals) == 1
+    assert tool.canonical_name(journals[0].name) == journals[0].name
+
+
+def test_a_name_collision_leaves_both_files_untouched(tmp_path):
+    year = tmp_path / "2026"
+    year.mkdir()
+    # Two historical shapes of the same instant: renaming one onto the other
+    # would destroy a photo, so neither moves.
+    (year / "2026-08-25_(Tue)_10.23.12.JPG").write_text("old", encoding="utf-8")
+    (year / "2026-08-25_(Tue)__10.23.12.JPG").write_text("new", encoding="utf-8")
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 1
+    assert (year / "2026-08-25_(Tue)_10.23.12.JPG").read_text(encoding="utf-8") == "old"
+    assert (year / "2026-08-25_(Tue)__10.23.12.JPG").read_text(encoding="utf-8") == "new"
+
+
+def test_the_target_root_itself_is_never_renamed(tmp_path):
+    # The root is addressed by the caller; renaming it would strand the run.
+    year = tmp_path / "2026-08-25__10.23.12"
+    year.mkdir()
+    (year / "2026-08-25__10.24.00.JPG").write_text("a", encoding="utf-8")
+
+    tool.main([str(year), "--apply", "--no-colour"])
+
+    assert year.is_dir()
+
+
+def test_deeply_nested_folders_are_renamed_deepest_first(tmp_path):
+    year = tmp_path / "2026"
+    inner = year / "2026-08-25__00.00.00" / "2026-08-26__00.00.00"
+    inner.mkdir(parents=True)
+    (inner / "2026-08-26__12.00.00.JPG").write_text("a", encoding="utf-8")
+
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    moved = year / "2026-08-25_(Tue)__00.00.00" / "2026-08-26_(Wed)__00.00.00"
+    assert (moved / "2026-08-26_(Wed)__12.00.00.JPG").read_text(encoding="utf-8") == "a"
+
+
+# --------------------------------------------------------------------------
+# Year warning and target guards
+# --------------------------------------------------------------------------
+
+def test_a_year_folder_that_is_not_the_current_year_warns(tmp_path, capsys):
+    year = tmp_path / "2019"
+    year.mkdir()
+
+    tool.main([str(year), "--no-colour"])
+
+    assert "not the current year" in capsys.readouterr().out
+
+
+def test_the_current_year_does_not_warn(tmp_path, capsys):
+    import datetime
+    year = tmp_path / str(datetime.date.today().year)
+    year.mkdir()
+
+    tool.main([str(year), "--no-colour"])
+
+    assert "not the current year" not in capsys.readouterr().out
+
+
+def test_a_target_that_is_not_a_year_folder_warns_but_proceeds(tmp_path, capsys):
+    target = tmp_path / "loose photos"
+    target.mkdir()
+
+    assert tool.main([str(target), "--no-colour"]) == 0
+    assert "not a year folder" in capsys.readouterr().out
+
+
+def test_a_missing_target_is_an_error_not_an_empty_run(tmp_path):
+    assert tool.main([str(tmp_path / "nope"), "--no-colour"]) == 2
+
+
+def test_the_walk_refuses_a_path_outside_the_root():
+    root_key = tool.path_key(r"c:\__PHOTOS\2026")
+    assert tool.inside(root_key, r"c:\__PHOTOS\2026\2026-08-25_(Tue)")
+    assert not tool.inside(root_key, r"c:\__PHOTOS\2025")
+    assert not tool.inside(root_key, r"c:\__PHOTOS\20260")

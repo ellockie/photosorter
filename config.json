@@ -1,0 +1,117 @@
+{
+  "author_symbols": {
+    "": ""
+  },
+  "camera_symbols": {
+    "": "NOID"
+  },
+  "collision": {
+    "duplicate_suffix": "_DUPE",
+    "low_res_suffix": "_LOWRES",
+    "significantly_smaller_ratio": 0.5
+  },
+  "companion_reconciliation": {
+    "enabled": true
+  },
+  "dashboard": {
+    "host": "127.0.0.1",
+    "open_browser": true,
+    "port": 8888
+  },
+  "day_boundary_time": "04.44.44",
+  "extensions": {
+    "lossy_images": [
+      ".jpg",
+      ".jpeg"
+    ],
+    "other_images": [
+      ".png",
+      ".gif",
+      ".bmp",
+      ".tif",
+      ".tiff",
+      ".webp",
+      ".heic",
+      ".heif"
+    ],
+    "previews": [
+      ".THM.jpg",
+      ".PREVIEW.jpg",
+      ".thm",
+      ".lrv"
+    ],
+    "raw_images": [
+      ".arw",
+      ".cr2",
+      ".crw",
+      ".dng",
+      ".mpo",
+      ".rw2"
+    ],
+    "sidecars": [
+      "._exif"
+    ],
+    "videos": [
+      ".mp4",
+      ".mov",
+      ".avi"
+    ],
+    "ocr": [
+      ".OCR.txt"
+    ]
+  },
+  "external_tools": {
+    "dpviewer": "c:\\Program Files (x86)\\Canon\\Digital Photo Professional\\DPPViewer.exe",
+    "exiftool": "exiftool",
+    "irfanview": "c:\\_[SOFT] - Grafika\\__Browsers, Viewers\\IrfanView\\i_view32.exe",
+    "sony_converter": "c:\\Program Files\\Sony\\Imaging Edge Desktop\\ied.exe"
+  },
+  "grouping_review": {
+    "enabled": true
+  },
+  "legacy": {
+    "date_folder_suffix": " - 1. ######",
+    "raw_marker": "RAW__",
+    "subfolders": {
+      "duplicate_file_names": "##   DUPLICATE_FILE_NAMES FILES   ##",
+      "empty": "##   EMPTY FILES   ##",
+      "exif": "##   EXIFs   ##",
+      "not_enough_info": "##   NOT_ENOUGH_INFO FILES   ##",
+      "old_exif": "old_EXIF",
+      "raw": "##   RAWs   ##",
+      "unsupported": "##   UNSUPPORTED EXTENSIONS   ##"
+    }
+  },
+  "raw_sidecar_generation": {
+    "enabled": true
+  },
+  "paths": {
+    "camera_uploads": "c:/Users/luxxa/Dropbox/Camera Uploads",
+    "inbox_folder": "c:\\__PHOTOS\\____INGEST_PIPELINE\\INBOX",
+    "ingest": {
+      "camera_uploads": "c:/Users/luxxa/Dropbox/Camera Uploads"
+    },
+    "legacy_ready_folder": "c:\\__PHOTOS\\____TO_SORT\\__READY",
+    "legacy_unsorted_folder": "c:\\__PHOTOS\\____TO_SORT\\____UNSORTED",
+    "ready_folder": "c:\\__PHOTOS\\____INGEST_PIPELINE\\READY",
+    "root_folder": "c:\\__PHOTOS",
+    "temp_folder": "c:\\__PHOTOS\\____INGEST_PIPELINE\\.TMP",
+    "temp_root": "c:\\__PHOTOS\\____INGEST_PIPELINE\\.TMP",
+    "unsorted_folder": "c:\\__PHOTOS\\____INGEST_PIPELINE\\INBOX",
+    "working_folder": "c:\\__PHOTOS\\____INGEST_PIPELINE"
+  },
+  "retry": {
+    "attempts": 5,
+    "delay_seconds": 0.2
+  },
+  "safety": {
+    "enabled": true,
+    "hash_chunk_size": 1048576
+  },
+  "screenshot_grouping": {
+    "enabled": true,
+    "max_folders": 0,
+    "project_path": "c:\\Users\\luxxa\\Dropbox\\___Projects\\SCREENSHOT_GROUPER\\screnshot-grouper",
+    "python": "c:\\Users\\luxxa\\AppData\\Local\\pypoetry\\Cache\\virtualenvs\\screenshot-grouper-bPT5Y6s0-py3.10\\Scripts\\python.exe"
+  }
+}

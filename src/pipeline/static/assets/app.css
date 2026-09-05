@@ -1,0 +1,319 @@
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: #10130f;
+  color: #f4f1e8;
+  font-family:
+    Segoe UI,
+    system-ui,
+    sans-serif;
+}
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+header {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 24px;
+  border-bottom: 1px solid #373a2d;
+  background: #151812e6;
+}
+h1,
+h2,
+p {
+  margin: 0;
+}
+nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+button {
+  min-height: 36px;
+  border: 1px solid #484b3b;
+  background: #24281f;
+  color: #f4f1e8;
+  padding: 0 12px;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
+}
+button:hover {
+  border-color: #74c7bd;
+  background: #30362a;
+  transform: translateY(-1px);
+}
+button:active {
+  transform: translateY(0);
+}
+/* Buttons are disabled while an external GUI holds the decision (the grouper
+   opened from a review prompt): they must read as out of reach, not broken. */
+button:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+button:disabled:hover {
+  border-color: #484b3b;
+  background: #24281f;
+  transform: none;
+}
+.alert {
+  flex: 0 0 auto;
+  padding: 12px 24px;
+  background: #512020;
+  border-bottom: 1px solid #ff6969;
+}
+.hidden {
+  display: none;
+}
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.graph {
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: stretch;
+}
+.node {
+  flex: 1 1 0;
+  min-height: 20px;
+  border: 2px solid #525641;
+  background: #24281f;
+  border-radius: 6px;
+  padding: 1px 10px;
+  white-space: pre-line;
+}
+.node.active {
+  border-color: #4fd5d5;
+}
+.node.complete {
+  border-color: #68d66f;
+}
+.node.failed {
+  border-color: #ff6969;
+}
+aside {
+  border-left: 1px solid #373a2d;
+  padding: 20px;
+  overflow: auto;
+  background: #1a1e16;
+}
+dt {
+  color: #aaa690;
+}
+dd {
+  margin: 0 0 14px;
+  font-size: 24px;
+}
+.logs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.log-line {
+  color: #aaa690;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.stage-log {
+  color: #f8f8f2;
+  font-weight: 700;
+  margin-top: 8px;
+}
+.stage-number {
+  display: inline-block;
+  width: 28px;
+  color: #74c7bd;
+  font-variant-numeric: tabular-nums;
+}
+.prompt-dialog {
+  width: min(560px, calc(100vw - 48px));
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  border: 1px solid #c7a974;
+  border-radius: 10px;
+  background: #151812;
+  color: #f4f1e8;
+  padding: 20px 22px;
+  box-shadow: 0 24px 64px #000000b3;
+}
+.prompt-dialog h2 {
+  margin: 0 0 14px;
+  color: #e9c789;
+}
+.prompt-dialog::backdrop {
+  background: #06070591;
+  backdrop-filter: blur(2px);
+}
+.prompt-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.prompt-card {
+  border: 2px solid #c7a974;
+  background: #26221a;
+  border-radius: 8px;
+  padding: 12px;
+}
+.prompt-card h3 {
+  margin: 0 0 8px;
+  text-transform: capitalize;
+  color: #e9c789;
+}
+.prompt-file {
+  margin: 8px 0;
+  font-size: 13px;
+  color: #aaa690;
+  word-break: break-all;
+}
+.prompt-file strong {
+  display: block;
+  color: #f4f1e8;
+}
+.prompt-instructions {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #d8d3c0;
+}
+/* A run blocked on a prompt is waiting on purpose and can wait indefinitely.
+   The pulse makes that visible so it never reads as a hang. */
+body.awaiting-prompt #status {
+  color: #e9c789;
+  animation: awaiting-pulse 1.6s ease-in-out infinite;
+}
+@keyframes awaiting-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body.awaiting-prompt #status { animation: none; }
+}
+.prompt-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.prompt-card form {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.prompt-card input {
+  flex: 1;
+  min-height: 34px;
+  border: 1px solid #484b3b;
+  background: #1a1e16;
+  color: #f4f1e8;
+  padding: 0 10px;
+}
+button.primary {
+  border-color: #68d66f;
+  background: #1f3a22;
+  font-weight: 700;
+}
+button.primary:hover {
+  border-color: #8bf08f;
+  background: #27492b;
+}
+button.danger {
+  border-color: #ff6969;
+  background: #3a1f1f;
+  margin-left: auto;
+}
+#sound-toggle[aria-pressed="true"] {
+  opacity: 0.55;
+}
+button.danger:hover {
+  border-color: #ff8a8a;
+  background: #4a2727;
+}
+.node {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.node-icon {
+  flex: 0 0 auto;
+  width: 24px;
+  text-align: center;
+  font-size: 20px;
+  line-height: 1;
+  color: #6f7363;
+}
+.node-number {
+  flex: 0 0 auto;
+  color: #74c7bd;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.node-sep {
+  flex: 0 0 auto;
+  color: #6f7363;
+  margin: 0 -4px;
+}
+.node-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.node-stats {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+  color: #aaa690;
+  font-variant-numeric: tabular-nums;
+}
+.node-stat {
+  white-space: nowrap;
+}
+.node-errors {
+  color: #ff6969;
+  font-weight: 700;
+}
+.node.active .node-icon {
+  color: #4fd5d5;
+}
+.node.complete .node-icon {
+  color: #68d66f;
+}
+.node.failed .node-icon {
+  color: #ff6969;
+}
+.node.paused .node-icon {
+  color: #e9c789;
+}
+.node.active {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    border-color: #4fd5d5;
+  }
+  50% {
+    border-color: #2c7c7c;
+  }
+}

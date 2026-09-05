@@ -1,0 +1,1 @@
+start cmd.exe /k "exiftool_EXIF_extractor.py"

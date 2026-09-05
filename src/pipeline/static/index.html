@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>photosorter</title>
+    <link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg">
+    <script type="module" crossorigin src="/static/assets/app.js"></script>
+    <link rel="stylesheet" crossorigin href="/static/assets/app.css">
+  </head>
+  <body>
+    <div id="root">
+      <main class="app">
+        <header>
+          <div>
+            <h1>photosorter</h1>
+            <p id="status">Loading dashboard</p>
+          </div>
+          <nav>
+            <button data-action="run" class="primary">Run</button>
+            <button data-action="pause">Pause</button>
+            <button data-action="resume">Resume</button>
+            <button data-action="restart">Restart</button>
+            <button id="sound-toggle" aria-pressed="false">&#x1F50A; Sound</button>
+            <button id="stop-server" class="danger">Stop server</button>
+          </nav>
+        </header>
+        <section id="alert" class="alert hidden"></section>
+        <section class="layout">
+          <div id="graph" class="graph"></div>
+          <aside>
+            <dl>
+              <dt>Pending</dt><dd id="assets">0</dd>
+              <dt>Processed</dt><dd id="processed">0</dd>
+              <dt>Prompts</dt><dd id="prompts">0</dd>
+            </dl>
+            <h2>Logs</h2>
+            <div id="logs" class="logs"></div>
+          </aside>
+        </section>
+      </main>
+      <!-- Decisions block the run, so they block the page too: buried in the
+           sidebar above the log they were easy to scroll past and miss. -->
+      <dialog id="prompt-dialog" class="prompt-dialog">
+        <h2>Pending decisions</h2>
+        <div id="prompt-list" class="prompt-list"></div>
+      </dialog>
+    </div>
+  </body>
+</html>

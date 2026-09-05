@@ -1,0 +1,1 @@
+python -m venv C:\Users\luxxa\_DEV\__VENV\photosorter
