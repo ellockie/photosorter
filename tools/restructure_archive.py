@@ -235,16 +235,19 @@ would print the first's report word for word. Those are skipped, with a line
 saying why. Asked for on their own (``--steps 5``) they still run: nothing came
 before them to repeat.
 
-Steps 6 and 7 are placeholders
+Steps 7 and 8 are placeholders
 ------------------------------
-``ARCHIVE_STANDARD.md`` is **v0.12, a draft, only partly enforced** -- its S4
-subfolder set and its T8 "defined more than once" list still carry open
-questions whose answers change what "compliant" means. Enforcing it now would
-migrate a live archive of hundreds of thousands of files to a shape that is
-still being argued about. So both steps announce themselves and do nothing;
-the plumbing -- ordering, prompting, journalling, exit codes -- is here so
-that implementing them is a change to one function each, against the
-specification in that document's section 7.
+``ARCHIVE_STANDARD.md`` is **v1.0, settled but only partly enforced**. Nothing
+in it is open to argument any more -- what is missing is the fixing tool its
+section 7 specifies, and this is where it will go. Until then both steps
+announce themselves and do nothing; the plumbing -- ordering, prompting,
+journalling, exit codes -- is here so that implementing them is a change to one
+function each, against that specification.
+
+The obligations settled in v1.0 are the ones to build first, and both are
+prompt-then-write, never silent: gathering loose media out of a group into a
+``__TO_LABEL__`` child (C4) and moving a group whose start has crossed into
+another month folder (C12). Step 6 reports both today.
 
 TARGETS
 -------
@@ -2055,13 +2058,14 @@ def step_reconcile(run, label):
 #
 #   * It never rewrites the start **date**. N6 forbids deriving a date from
 #     contents -- rewriting it would move the folder out from under its month
-#     folder -- and C12's consequence, a group crossing into another month when
-#     its earliest child leaves, is open question 6 in the standard. A folder
-#     whose earliest file falls before its own date is reported instead.
-#   * It never moves media out of a group (C4, open question 5), and never
-#     moves a group between month folders (C12, open question 6).
+#     folder -- and moving the folder is C12, which since v1.0 is a prompted
+#     action of the fixing tool (section 7), not of this step. A folder whose
+#     earliest file falls before its own date is reported instead.
+#   * It never moves media out of a group (C4) and never moves a group between
+#     month folders (C12). Both rules are settled; both belong to the fixing
+#     tool, which does not exist yet.
 #
-# So this is the settled half of section 3: the marker and the two stamps.
+# So this is the implemented half of section 3: the marker and the two stamps.
 
 
 def dated_children(folder, refused):
@@ -2265,7 +2269,8 @@ def group_target_name(folder, children, run, config, refused):
         # A day that has been split but still has shots of its own at the top
         # level is half-done, and the marker is how step 3 finds it again.
         # Taking it off would strand that media for good -- and gathering it
-        # into a child of its own is C4, open question 5. Reported, not touched.
+        # into a child of its own is C4, which the fixing tool will do under a
+        # prompt (section 7). Reported here, not touched.
         counts = top_level_media(folder, run.grouping_settings)
         if counts is None or sum(counts) > 0:
             return (
@@ -2273,7 +2278,7 @@ def group_target_name(folder, children, run, config, refused):
                 (
                     "still carries %s with %s at its top level: it is a "
                     "group by C1 and a day awaiting the grouper at once "
-                    "-- C4, open question 5"
+                    "-- C4, for the fixing tool"
                     % (
                         placeholder,
                         (
@@ -2303,14 +2308,15 @@ def group_target_name(folder, children, run, config, refused):
 
     earliest, latest = subtree.earliest, subtree.latest
     if "%04d-%02d-%02d" % (earliest.year, earliest.month, earliest.day) < parsed.date:
-        # C12 / open question 6: the start belongs under an earlier month
-        # folder. Reported, never moved -- and the name is left alone, because
-        # a start time from a day the folder does not claim would be a lie.
+        # C12: the start belongs under an earlier month folder. Moving it is
+        # settled -- under --apply, after a prompt -- but it is the fixing
+        # tool's move, not this step's. Reported, and the name is left alone,
+        # because a start time from a day the folder does not claim is a lie.
         return (
             None,
             (
                 "its earliest file is dated %04d-%02d-%02d, before the "
-                "folder's own %s -- moving it is open question 6 (C12)"
+                "folder's own %s -- moving it is C12, for the fixing tool"
                 % (earliest.year, earliest.month, earliest.day, parsed.date)
             ),
             None,
@@ -2329,10 +2335,11 @@ def group_target_name(folder, children, run, config, refused):
 def group_violations(folder, config):
     """What ``folder`` holds that C3 does not allow. Reported, never fixed.
 
-    Media, loose files of any kind and taxonomy subfolders are all outside the
-    closed set. None of it is touched: gathering loose media into a dated child
-    is C4, which is open question 5, and where a whole trip's ".gpx" belongs is
-    open question 4.
+    Media, loose files of any kind and taxonomy subfolders are outside the
+    closed set -- with the one exception C3a admits, ``__GEOLOCATIONS``, for a
+    track whose span no single dated child can hold. Nothing here is touched:
+    gathering loose media into a dated child is C4, and since v1.0 that is a
+    prompted action of the fixing tool (section 7), not of this pass.
     """
     stamps = canonicalise.stamps
     grouping = canonicalise.grouping
@@ -2360,13 +2367,17 @@ def group_violations(folder, config):
         if images or videos:
             reasons.append(
                 "holds %d image(s) and %d video(s) of its own -- C3; "
-                "moving them down is C4, open question 5" % (images, videos)
+                "moving them down is C4, for the fixing tool" % (images, videos)
             )
         other = len(files) - images - videos
         if other:
             reasons.append("holds %d loose file(s) that are not media (C3)" % other)
 
+    # Read from the taxonomy, never spelled here (S4).
+    geolocations = taxonomy.taxonomy_folder(config, "geolocations")
+
     parking_areas = 0
+    tracks = 0
     for name in folders_inside:
         if stamps.day_prefix(name):
             continue
@@ -2378,9 +2389,18 @@ def group_violations(folder, config):
             if parking_areas > 1:
                 reasons.append("holds more than one %r (C3, H2)" % name)
             continue
+        if name.casefold() == geolocations.casefold():
+            # C3a: the one taxonomy subfolder a group may hold -- a track
+            # covering the whole trip, which no single dated child can claim.
+            # One only, and its contents are excluded from the span and the
+            # counts (C14), which is why nothing here looks inside it.
+            tracks += 1
+            if tracks > 1:
+                reasons.append("holds more than one %r (C3a)" % name)
+            continue
         reasons.append(
-            "holds %r, which is neither a dated folder nor %s (C3)"
-            % (name, grouping.EMPTY_SUBFOLDERS_FOLDER)
+            "holds %r, which is not a dated folder, %s or %s (C3, C3a)"
+            % (name, grouping.EMPTY_SUBFOLDERS_FOLDER, geolocations)
         )
     return reasons
 
@@ -2500,15 +2520,16 @@ def step_group_markers(run):
 # --------------------------------------------------------------------------
 
 _STANDARD_NOTICE = (
-    "%s is a DRAFT: its S4 subfolder set and its T8 "
-    "'defined more than once' list still carry open questions, and the answers "
-    "change what counts as compliant. Enforcing it now would migrate a live "
-    "archive to a shape that is still being argued about.\nThis step is a "
-    "placeholder and does nothing. 'The fixing tool' under section 7 of that "
-    "document is the specification it will be built to, and section 8 is the "
-    "machine-readable form it will parse.\nSection 3 is the one part already "
-    "settled and already enforced -- by step 6, which marks, times and spans "
-    "the groups." % STANDARD_PATH.name
+    "%s is settled at v1.0 -- it carries no open questions -- but the tool "
+    "that enforces it does not exist yet. What is missing here is code, not "
+    "decisions.\nThis step is a placeholder and does nothing. 'The fixing "
+    "tool' under section 7 of that document is the specification it will be "
+    "built to, and section 8 is the machine-readable form it will parse.\n"
+    "Section 3 is the part already enforced -- by step 6, which marks, times "
+    "and spans the groups, and which reports the two moves v1.0 settled and "
+    "left to this step: gathering loose media out of a group (C4), and moving "
+    "a group whose start has crossed into another month folder (C12). Both "
+    "write only under --apply and only after a prompt." % STANDARD_PATH.name
 )
 
 

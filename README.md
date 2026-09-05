@@ -17,8 +17,10 @@ Read it before writing any stage or tool that creates, moves, renames or scans
 archive folders. The sections below describe what the current code does; where the
 two disagree, the standard is the intent and the code is the gap.
 
-Currently **v0.12, draft, partially enforced by the restructure tool** — and existing tools are not
-assumed compliant.
+Currently **v1.0, settled, partially enforced by the restructure tool** — and
+existing tools are not assumed compliant. Settled means the rules are decided,
+not that the code implements them: §7's fixing tool is still to be built, and
+steps 7 and 8 of the restructure tool are the placeholders waiting for it.
 
 ## Current Default Behaviour
 
@@ -196,8 +198,11 @@ children agree on a name of their own (C16). Step 6 of
 `tools/restructure_archive.py` maintains them, adds the marker to a folder that
 has gained dated children and takes it off one that has lost its last. What it
 holds (C3) is only reported: moving media down into a child of its own is C4,
-still an open question. `__CONTAINER__` was the v0.8 spelling; nothing ever
-wrote one, and step 6 converts any that a person typed.
+which since v1.0 is a settled action of the fixing tool — under `--apply`, after
+a prompt — and not of step 6. A group may hold one `__GEOLOCATIONS` (C3a), for a
+track spanning more days than any single child, and that is the only taxonomy
+subfolder it may hold. `__CONTAINER__` was the v0.8 spelling; nothing ever wrote
+one, and step 6 converts any that a person typed.
 
 The standard proposes more that no code writes yet:
 
@@ -768,9 +773,11 @@ tree so a multi-year run does not pool them. **Nothing is overwritten and nothin
 is deleted** (T1, T2), and the parking folder is excluded from the next run's
 index so its contents are not re-reported as orphans.
 
-> `__DUPLICATES` under a _year_ remains a deliberate extension of §4 and is
-> listed in the standard's open questions. Empty legacy containers now park in
-> the `__EMPTY_SUBFOLDERS` beside their dated folder under settled H2/L4.
+> `__DUPLICATES` under a _year_ is the standard's own rule since v1.0 — S7,
+> with P6 admitting it beside the month folders — rather than an extension this
+> tool was making on its own. The in-event `__DUPLICATES` keeps its separate
+> job, and nothing migrates between the two. Empty legacy containers park in
+> the `__EMPTY_SUBFOLDERS` beside their dated folder under H2/L4.
 
 A companion whose subject is nowhere in the target is **left exactly where it
 is** and reported (X3). The pass also counts the media that have **no sidecar at
@@ -807,12 +814,14 @@ favours — and step 4 then moves files between folders, changing those counts
 again. Running the canonicaliser last folds all of it back onto the canonical
 form and re-derives the audit markers from what is finally on disk.
 
-**Steps 6 and 7 are placeholders.** The standard is v0.12, a draft, only partly
-enforced — its `S4` subfolder set and its `T8` "defined more than once" list carry
-open questions whose answers change what "compliant" means. Both steps announce
-themselves and do nothing; the plumbing is there so implementing them is a change
-to one function each, against "The fixing tool" in §7 and the machine-readable
-definitions in §8.
+**Steps 7 and 8 are placeholders.** The standard is v1.0 and settled, but only
+partly enforced: what is missing is the tool, not the decisions. Both steps
+announce themselves and do nothing; the plumbing is there so implementing them
+is a change to one function each, against "The fixing tool" in §7 and the
+machine-readable definitions in §8. The two obligations to build first are the
+ones v1.0 settled and step 6 already reports — gathering loose media out of a
+group (C4) and moving a group whose start crossed into another month folder
+(C12) — both writing only under `--apply` and only after a prompt.
 
 #### Targets
 

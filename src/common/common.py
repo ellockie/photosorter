@@ -1,6 +1,5 @@
 import datetime
 import fnmatch
-import hashlib
 import ntpath
 import os
 import subprocess
@@ -10,6 +9,7 @@ import winsound
 import dateutil.parser
 
 from common.globals import COUNTERS, FULL_PATH_SUBFOLDER, created_folders, file_info_array
+from utils.checksums import file_md5
 from constants.constants import \
     COMMAND_LINE_OPTION_GENERATE_EXIFS, \
     DAY_DIVISION_TIME, \
@@ -357,13 +357,9 @@ def full_path_of(folder_name, trailing_part_1="", trailing_part_2=""):
     return os.path.join(PATHS["ROOT_FOLDER"], folder_name, trailing_part_1, trailing_part_2).rstrip('\\')
 
 
-def file_md5(file_path):
-    """Return MD5 hex digest of a file."""
-    hasher = hashlib.md5()
-    with open(file_path, 'rb') as f:
-        for chunk in iter(lambda: f.read(65536), b''):
-            hasher.update(chunk)
-    return hasher.hexdigest()
+# ``file_md5`` is imported at the top of this module, from utils.checksums --
+# the one definition of it in the repo (T8). It used to be defined here too,
+# with a 64 KiB chunk where the pipeline's copy used 1 MiB.
 
 
 def rename_exif_file(exif_file_name, image_file_name):

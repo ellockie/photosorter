@@ -1,4 +1,3 @@
-import hashlib
 import json
 import logging
 import os
@@ -13,6 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from src.utils.checksums import file_md5  # noqa: F401  (re-export)
 from src.utils.stage_banner import \
     announce_to_console, \
     format_end, \
@@ -467,15 +467,9 @@ def normalize_suffix(suffix: str) -> str:
     return suffix.lower()
 
 
-def file_md5(path: str | Path, chunk_size: int = 1024 * 1024) -> str:
-    digest = hashlib.md5()
-    with Path(path).open("rb") as handler:
-        while True:
-            chunk = handler.read(chunk_size)
-            if not chunk:
-                break
-            digest.update(chunk)
-    return digest.hexdigest()
+# Re-exported, not defined: ``src.utils.checksums`` is the one implementation
+# (T8), and every ``from src.core import file_md5`` in the pipeline keeps
+# reading it from here.
 
 
 def with_retry(operation, attempts=DEFAULT_RETRY_ATTEMPTS, delay_seconds=DEFAULT_RETRY_DELAY_SECONDS):

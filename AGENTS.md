@@ -22,12 +22,14 @@ renames or scans archive folders. It defines:
 Rules carry stable IDs (`P1`, `N3`, `C2`, `S1`, `F5`, `X4`, `T2`); cite the ID.
 §8 is the machine-readable YAML form — parse that, not the prose.
 
-It is **v0.14, draft**, and it is also written to be handed to third-party tools,
-so it mostly describes the target, not the current code. §3 (groups), §4.1
-(parking areas, sibling of what they park), and X1a/X14 (historical EXIF matching and missing RAW
-sidecars) are settled and enforced by the restructure tool.
-Everywhere else: do not add enforcement, and do not "fix" the archive or the
-taxonomy to match it, until the open questions in it are answered.
+It is **v1.0, settled** — no open questions — and it is also written to be
+handed to third-party tools, so it still mostly describes the target, not the
+current code. §3 (groups), §4.1 (parking areas, sibling of what they park), and
+X1a/X14 (historical EXIF matching and missing RAW sidecars) are enforced by the
+restructure tool. Everywhere else the rule is decided but unbuilt: steps 7 and 8
+of that tool are placeholders, and §7's "fixing tool" is the specification they
+will be built to. Settled is not implemented — do not treat an unenforced rule
+as licence to "fix" a live archive in passing.
 
 ## OVERVIEW
 

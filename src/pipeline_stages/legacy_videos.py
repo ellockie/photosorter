@@ -9,7 +9,6 @@ This module owns the migration mechanics while the restructure front door
 supplies ExifTool, archive-safe moves, checksums, dry-run behaviour and logs.
 """
 
-import hashlib
 import os
 import stat
 from dataclasses import dataclass
@@ -35,17 +34,15 @@ from src.pipeline_stages.taxonomy import \
     duplicate_name, \
     sidecar_subdir, \
     taxonomy_subdir
+from src.utils.checksums import file_md5
 
 
 TO_RENAME_PREFIX = "__TO_RENAME__"
 
 
-def _default_checksum(path: Path):
-    digest = hashlib.md5()
-    with Path(path).open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+# The one implementation, under this module's own name (T8). A caller with a
+# config in hand passes its own chunked checksum in instead.
+_default_checksum = file_md5
 
 
 @dataclass

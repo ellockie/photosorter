@@ -36,8 +36,8 @@ from the one the pipeline uses, is exactly what T8 forbids.
 
 This is a **leaf module** in the sense the standard means (T8): it imports
 nothing from the project but other dependency-free modules — ``stamps``,
-``grouping_names``, ``taxonomy`` and ``parking`` (which reads ``months``) — and
-in particular nothing from ``src.core``. A maintenance tool can therefore load
+``grouping_names``, ``taxonomy``, ``parking`` (which reads ``months``) and
+``utils.checksums`` — and in particular nothing from ``src.core``. A maintenance tool can therefore load
 it without dragging exiftool, the dashboard and the converters in behind it.
 
 Every file lands in exactly one bucket of the returned report, and every file
@@ -45,7 +45,6 @@ that is *not* moved is named in the log, so a partial run can never look like a
 clean one.
 """
 
-import hashlib
 import os
 import re
 import shutil
@@ -78,6 +77,7 @@ from src.pipeline_stages.taxonomy import \
     sidecar_subdir, \
     strip_representative_suffixes, \
     taxonomy_dir_names
+from src.utils.checksums import file_md5
 
 # Per-folder, per-kind cap on individual filenames written to the log, so one
 # pathological folder cannot bury the rest of the run. Errors are never capped.
@@ -495,18 +495,11 @@ COMPANION_KINDS = (("exif", sidecar_extensions),
                    ("ocr", ocr_extensions))
 
 
-def default_checksum(path: Path, chunk_size: int = 1024 * 1024) -> str:
-    """MD5 of a file, read in chunks. The plain version.
-
-    Injected the way ``move`` is, for the same reason: ``src.core.file_md5`` is
-    this plus the project's config-driven chunk size, and the caller that has a
-    config passes it in.
-    """
-    digest = hashlib.md5()
-    with open(path, "rb") as handle:
-        for block in iter(lambda: handle.read(chunk_size), b""):
-            digest.update(block)
-    return digest.hexdigest()
+# MD5 of a file, read in chunks -- the plain version, for a caller with no
+# config in hand. Injected the way ``move`` is: a caller that has a config
+# passes one carrying its own ``safety.hash_chunk_size``. It is the repo's one
+# implementation under a local name (T8), not a second one.
+default_checksum = file_md5
 
 
 @dataclass

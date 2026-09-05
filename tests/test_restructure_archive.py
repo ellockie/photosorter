@@ -1449,7 +1449,7 @@ def test_a_nested_group_spans_everything_beneath_it(tmp_path, config):
 
 
 def test_media_inside_a_group_is_reported_and_never_moved(tmp_path, config, capsys):
-    """C3 is reported; C4, which would move it down, is open question 5."""
+    """C3 is reported; C4, which would move it down, is the fixing tool's."""
     root = make_archive(tmp_path)
     group = make_group(root, "2026-07-15_(Wed) - Sopot", {
         "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
@@ -1457,7 +1457,7 @@ def test_media_inside_a_group_is_reported_and_never_moved(tmp_path, config, caps
     loose = "2026-07-15_(Wed)__12.00.00__f1.7__SG23U.jpg"
     (group / loose).write_bytes(b"x")
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
-    assert "open question 5" in capsys.readouterr().out
+    assert "C4, for the fixing tool" in capsys.readouterr().out
     renamed = group.parent / month_entries(group)[0]
     assert (renamed / loose).is_file()               # still exactly where it was
 
@@ -1470,6 +1470,41 @@ def test_a_taxonomy_subfolder_inside_a_group_is_reported(tmp_path, config, capsy
     (group / "__RAW").mkdir()
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert "__RAW" in capsys.readouterr().out
+
+
+def test_a_geolocations_folder_inside_a_group_is_allowed(tmp_path, config, capsys):
+    """C3a: the one taxonomy subfolder a group may hold.
+
+    A track covering the whole trip belongs to the group, not to whichever day
+    it happens to start on -- so ``__GEOLOCATIONS`` is admitted here and
+    nothing else is.
+    """
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed) - Sopot", {
+        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+    })
+    tracks = group / "__GEOLOCATIONS"
+    tracks.mkdir()
+    (tracks / "norway.gpx").write_bytes(b"<gpx/>")
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    out = capsys.readouterr().out
+    assert "__GEOLOCATIONS" not in out
+    assert "not a dated folder" not in out
+    renamed = group.parent / month_entries(group)[0]
+    assert (renamed / "__GEOLOCATIONS" / "norway.gpx").is_file()
+
+
+def test_a_second_geolocations_folder_inside_a_group_is_reported(
+        tmp_path, config, capsys):
+    """C3a allows exactly one, the way C3 allows exactly one parking area."""
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed) - Sopot", {
+        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+    })
+    (group / "__GEOLOCATIONS").mkdir()
+    (group / "__geolocations_2").mkdir()
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert "__geolocations_2" in capsys.readouterr().out
 
 
 def test_a_parking_area_inside_a_group_is_allowed(tmp_path, config, capsys):
@@ -1494,13 +1529,13 @@ def test_a_parking_area_inside_a_group_is_allowed(tmp_path, config, capsys):
 
 def test_a_group_whose_earliest_file_predates_its_date_is_reported_not_moved(
         tmp_path, config, capsys):
-    """C12 / open question 6: the month-folder move is nobody's to make yet."""
+    """C12: settled since v1.0, but the move belongs to the fixing tool."""
     root = make_archive(tmp_path)
     group = make_group(root, "2026-07-15_(Wed)__08.14.02 - Sopot", {
         "2026-07-15_(Wed)__08.14.02": ["2026-06-30_(Tue)__08.14.02"],
     })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
-    assert "open question 6" in capsys.readouterr().out
+    assert "C12, for the fixing tool" in capsys.readouterr().out
     assert group.is_dir()                            # untouched, still where it was
 
 
@@ -1539,8 +1574,9 @@ def test_a_half_split_day_keeps_its_marker_and_is_reported(tmp_path, config, cap
     """A day with children AND shots of its own is both things at once.
 
     Taking ``__TO_SPLIT__`` off would strand the loose media -- step 3 finds
-    folders by that marker -- and moving it down into a child is C4, open
-    question 5. So the folder is left exactly as it is and reported.
+    folders by that marker -- and moving it down into a child is C4, which
+    the fixing tool does under a prompt. So the folder is left exactly as it
+    is and reported.
     """
     root = make_archive(tmp_path)
     group = make_group(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=3)", {
@@ -1551,7 +1587,7 @@ def test_a_half_split_day_keeps_its_marker_and_is_reported(tmp_path, config, cap
     assert month_entries(group) == [
         "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=3)"]      # untouched
     out = capsys.readouterr().out
-    assert "__TO_SPLIT__" in out and "open question 5" in out
+    assert "__TO_SPLIT__" in out and "C4, for the fixing tool" in out
 
 
 def test_a_name_a_person_wrote_survives_becoming_a_group(tmp_path, config):

@@ -1,6 +1,6 @@
 # Photo & Video Archive Standard
 
-**v0.14 — DRAFT. Under review. Partially enforced by the restructure tool.**
+**v1.0 — settled. Partially enforced by the restructure tool.**
 
 The target structure of the photo + video archive on disk. It exists to (a) drive
 the redesign of the **already-archived** material and (b) serve as the contract
@@ -10,6 +10,13 @@ folders and names the rest of the archive can join.
 
 Only the sections explicitly marked implemented are enforced. Existing tools
 are **not** otherwise assumed compliant.
+
+**What v1.0 means, and what it does not.** Every rule here is decided: a tool
+implementing one is implementing its final form, not a proposal that may move
+underneath it. It does not mean the archive complies, and it does not mean this
+repo implements all of it — §7's fixing tool is still to be built. The sections
+marked *Implemented* say what is enforced today; the rest is a contract waiting
+for its tool.
 
 **Conformance:** MUST / SHOULD / MAY as in RFC 2119. Every rule has a stable ID
 (`P1`, `N3`, …); cite the ID when reporting a violation. §8 is the normative
@@ -21,6 +28,7 @@ machine-readable form of everything above it — parse that, not the prose.
 
 ```text
 <ROOT>/<YYYY>/<NN>. <Month>/<dated folder>[/<dated folder>…][/<__SUBFOLDER>]
+<ROOT>/<YYYY>/__DUPLICATES                    <- the one year-level subfolder (S7)
 ```
 
 | ID | Rule |
@@ -30,6 +38,7 @@ machine-readable form of everything above it — parse that, not the prose.
 | P3 | Month folder is `NN. Month` — zero-padded number, dot, space, **fixed English** month name (`01. January` … `12. December`). Never locale-derived. |
 | P4 | Below a month folder, every directory MUST be a dated folder (§2) — leaf or group (§3) — an allowed subfolder (§4), or a parking area (§4.1). There is no fourth kind. |
 | P5 | The year and month a folder sits under MUST match the date in its own name, after the N7 day shift. |
+| P6 | Directly under a year folder sit its **month folders** and, optionally, **one `__DUPLICATES`** (S7). There is no third kind. A tool MUST NOT read `__DUPLICATES` as a month folder, and MUST NOT walk into it looking for dated folders: what is in it lost a name collision and is waiting for a person, not for the next pass. |
 
 ### §0 Out of scope
 
@@ -56,13 +65,18 @@ on.
 | --- | --- |
 | D1 | A derivative SHOULD carry its subject's leading stamp, which is what keys it to the shot. One that does is filed under that shot's event folder automatically. |
 | D2 | **A derivative with no usable stamp is never given an invented one** — the same rule as V4, for the same reason. It is not renamed from a neighbour, a folder name, or a file time. |
-| D3 | Instead, **the dated folder supplies the date the filename lacks**: an unkeyed derivative MUST still come to rest inside the `__EDITED` of the event folder it belongs to, and its own name is kept byte for byte. The folder is then the only claim being made, and it is one a person made. |
+| D3 | Instead, **the dated folder supplies the date the filename lacks**: an unkeyed derivative MUST still come to rest inside the `__EDITED` of the event folder it belongs to, and its own name is kept byte for byte. The folder is then the only claim being made, and it is one a person made. That folder is a **leaf** (§3) — not because leaves are more precise but because a group may hold no `__EDITED` at all (C3), so there is no other legal resting place. |
+| D3a | **"Somewhere in the trip" is not an attribution.** A person who can name the group but not the day has not finished D4, and no rule here finishes it for them: the file stays in `__PROCESSED` and is reported every run until someone picks a leaf. Reporting the same file indefinitely is the intended behaviour, not a defect — it is the archive saying a decision is outstanding. |
 | D4 | Attributing an unkeyed derivative to an event is a **human decision**, not a tool's. Until someone makes it, the file stays in `__PROCESSED` and is reported. A tool MUST NOT distribute unkeyed derivatives by guesswork. |
 | D5 | D3 is the **second exemption from F1** (after V10): a file inside `__EDITED` may open with something other than a stamp. A compliance checker reports it as unkeyed, not as malformed. |
 
-**[OPEN]** — D3 says the *event* folder is enough. It could be tightened to
-require the sub-event folder, which would be more precise and much more work to
-establish for a file with no time. Is event-level attribution enough?
+**Settled — v1.0.** This section used to ask whether event-level attribution
+was enough, or whether D3 should demand the sub-event folder. C3 answers it:
+the only dated folder that may hold an `__EDITED` is a leaf, so "the event
+folder" can only ever have meant the leaf, and the question was really about
+what happens to a derivative nobody can place that precisely. D3a says: nothing
+happens to it. It waits in `__PROCESSED`, reported, which is where D4 already
+put it.
 
 ### §0.2 `_Innych` — other people's media
 
@@ -202,8 +216,9 @@ stamp or de-duplicate at this level.
 | --- | --- |
 | C1 | A dated folder holding ≥1 dated child folder MUST carry `____GROUP____` as the **first element of its tail**, so it is distinguishable from a leaf at a glance and by regex: `2026-08-20_(Thu)__09.14.02#2026-08-27_(Thu)__18.31.50 - ____GROUP____(d=7) - Norway`. |
 | C2 | A leaf dated folder MUST NOT carry the marker. Adding or removing the last dated child flips it; a conforming tool maintains it. |
-| C3 | **A group's contents are closed.** Exactly three kinds may sit in one: dated leaf folders, dated groups, and at most one parking area (§4.1) holding the children it has emptied. No media, no loose files of any kind, and no taxonomy subfolder (§4) — a group has no files for an `__EXIF` or a `__RAW` to be about. |
-| C4 | Loose media met in a group is **moved down, never deleted and never renamed**: the shots are gathered into a dated child folder of their own by the ordinary rules — day boundary per N7, time per N3, tail ` - __TO_LABEL__` because no person has named them yet — and their sidecars and companions travel with them (X10), which carries the taxonomy subfolders holding those companions down one level too. This is a **migration action**; after it, nothing ever writes media into a group again. |
+| C3 | **A group's contents are closed.** Exactly four kinds may sit in one: dated leaf folders, dated groups, at most one parking area (§4.1) holding the children it has emptied, and at most one `__GEOLOCATIONS` (C3a). No media, no loose files of any kind, and no other taxonomy subfolder (§4) — a group has no files for an `__EXIF` or a `__RAW` to be about. |
+| C3a | **`__GEOLOCATIONS` is the one taxonomy subfolder a group may hold.** A track covering a fortnight in Norway is about the *group*, the way a sidecar is about one shot: filing it under the day it happens to start says something false, and cutting it into seven daily fragments edits a recording to fit the folders. So it is admitted here, and narrowly — geodata only (§8 `extensions.geodata`), never media, never a further subfolder — which leaves C3's real claim standing: a person or a tool that opens a group still finds nothing in it to review, rate, stamp or de-duplicate. A `.gpx` whose span fits inside one dated child belongs in **that child's** `__GEOLOCATIONS`; this one is for the tracks no single child can hold. It is *hand* in the sense of S3: recognised and preserved, never auto-populated — deciding a track spans a whole group is a reading of the track. Its contents are **excluded from the group's span and from its counts**, exactly as a parking area's are (H5, C14): a group states the extent of the photography it holds, and a track is a record of the trip, not a shot taken during it. |
+| C4 | Loose media met in a group is **moved down, never deleted and never renamed**: the shots are gathered into a dated child folder of their own by the ordinary rules — day boundary per N7, time per N3, tail ` - __TO_LABEL__` because no person has named them yet — and their sidecars and companions travel with them (X10), which carries the taxonomy subfolders holding those companions down one level too. A tool MAY perform this: the child it creates invents no date (N7 fixes the day, N3 the time) and no name (`__TO_LABEL__` is precisely the refusal to name one), which is what separates it from the inventions N6, D4 and V4 refuse. It writes only under `--apply`, and only after naming the group, the shots and the child it proposes, and getting a yes — the way step 2 prompts. Without `--apply` it reports. This is a **migration action**; after it, nothing ever writes media into a group again. |
 | C5 | A group uses the **same prefix convention** as any dated folder (§2). Its start is the capture time of the earliest file in its **whole subtree** (N3). |
 | C6 | **A group states both ends of its span, always** — `#<end>` appended directly to the dated prefix, before the tail. The name therefore carries an initial timestamp and a final one, and the range between them is exactly the extent of what the group holds. |
 | C7 | The end states **all of the date or none of it**. A span that closes on the day it opened writes the time alone — `#17.47.04` — because the start, two characters to the left, has already said which day. One that crosses a day writes the whole canonical stamp of N1, weekday included — `#2026-08-27_(Thu)__18.31.50`. There is no third case and no abbreviation: a fragment like `#27` made the reader carry the start's year and month across the `#` to work out which day was meant. |
@@ -211,9 +226,9 @@ stamp or de-duplicate at this level.
 | C9 | A single-day group still states its end, as the time — `…__11.03.27#22.14.09`. The claim is the same as a cross-day group's; only the half that would repeat the start is left off. A parser tries the time-only shape **first**: offered to the date branch, `#17.47.04` matches `#17` and leaves `.47.04` standing as tail, silently reading a time as the 17th of the month. |
 | C10 | The **start** keeps the full canonical prefix (C5) and leads the name, so alphabetical order stays chronological and every parser still reads the start date and time unchanged. |
 | C11 | **Both ends are tool-maintained.** Any run that adds, removes or retimes anything in the subtree recomputes the pair and renames the group. T7 — a folder named by a human is finished — protects the **description** in the tail, never the stamp. |
-| C12 | A group sits under the month folder of its **start** (P5). If the earliest file in the subtree leaves and the start crosses into another month or year, the group moves with it. The date is still never invented (N6); it is read off the contents, which is the one thing a group's own name is made of. |
+| C12 | A group sits under the month folder of its **start** (P5). If the earliest file in the subtree leaves and the start crosses into another month or year, the group moves with it — but never silently: a folder holding a fortnight of someone's life changing month is too large a surprise for a batch pass, so a tool moves it only under `--apply` and only after naming the group, the month folder it is in and the one it is bound for, and getting a yes. One prompt per group; a run that is refused reports and moves on, and P5 stands violated until a person says yes or moves it by hand. The date is still never invented (N6); it is read off the contents, which is the one thing a group's own name is made of. |
 | C13 | A child's date MUST fall within the group's span ±1 day. A sub-event split near the day boundary can land on the neighbouring date; anything further is a violation. |
-| C14 | Of the count letters (§2) only `d` — direct dated children — is ever written on a group. `i`/`v` cannot occur, C3 having removed them; `e`/`c`/`s`/`w` describe files a group does not hold. |
+| C14 | Of the count letters (§2) only `d` — direct dated children — is ever written on a group. `i`/`v` cannot occur, C3 having removed them; `e`/`c`/`s`/`w` describe files a group does not hold. The one thing it may hold, a trip-wide track in `__GEOLOCATIONS` (C3a), is **not counted**: it would show up as `s`, and `s` exists to warn that files are hiding below the top level where a reviewer will not meet them. A track is not hiding. It is filed. |
 | C16 | **A group nobody has named says so.** Its description comes from one of three places, in this order: a person (the group's own description, or the label it carried before it had children — never re-derived, T7); **agreement among its children**, when every direct dated child carries the same description, which invents nothing and is adopted verbatim; or, failing both, N11's `__TO_LABEL__` in the description slot. Anything short of unanimity — one child unnamed, or two disagreeing — is a name the tool would be making up, and N6's refusal to derive a date from contents is the same refusal one step over. The marker is deliberately **not sticky**: it is re-asked on every run, so a group picks up a name the moment its children agree on one or a person types one in. |
 | C15a | The abbreviated ends `#27`, `#09-11` and `#2027-01-03`, with or without a `__HH.MM.SS` after them, are **legacy spellings** of C7 — read-old/write-new, the same rule as N5 and C15. They MUST still parse; none is written again. |
 | C15 | `__CONTAINER__` is the **legacy spelling** of this marker. No tool ever wrote one — §3 proposed it and nothing implemented it — so the rename costs no folder on disk anything; a folder carries one only because a person typed it, or because a third party read this document at v0.8. It MUST still be **read** and converted; it MUST NOT be newly **written**, the same read-old/write-new rule as N5 and S5. |
@@ -242,6 +257,7 @@ stamp or de-duplicate at this level.
             2026-08-22_(Sat)__06.55.02 - Flåm
             2026-08-23_(Sun)__08.11.19 - the drive north
         2026-08-27_(Sat)__11.02.09 - going home
+        __GEOLOCATIONS\                    <- the whole trip's track (C3a)
     2026-07-18_(Sat)__11.03.27 - __TO_SPLIT__(i=79_v=2_w=1)\
         2026-07-18_(Sat)__11.03.27__fNA__T---__LNA__I---s__SG23U.mp4
         __EXIF\                              <- stills and videos share it (V3)
@@ -265,12 +281,13 @@ request to a person rather than a violation: a group with no name is a
 conforming group.
 
 C3 is **reported, never fixed**: media, loose files and taxonomy subfolders
-inside a group are named with the rule they break and left where they are,
-because moving them is C4 — open question 5. C12 is reported for the same
-reason (open question 6), as is a day that carries `__TO_SPLIT__` *and* has
-dated children *and* still has shots at its top level: it is a group by C1 and
-a day awaiting the grouper at once, and dropping either half would strand
-something.
+inside a group are named with the rule they break and left where they are.
+Moving them down is C4 and moving a group between month folders is C12 — both
+settled rules since v1.0, and both the job of §7's fixing tool, which is not
+built yet. Step 6 names them and says exactly that. The same goes for a day
+that carries `__TO_SPLIT__` *and* has dated children *and* still has shots at
+its top level: it is a group by C1 and a day awaiting the grouper at once, and
+dropping either half would strand something.
 
 **Why the span is written out and not computed.** Every other derived field in
 this document is written into the name too — the counts, the weekday, the
@@ -290,7 +307,7 @@ Inside a dated folder, exactly these are permitted. All optional.
 | `__TO_SHARE` | Queued for sharing — not yet sent | hand |
 | `__3D` | Stereo / 3D captures (MPO etc.) | hand |
 | `___OTHER` | Fits nowhere else — **three** leading underscores | hand |
-| `__DUPLICATES` | Burst discards, unused brackets, accidental / low-res duplicates, collision losers | tool |
+| `__DUPLICATES` | Burst discards, unused brackets, accidental / low-res duplicates. Also the one subfolder permitted at the **year** level, where collision losers go — S7 | tool |
 | `__EDITED` | Non-destructive edits and masters — `.xmp`, `.psd`, high-bit `.tif` | tool |
 | `__EXIF` | `._exif` sidecars, JSON camera logs | tool |
 | `__EXPORTED` | Full-resolution exports for print/archive | tool |
@@ -316,6 +333,7 @@ Inside a dated folder, exactly these are permitted. All optional.
 | S4 | A tool MUST read these names from §8, not restate them as literals. |
 | S5 | **No video folder in the ordinary case.** A datable video is a representative at the top level (V1). `__VIDEOS` and `__EXTRACTED_VIDEOS` were an earlier arrangement: they are **read** — recognised case-insensitively as taxonomy folders so an existing Windows archive is not reported as malformed and its companions can still be reunited — and **never written**, the same read-old/write-new rule N5 applies to timestamps. The restructure migration drains `__VIDEOS` per V12; `__EXTRACTED_VIDEOS` remains only recognised. |
 | S6 | `__PROCESSED` inside a dated folder is the **resting place a person chose** for derivatives the root `__PROCESSED` held (§0.1). It is recognised and preserved and, being *hand* (S3), never written to: D3 still routes what a tool can key automatically into `__EDITED`. Its files travel with their subject like any other subfolder's when an event is split. |
+| S7 | **`__DUPLICATES` sits at the year level too** — `<YYYY>\__DUPLICATES`, beside the month folders (P6) — and that is where a tool parks a file that lost a name collision (F4, L3, and the placement rules of §6). One folder per year rather than one per event, because a collision loser is something a person has to look at and decide about, and a year's worth of them scattered across four hundred event folders is a review nobody performs. The in-event `__DUPLICATES` keeps the job the table describes — burst discards and unused brackets, put there deliberately, belonging to that event. Nothing migrates between the two: they answer different questions, and a tool MUST NOT drain one into the other. |
 
 ### Implemented
 
@@ -323,6 +341,14 @@ Inside a dated folder, exactly these are permitted. All optional.
 `default_config()` writes no `taxonomy` block, so there is nothing to keep in
 step with it; `LEGACY_TAXONOMY` in the same module carries the two retired names
 for S5. Videos are routed to the top level by `folder_sorting.py`.
+
+S7 is implemented: `duplicates_folder` in `tools/restructure_archive.py` answers
+"where does a collision loser go" with the `__DUPLICATES` of the **subject's own
+year tree**, so a run spanning several years parks each year's losers under that
+year rather than pooling them. Both callers that can meet a collision take it as
+a parameter — companion placement (§6) and the legacy-container migration (L3) —
+so there is one answer, not two. The folder is excluded from the next run's
+index, or its contents would be re-reported as orphans forever.
 
 ### 4.1 Parking areas — `H`
 
@@ -403,29 +429,42 @@ emptied container is parked only after a recursive file check returns empty.
 
 ---
 
-### **[OPEN]** — still to settle
+### Settled — v1.0
 
-1. **Where does a collision loser go?** S4 puts `__DUPLICATES` inside a dated
-   folder. Companion placement (§6) instead writes one per **year tree**,
-   `<YYYY>\__DUPLICATES`, so a whole year's losers are in a single place to
-   review rather than scattered one per event. That is outside §4 as written and
-   wants either an amendment here or a change there before this leaves draft.
-4. **Where does a whole trip's `.gpx` go?** C3 leaves a group with nowhere to put
-   one: a track covering seven days in Norway must be filed in the day it starts,
-   split per day, or left out. Admitting `__GEOLOCATIONS` as a fourth permitted
-   entry would be the narrow exception, and it would be the first crack in "a
-   group holds no files" — which is the rule that makes a group cheap to walk.
-5. **May the tool create the `__TO_LABEL__` child C4 calls for, or must it
-   report?** Gathering loose media into a dated child is mechanical — N7 fixes
-   the day, N3 the time — but it invents a folder, and every other invention in
-   this document is refused (N6, D4, V4). The counter-argument is that C4 runs
-   once, during migration, over folders a person already grouped by hand.
-6. **What happens when C12 moves a group across a month folder?** Removing the
-   earliest child rewrites the start, which can push a group from `08. August`
-   into `07. July`. C12 says it moves. That is a large, surprising operation to
-   perform automatically on a folder holding a fortnight of someone's life, and
-   the alternative — report it and let a person move it — leaves the archive
-   transiently violating P5.
+The questions this section carried are answered, and each answer is a rule
+above rather than a note here. They keep the numbers they were asked under, so
+the gaps are real: 4 and 5 below were 4 and 5 in the draft, and 2 and 3 were
+settled in earlier versions and struck then.
+
+- **Q1 — where does a collision loser go?** At the **year** level — S7, P6. What
+  companion placement already writes, admitted into the standard rather than
+  migrated away from. A collision loser is a question for a person, and a
+  year's worth of them in one folder is a review someone can actually sit down
+  and do; the same files one-per-event are a review nobody performs. The
+  in-event `__DUPLICATES` keeps its own, different job.
+- **Q4 — where does a whole trip's `.gpx` go?** In the group's own
+  `__GEOLOCATIONS` — C3a. It is the single exception to "a group holds no
+  files", and it is drawn narrowly: geodata only, excluded from the span and
+  the counts, never auto-populated. What made a group cheap to walk was that
+  there is nothing in it to review, and a track does not change that. The
+  alternatives both damaged something real — filing a fortnight under the day
+  it started says something false, splitting it per day edits the recording to
+  fit the folders.
+- **Q5 — may the tool create the `__TO_LABEL__` child C4 calls for?** Yes — C4 —
+  under `--apply` and after a prompt. What N6, D4 and V4 refuse is *invention*:
+  a date deduced from a filename, a name deduced from contents. This child
+  invents neither. Its day comes from N7 and its time from N3, and
+  `__TO_LABEL__` is the refusal to name it. Prompting is what keeps a
+  mechanical move from being a silent one.
+- **Q6 — what happens when C12 moves a group across a month folder?** It moves —
+  C12 — under `--apply` and after a prompt, one per group. P5 is kept, which
+  the report-only alternative gave up on, and no fortnight of someone's life
+  changes month unannounced, which is what made moving it automatically the
+  wrong answer.
+
+Settling is not implementing. Q1 is what the placement pass already does; Q4 is
+a folder a person files into; Q5 and Q6 are obligations of §7's fixing tool,
+which does not exist yet and reports in the meantime.
 
 ---
 
@@ -445,7 +484,7 @@ YYYY-MM-DD_(Ddd)__HH.MM.SS[__RAW]__f<ap>__T<exp>__L<focal>__I<iso>__<CAM>[_RAW][
 | F3 | Semantic suffixes announce how the shot was taken and what else exists, in this fixed order: `_HAS_RAW` **or** `_FROM_RAW`, then `_HAS_EDIT`. Extension follows all of them. `_HAS_*` names a sibling elsewhere; `_FROM_*` names this file's own provenance. |
 | F3a | The two RAW suffixes are **mutually exclusive**: `_FROM_RAW` already says a RAW exists, so it never carries `_HAS_RAW` as well. |
 | F3b | Earlier names `_RAW` (has raw), `_EXT` (extracted) and `_EDT` (has edit) MUST still be **read** and MUST NOT be newly written — the N5 rule again. `_RAW` was the ambiguous one: on a camera JPEG it read as *this is a RAW*, the sense `RAW__` carries inside a filename, when it meant *a RAW exists*. |
-| F4 | Collision suffixes: `_DUPE_<md5>_<n>`, `_DIFFERS_<md5>_<n>`, `_LOWRES`. `_DUPE` is a byte-identical loser; `_DIFFERS` is one that claimed the same name with **different** bytes, which is a defect a person has to settle. Both are written by companion placement (§6). |
+| F4 | Collision suffixes: `_DUPE_<md5>_<n>`, `_DIFFERS_<md5>_<n>`, `_LOWRES`. `_DUPE` is a byte-identical loser; `_DIFFERS` is one that claimed the same name with **different** bytes, which is a defect a person has to settle. Both are written by companion placement (§6), and by the legacy-container migration when it meets the same collision (L3). The loser is parked in the **year-level** `__DUPLICATES` (S7), never beside the file whose name it lost. |
 | F5 | **One representative per shot at the top level, at most.** Every other version of the shot goes in a subfolder. |
 | F6 | A camera-produced image is the preferred representative. For a RAW-only shot one selected extraction may stand in; the others go to `__EXTRACTED`. |
 | F7 | RAW originals, sidecars, edits, exports, resizes and duplicates MUST NOT sit at the top level. *Why:* the top level is what a grouper GUI shows and what `i`/`v` count. A file in a subfolder is a file the reviewer never sees — which is what `s` exists to announce. |
@@ -519,7 +558,7 @@ numbers video separately from stills (`VID_0034` beside `IMG_0033`) interleaves
 wrongly, and a mixed-source day breaks it outright. Until that is settled, V4
 stands: no invented times.
 
-**[OPEN] — the cleanup tool.** To be implemented. Expected to be the interactive
+**To be implemented — the cleanup tool.** Expected to be the interactive
 counterpart of the fixing tool (§7): it lists `w=N` folders, shows each unresolved
 video with its anchors, takes the user's decision, and applies it under the same
 T1–T8 obligations. Not yet designed.
@@ -647,6 +686,7 @@ Any tool writing to the archive, first-party or third-party:
 | Timestamp grammar | `src/pipeline_stages/stamps.py` |
 | Folder-tail grammar, count bracket | `src/pipeline_stages/grouping_names.py` |
 | Month names | `src/constants/months.py` — `MONTH_FOLDERS` (re-exported by the legacy modules) |
+| File checksum | `src/utils/checksums.py` — `file_md5` (a leaf: standard library only) |
 | Extensions, day boundary, collision suffixes, paths | `config.json` / `src/core.py` `default_config()` |
 
 `stamps.py` and `grouping_names.py` are deliberately **leaf modules** importing
@@ -675,6 +715,18 @@ dragging exiftool, the dashboard and the converters in behind it.
    `src/constants/months.py`, a dependency-free leaf module. Both the legacy
    CLI and the pipeline re-export that one mapping; parking lookup uses it too.
 
+5. ~~**`file_md5`, four times**~~ — `core.py`, `common/common.py`,
+   `companion_matching.default_checksum` and `legacy_videos._default_checksum`.
+   One algorithm, three different chunk sizes: the harmless-looking kind of
+   drift, where nothing breaks until one copy is changed and the others are
+   not. `src/utils/checksums.py` holds the definition — a leaf importing only
+   the standard library, so `companion_matching` can take it and stay the
+   dependency-free module its docstring promises — and the other four names
+   are aliases for it. `tests/test_t8_single_definition.py` asserts they are
+   the same object, that the legacy CLI's spelling resolves to the same source
+   file, and that nothing else under `src/` or `tools/` hashes a file of its
+   own.
+
 ### Deliberately *not* consolidated
 
 Three date regexes remain outside `stamps.py`. Each parses something `stamps`
@@ -690,16 +742,15 @@ does not, so folding them in would widen a grammar rather than share one:
 3. **`folder_sorter.py:29`** belongs to the legacy CLI, which works in
    `____TO_SORT` — out of scope by §0 — and already accepts the forms it meets.
 
-### **[OPEN]** — still defined more than once
-
-1. **`file_md5`, twice** — `core.py:465` and `common/common.py:360`. Companion
-   placement needs a checksum and cannot import either without dragging the
-   pipeline in, so it takes one as a parameter and carries a stdlib default
-   (`default_checksum`). That is three implementations of MD5-a-file, which is
-   two too many.
-2. `grouping_names.py:73` duplicates the leading-stamp regex **deliberately** (its
-   docstring explains why: importing `stamps` pulls in the whole package
-   `__init__`). An accepted exception — but a test should hold the two equal.
+A fourth duplication is deliberate and is not a date regex. `grouping_names.py`
+spells out the three stamp fragments `stamps.py` defines rather than importing
+them, because it imports nothing from the project at all — which is what lets a
+maintenance tool load it by file path, and importing `stamps` would pull the
+package `__init__` in behind it. An accepted exception nobody was testing is
+just drift with a docstring, so `tests/test_t8_single_definition.py` holds the
+two spellings equal character for character, checks they read a table of sample
+names identically, and fails if either module ever grows a project import —
+that being the only thing making the copy legitimate.
 
 ### The fixing tool (to be implemented)
 
@@ -712,6 +763,16 @@ Maintains the `____GROUP____` marker (C2) and the span stamps either side of it
 roots. Exit codes `0` nothing to do, `1` changes pending or failures, `2` error
 — matching `tools/canonicalise_timestamp_names.py`.
 
+**Two obligations arrived with v1.0**, and each writes only under `--apply`, and
+only after a prompt naming exactly what it is about to move and taking a yes:
+gathering loose media out of a group into a `__TO_LABEL__` child (C4), and
+moving a group whose start has crossed into another month folder (C12). One
+prompt per group in both cases; a refusal is reported, not retried. It also
+recognises the two placements v1.0 settled and **creates neither**: a group's
+`__GEOLOCATIONS` (C3a), because which tracks span a whole group is a reading of
+the tracks, and the year-level `__DUPLICATES` (S7), which belongs to the
+placement pass that parks collision losers in it.
+
 ---
 
 ## 8. Machine-readable definitions
@@ -722,12 +783,14 @@ against a single path component.
 
 ```yaml
 standard: photo-archive
-version: 0.16
-status: draft
+version: 1.0
+status: settled
 
 path:
   levels: [root, year, month, dated_folder, "dated_folder*", subfolder]
   year: '^\d{4}$'
+  year_level_entries: [month_folder, "__DUPLICATES"]   # P6/S7 - there is no third kind
+  year_level_duplicates_are_walked: false              # P6 - not a month folder, not descended into
   month: '^(0[1-9]|1[0-2])\. (January|February|March|April|May|June|July|August|September|October|November|December)$'
   month_names:
     "01": "01. January"
@@ -811,19 +874,34 @@ group:
   description_marker_is_not_a_name: "__TO_LABEL__"   # C16/N11 - re-asked every run, never protected by T7
   human_owns: [description]           # C11/T7 - the tail description, never the stamps
   month_folder_from: start            # C12
+  month_folder_move:                  # C12 - settled v1.0
+    performed_by_tool: true
+    requires_apply: true
+    prompts_per_group: true
+    otherwise: report                 # P5 stands violated until a person acts
   count_letters_allowed: [d]          # C14
   contents:                           # C3 - closed set
     allowed: [dated_folder, group]
     media: false
     loose_files: false
-    taxonomy_subfolders: false
+    taxonomy_subfolders: ["__GEOLOCATIONS"]  # C3a - the only one, geodata only
     max_parking_areas: 1                     # C3
+    max_geolocations: 1                      # C3a
+  geolocations:                       # C3a
+    holds: geodata                    # extensions.geodata; never media, never a subfolder
+    auto_populated: false             # S3 - recognised and preserved, never written
+    excluded_from: [span, counts]     # C14 - a track is filed, not hiding
+    belongs_here_when: span_exceeds_any_single_dated_child
   loose_media_migration:              # C4 - migration only, runs once
     action: move_into_new_dated_child
     child_tail: " - __TO_LABEL__"
     child_day_from: day_boundary      # N7
     child_time_from: earliest_file    # N3
     companions_travel_with_media: true    # X10
+    performed_by_tool: true           # C4 - settled v1.0
+    requires_apply: true
+    prompts_before_moving: true       # one prompt per group; refusal is reported
+    otherwise: report
 
 parking_areas:                        # section 4.1
   closed_set: ["__EMPTY_SUBFOLDERS"]
@@ -846,6 +924,8 @@ parking_areas:                        # section 4.1
 subfolders:
   closed_set: true
   also_allowed: dated_child_folder
+  year_level_allowed: ["__DUPLICATES"]   # S7/P6 - collision losers, one per year tree
+  year_level_migrates_to_event_level: false   # S7 - the two answer different questions
   may_nest: false
   may_nest_exception: ["__EXIF", "__PREVIEWS", "__OCR"]   # S2 / X11: sidecar folders, one level
   tool_written:
@@ -902,6 +982,7 @@ files:
     duplicate: "_DUPE_<md5>_<n>"
     differing: "_DIFFERS_<md5>_<n>"
     low_resolution: "_LOWRES"
+    parked_in: "<YYYY>/__DUPLICATES"  # S7 - one per year tree, not per event
   top_level: representatives_only
   max_representatives_per_shot: 1
   absent_field_placeholders:          # V2: written, never omitted
@@ -1002,6 +1083,7 @@ tool_obligations:
   resolve_mapped_drive_to_unc: true
   long_path_prefix: '\\?\'
   human_named_folder_is_final: true
+  prompts_before: [group_loose_media_migration, group_month_folder_move]   # C4/C12
   exit_codes: {clean: 0, pending_or_failed: 1, error: 2}
 ```
 
@@ -1013,3 +1095,10 @@ The names and the taxonomy are load-bearing — hundreds of thousands of files a
 already on disk in this shape. An amendment is a change to this document **and** a
 migration for the existing archive, together, never one alone. Bump `version` in
 §8 with any normative change.
+
+v1.0 closed the last of the open questions. From here a change is an
+**amendment** — a decision being revisited, with a migration attached — not a
+decision that was still pending. A rule that turns out to be wrong is amended in
+the open, with the reasoning kept the way the *Settled* notes in §0.1 and §4
+keep theirs: a rule whose argument has been deleted is one that gets re-argued
+from scratch in a year.
