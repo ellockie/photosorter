@@ -206,6 +206,15 @@ fits no shape, a reparse point it would not follow, a companion with no
 subject, a group nobody has named, a step that did not finish. None of them is
 fixed for you, and each is listed with the reason it was left.
 
+**Every line this tool says itself is tagged " [restructure] " and cyan**, and
+every line it relays from a tool it called -- the canonicaliser's rename
+report, the grouper's stderr, the matching engine's log, ExifTool's -- is
+neither. Run together they are a wall; told apart, "which of these was the
+restructurer complaining about?" stops being a question. The tag is always the
+same colour whoever is speaking about whatever: the colour says who, and the
+message keeps whatever colour its own meaning earned, so an ``ok`` stays
+green, a ``warn`` yellow and a failure red inside a cyan-tagged line.
+
 The frames are box-drawing characters where the console can encode them and
 ASCII where it cannot: this prints to whatever code page the machine happens
 to have, and a ``UnicodeEncodeError`` raised while drawing the summary would
@@ -333,7 +342,6 @@ import textwrap
 from pathlib import Path
 from typing import NamedTuple
 
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CANONICALISE_TOOL_PATH = REPO_ROOT / "tools" / "canonicalise_timestamp_names.py"
 PIPELINE_STAGES_DIR = REPO_ROOT / "src" / "pipeline_stages"
@@ -367,8 +375,10 @@ def load_leaf_package():
     file. The engine stays a plain readable module with plain imports, and this
     tool still starts on a bare interpreter.
     """
-    for name, folder in (("src", REPO_ROOT / "src"),
-                         ("src.pipeline_stages", PIPELINE_STAGES_DIR)):
+    for name, folder in (
+        ("src", REPO_ROOT / "src"),
+        ("src.pipeline_stages", PIPELINE_STAGES_DIR),
+    ):
         if name in sys.modules:
             continue
         spec = importlib.machinery.ModuleSpec(name, None, is_package=True)
@@ -435,14 +445,24 @@ inside = canonicalise.inside
 # UnicodeEncodeError raised while drawing the summary would lose the very
 # lines the frame exists to make unmissable.
 
-FRAME_LIGHT = {"tl": "\u250c", "tr": "\u2510", "bl": "\u2514", "br": "\u2518",
-               "h": "\u2500", "v": "\u2502"}
-FRAME_HEAVY = {"tl": "\u2554", "tr": "\u2557", "bl": "\u255a", "br": "\u255d",
-               "h": "\u2550", "v": "\u2551"}
-FRAME_LIGHT_ASCII = {"tl": "+", "tr": "+", "bl": "+", "br": "+",
-                     "h": "-", "v": "|"}
-FRAME_HEAVY_ASCII = {"tl": "+", "tr": "+", "bl": "+", "br": "+",
-                     "h": "=", "v": "|"}
+FRAME_LIGHT = {
+    "tl": "\u250c",
+    "tr": "\u2510",
+    "bl": "\u2514",
+    "br": "\u2518",
+    "h": "\u2500",
+    "v": "\u2502",
+}
+FRAME_HEAVY = {
+    "tl": "\u2554",
+    "tr": "\u2557",
+    "bl": "\u255a",
+    "br": "\u255d",
+    "h": "\u2550",
+    "v": "\u2551",
+}
+FRAME_LIGHT_ASCII = {"tl": "+", "tr": "+", "bl": "+", "br": "+", "h": "-", "v": "|"}
+FRAME_HEAVY_ASCII = {"tl": "+", "tr": "+", "bl": "+", "br": "+", "h": "=", "v": "|"}
 
 GLYPHS = {"tick": "\u2714", "cross": "\u2716", "warn": "\u25b6", "dot": "\u2022"}
 # Bracketed rather than spelled out: the summary already says OK or FAILED in
@@ -508,10 +528,13 @@ def glyph(name):
 
 
 def frame_width():
-    return max(FRAME_MIN_WIDTH,
-               min(shutil.get_terminal_size((100, 24)).columns - 1
-                   - len(FRAME_MARGIN),
-                   FRAME_MAX_WIDTH))
+    return max(
+        FRAME_MIN_WIDTH,
+        min(
+            shutil.get_terminal_size((100, 24)).columns - 1 - len(FRAME_MARGIN),
+            FRAME_MAX_WIDTH,
+        ),
+    )
 
 
 def line(key, text, rendered=None):
@@ -545,17 +568,20 @@ def frame(title, lines, key, colour, heavy=False, closed=True):
     print(FRAME_MARGIN + colourise(head, key, colour))
 
     edge = colourise(box["v"], key, colour)
-    inner = width - 4                       # "| " ... " |"
+    inner = width - 4  # "| " ... " |"
     for line_key, text, rendered in lines:
-        body = rendered if rendered is not None else colourise(text, line_key,
-                                                               colour)
+        body = rendered if rendered is not None else colourise(text, line_key, colour)
         if closed and len(text) <= inner:
-            print("%s%s %s%s %s" % (FRAME_MARGIN, edge, body,
-                                    " " * (inner - len(text)), edge))
+            print(
+                "%s%s %s%s %s"
+                % (FRAME_MARGIN, edge, body, " " * (inner - len(text)), edge)
+            )
         else:
             print("%s%s %s" % (FRAME_MARGIN, edge, body))
-    print(FRAME_MARGIN + colourise(box["bl"] + box["h"] * (width - 2)
-                                   + box["br"], key, colour))
+    print(
+        FRAME_MARGIN
+        + colourise(box["bl"] + box["h"] * (width - 2) + box["br"], key, colour)
+    )
 
 
 def banner(headline, detail, key, colour):
@@ -570,20 +596,98 @@ def banner(headline, detail, key, colour):
     width = frame_width()
     inner = width - 4
     edge = colourise(box["v"], key, colour)
-    print(FRAME_MARGIN + colourise(box["tl"] + box["h"] * (width - 2)
-                                   + box["tr"], key, colour))
-    for text, emphasis in (("", False), (headline, True), (detail, False),
-                           ("", False)):
+    print(
+        FRAME_MARGIN
+        + colourise(box["tl"] + box["h"] * (width - 2) + box["tr"], key, colour)
+    )
+    for text, emphasis in (("", False), (headline, True), (detail, False), ("", False)):
         text = text[:inner]
         pad = inner - len(text)
         left = pad // 2
         body = colourise(text, key, colour)
         if emphasis and colour and text:
             body = "\033[1m" + body
-        print("%s%s %s%s%s %s" % (FRAME_MARGIN, edge, " " * left, body,
-                                  " " * (pad - left), edge))
-    print(FRAME_MARGIN + colourise(box["bl"] + box["h"] * (width - 2)
-                                   + box["br"], key, colour))
+        print(
+            "%s%s %s%s%s %s"
+            % (FRAME_MARGIN, edge, " " * left, body, " " * (pad - left), edge)
+        )
+    print(
+        FRAME_MARGIN
+        + colourise(box["bl"] + box["h"] * (width - 2) + box["br"], key, colour)
+    )
+
+
+# --------------------------------------------------------------------------
+# Whose voice a line is in
+# --------------------------------------------------------------------------
+#
+# This tool prints two kinds of line: the ones it says itself, and the ones it
+# relays from a tool it called -- the canonicaliser, the grouper, the
+# companion-matching engine, ExifTool. Told apart they are a run; run together
+# they are a wall, and "which of these was the restructurer complaining about?"
+# is a question somebody ends up asking at the wrong moment.
+#
+# So everything this tool says itself is tagged and cyan, and everything it
+# relays is neither. The tag is the whole of the distinction and it is always
+# the same colour, whatever the line means: the colour says who is speaking,
+# the message keeps whatever colour its meaning already earned.
+#
+# ok / warn / FAILED mean something -- something finished, something wants a
+# look, something broke -- and keep their green, yellow and red. "bold" and
+# "dim" are emphasis rather than meaning, so those are the ones that become
+# cyan: this tool speaking normally, loudly or quietly.
+#
+# The frames are exempt. A frame is already unmistakably this tool's, it is
+# already coloured by what it is saying, and a tag inside a box would only
+# take width away from the paths in it.
+
+SPEAKER_TAG = " [restructure] "
+SPEAKER_GUTTER = " " * len(SPEAKER_TAG)
+SPEAKER_COLOUR = "\033[96m"  # bright cyan
+SPEAKER_EMPHASIS = {"bold": "\033[1;96m", "dim": "\033[2;96m"}
+COLOUR_OFF = "\033[0m"
+
+# The keys whose colour is a statement about the message, not about the
+# speaker, and which therefore survive being spoken by this tool.
+MEANS_SOMETHING = ("ok", "warn", FAILED)
+
+
+def speak(message, key, colour):
+    """Render one of this tool's own lines: tagged, and cyan unless it means
+    something else.
+
+    A message that spans lines is tagged once and gutter-aligned after that,
+    so a two-line rename report reads as one thing said rather than two. Blank
+    lines stay blank: a spacer with a tag on it is not a spacer.
+    """
+    lines, tagged = [], False
+    for text in message.split("\n"):
+        if not text.strip():
+            lines.append("")
+            continue
+        if key in MEANS_SOMETHING:
+            body = colourise(text, key, colour)
+        elif colour:
+            body = SPEAKER_EMPHASIS.get(key, SPEAKER_COLOUR) + text + COLOUR_OFF
+        else:
+            body = text
+        lines.append(
+            "%s %s"
+            % (
+                (
+                    (
+                        SPEAKER_COLOUR + SPEAKER_TAG + COLOUR_OFF
+                        if colour
+                        else SPEAKER_TAG
+                    )
+                    if not tagged
+                    else SPEAKER_GUTTER
+                ),
+                body,
+            )
+        )
+        tagged = True
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------
@@ -612,31 +716,39 @@ RENAME_FAILURES = "FOLDERS THAT COULD NOT BE RENAMED"
 
 ISSUE_NOTES = {
     NON_COMPLIANT: "reported, never fixed -- what to do with a folder the "
-                   "standard does not describe is a decision for a person",
-    STEPS_FAILED: "the run stopped here; whatever follows a stopped step "
-                  "never ran",
+    "standard does not describe is a decision for a person",
+    STEPS_FAILED: "the run stopped here; whatever follows a stopped step " "never ran",
     REFUSED_PATHS: "not followed and not read, so nothing below them was "
-                   "seen by this run at all",
+    "seen by this run at all",
     GROUPER_FAILURES: "the folder still carries its marker -- re-run step 3 "
-                      "once the grouper starts",
+    "once the grouper starts",
     PASSED_OVER: "the grouper shows a folder's top level only; --open-all "
-                 "opens these anyway",
+    "opens these anyway",
     PARK_FAILURES: "the folder holds no file anywhere and is still sitting "
-                   "in the month",
+    "in the month",
     RECONCILE_ERRORS: "a companion or a sidecar was left exactly where it was",
     WANTS_A_LOOK: "nothing was moved on a guess -- every one of these is a "
-                  "judgement call",
+    "judgement call",
     AWAITING_A_NAME: "their children disagree or are themselves unnamed, and "
-                     "a name is not this tool's to invent",
+    "a name is not this tool's to invent",
     RENAME_FAILURES: "the name on the disk still says what it said before",
 }
 
 # Failures first, because they change what the rest of the run means; the
 # folders the standard cannot describe last, because they are the only group
 # no future step will ever settle on its own.
-ISSUE_ORDER = [STEPS_FAILED, GROUPER_FAILURES, RENAME_FAILURES, PARK_FAILURES,
-               RECONCILE_ERRORS, REFUSED_PATHS, PASSED_OVER, WANTS_A_LOOK,
-               AWAITING_A_NAME, NON_COMPLIANT]
+ISSUE_ORDER = [
+    STEPS_FAILED,
+    GROUPER_FAILURES,
+    RENAME_FAILURES,
+    PARK_FAILURES,
+    RECONCILE_ERRORS,
+    REFUSED_PATHS,
+    PASSED_OVER,
+    WANTS_A_LOOK,
+    AWAITING_A_NAME,
+    NON_COMPLIANT,
+]
 
 
 def group_issues(flags, limit=None):
@@ -656,9 +768,11 @@ def group_issues(flags, limit=None):
             index[heading] = []
             headings.append(heading)
         index[heading].append((item, note))
-    headings.sort(key=lambda heading: (ISSUE_ORDER.index(heading)
-                                       if heading in ISSUE_ORDER
-                                       else len(ISSUE_ORDER)))
+    headings.sort(
+        key=lambda heading: (
+            ISSUE_ORDER.index(heading) if heading in ISSUE_ORDER else len(ISSUE_ORDER)
+        )
+    )
     groups = []
     for heading in headings:
         items = index[heading]
@@ -676,23 +790,30 @@ def issue_body(groups, notes=True):
         lines.append(line(FAILED, "%s  (%d)" % (heading, len(items) + hidden)))
         note = ISSUE_NOTES.get(heading) if notes else None
         for index, piece in enumerate(
-                textwrap.wrap(note, max(30, frame_width() - 12))
-                if note else []):
-            lines.append(line("dim", "    %s %s"
-                              % ("--" if index == 0 else "  ", piece)))
+            textwrap.wrap(note, max(30, frame_width() - 12)) if note else []
+        ):
+            lines.append(
+                line("dim", "    %s %s" % ("--" if index == 0 else "  ", piece))
+            )
         for item, item_note in items:
             lines.append(line("warn", "    %s %s" % (glyph("dot"), item)))
             if item_note:
                 lines.append(line("dim", "        %s" % item_note))
         if hidden:
-            lines.append(line("dim", "    ... and %d more, listed in full at "
-                                     "the end of the run" % hidden))
+            lines.append(
+                line(
+                    "dim",
+                    "    ... and %d more, listed in full at "
+                    "the end of the run" % hidden,
+                )
+            )
     return lines
 
 
 # --------------------------------------------------------------------------
 # Target resolution
 # --------------------------------------------------------------------------
+
 
 def report_refused(run, refused, indent=""):
     """Say what a walk would not follow, and keep it for the end of the run.
@@ -719,11 +840,11 @@ def path_is_reparse_point(path):
     try:
         status = os.lstat(extended_path(path))
     except OSError:
-        return True                            # unreadable: treat as untrusted
+        return True  # unreadable: treat as untrusted
     tag = getattr(status, "st_reparse_tag", 0)
     if tag:
         return True
-    return os.path.islink(str(path))           # non-Windows
+    return os.path.islink(str(path))  # non-Windows
 
 
 def year_children(folder):
@@ -775,8 +896,11 @@ def scan_roots(target, report):
     years = year_children(target)
     if not years:
         return [target]
-    report("dim", "Archive root: restricted to its %d year tree(s) -- %s"
-                  % (len(years), ", ".join(path.name for path in years)))
+    report(
+        "dim",
+        "Archive root: restricted to its %d year tree(s) -- %s"
+        % (len(years), ", ".join(path.name for path in years)),
+    )
     return years
 
 
@@ -806,7 +930,8 @@ def resolve_run_target(args, report):
             "%s does not look like an archive: it is not a year folder, it is "
             "not inside one, and it holds none.\nNothing was touched. Check "
             "the path, or pass --force-target if this really is the tree you "
-            "mean." % target)
+            "mean." % target
+        )
 
     if canonicalise.drive_is_network(target):
         report("dim", "Target is on a network location.")
@@ -816,6 +941,7 @@ def resolve_run_target(args, report):
 # --------------------------------------------------------------------------
 # Journal
 # --------------------------------------------------------------------------
+
 
 class Journal:
     """An append-only record of what an applied run did.
@@ -833,8 +959,10 @@ class Journal:
     def write(self, event, **fields):
         if self.path is None:
             return
-        record = {"at": canonicalise.stamps.format_stamp(datetime.datetime.now()),
-                  "event": event}
+        record = {
+            "at": canonicalise.stamps.format_stamp(datetime.datetime.now()),
+            "event": event,
+        }
         record.update(fields)
         try:
             with open(extended_path(self.path), "a", encoding="utf-8") as handle:
@@ -848,6 +976,7 @@ class Journal:
 # --------------------------------------------------------------------------
 # Steps 1 and 3 -- canonicalise names
 # --------------------------------------------------------------------------
+
 
 def step_canonicalise(run, label):
     """Canonicalise each tree, then park what that marked EMPTY (H4).
@@ -874,7 +1003,7 @@ def step_canonicalise(run, label):
             argv.append("--no-colour")
         try:
             code = canonicalise.main(argv)
-        except SystemExit as stop:              # argparse inside the tool
+        except SystemExit as stop:  # argparse inside the tool
             code = stop.code if isinstance(stop.code, int) else 2
         except OSError as error:
             run.report(FAILED, "Canonicalise failed on %s: %s" % (tree, error))
@@ -894,6 +1023,7 @@ def step_canonicalise(run, label):
 # Step 2 -- group the __TO_SPLIT__ folders
 # --------------------------------------------------------------------------
 
+
 def find_to_split_folders(run):
     """Every folder still carrying the marker, oldest day first.
 
@@ -904,8 +1034,10 @@ def find_to_split_folders(run):
     for tree in run.trees:
         root_key = path_key(tree)
         for directory, _files in canonicalise.walk_bottom_up(tree, root_key, refused):
-            if (TO_SPLIT_MARKER in directory.name
-                    and not parking.is_inside_parking_area(directory)):
+            if (
+                TO_SPLIT_MARKER in directory.name
+                and not parking.is_inside_parking_area(directory)
+            ):
                 found.append(directory)
     report_refused(run, refused)
     # Alphabetical is oldest-day-first, because every name opens with
@@ -945,7 +1077,8 @@ def top_level_media(folder, settings):
     except OSError:
         return None
     return canonicalise.grouping.count_media(
-        names, settings.image_exts, settings.video_exts, settings.preview_exts)
+        names, settings.image_exts, settings.video_exts, settings.preview_exts
+    )
 
 
 def partition_groupable(folders, run):
@@ -986,13 +1119,18 @@ def report_passed_over(run, passed_over):
     """Say what was left unopened, and why, rather than dropping it silently."""
     if not passed_over:
         return
-    run.report("warn", "%d marked folder(s) have nothing for the grouper to show:"
-               % len(passed_over))
+    run.report(
+        "warn",
+        "%d marked folder(s) have nothing for the grouper to show:" % len(passed_over),
+    )
     for folder, reason in passed_over:
         run.report("dim", "    %s  (%s)" % (folder.name, reason))
         run.flag(PASSED_OVER, folder, reason)
-    run.report("dim", "    The GUI shows a folder's top level only. "
-                      "Pass --open-all to open these anyway.")
+    run.report(
+        "dim",
+        "    The GUI shows a folder's top level only. "
+        "Pass --open-all to open these anyway.",
+    )
 
 
 def grouper_paths(run):
@@ -1000,22 +1138,26 @@ def grouper_paths(run):
     settings = canonicalise._config().get("screenshot_grouping", {})
     install = grouper.grouper_install(settings)
     if install is None:
-        run.report("warn",
-                   "The grouper is not installed on this machine "
-                   "(screenshot_grouping.python = %r, .project_path = %r in "
-                   "config.json)." % (settings.get("python", ""),
-                                      settings.get("project_path", "")))
+        run.report(
+            "warn",
+            "The grouper is not installed on this machine "
+            "(screenshot_grouping.python = %r, .project_path = %r in "
+            "config.json)."
+            % (settings.get("python", ""), settings.get("project_path", "")),
+        )
         return None
     python_exe, project_path = install
     if not run.allow_network_tool:
         for path in (python_exe, project_path):
             if canonicalise.drive_is_network(path):
-                run.report(FAILED,
-                           "The grouper lives on a network location (%s). An "
-                           "executable on a share can be replaced between one "
-                           "folder and the next, so it is not run from there."
-                           "\nPass --allow-network-tool if that share is yours "
-                           "and you trust it." % path)
+                run.report(
+                    FAILED,
+                    "The grouper lives on a network location (%s). An "
+                    "executable on a share can be replaced between one "
+                    "folder and the next, so it is not run from there."
+                    "\nPass --allow-network-tool if that share is yours "
+                    "and you trust it." % path,
+                )
                 return None
     return python_exe, project_path
 
@@ -1051,8 +1193,9 @@ def step_group(run):
     """
     marked = find_to_split_folders(run)
     if not marked:
-        run.report("ok", "No folder carries the %s marker; nothing to group."
-                   % TO_SPLIT_MARKER)
+        run.report(
+            "ok", "No folder carries the %s marker; nothing to group." % TO_SPLIT_MARKER
+        )
         return 0
 
     counted, passed_over = partition_groupable(marked, run)
@@ -1061,31 +1204,41 @@ def step_group(run):
         run.journal.write("group_passed_over", folder=str(folder), reason=reason)
 
     if not counted:
-        run.report("ok", "\nNothing to group: all %d marked folder(s) have an "
-                         "empty top level." % len(marked))
+        run.report(
+            "ok",
+            "\nNothing to group: all %d marked folder(s) have an "
+            "empty top level." % len(marked),
+        )
         return 0
 
     folders = [folder for folder, _images, _videos in counted]
-    top_level = {path_key(folder): (images, videos)
-                 for folder, images, videos in counted}
+    top_level = {
+        path_key(folder): (images, videos) for folder, images, videos in counted
+    }
 
     if run.max_folders and len(folders) > run.max_folders:
-        run.report("warn", "%d folder(s) carry the marker; limiting this run "
-                           "to the first %d (--max-folders / "
-                           "screenshot_grouping.max_folders). The rest stay "
-                           "marked and come up on the next run."
-                   % (len(folders), run.max_folders))
-        folders = folders[:run.max_folders]
+        run.report(
+            "warn",
+            "%d folder(s) carry the marker; limiting this run "
+            "to the first %d (--max-folders / "
+            "screenshot_grouping.max_folders). The rest stay "
+            "marked and come up on the next run." % (len(folders), run.max_folders),
+        )
+        folders = folders[: run.max_folders]
 
     run.report("bold", "\n%d folder(s) to group:" % len(folders))
     for folder in folders:
         images, videos = top_level[path_key(folder)]
-        run.report("dim", "    %s  [%d image(s), %d video(s) at the top level]"
-                   % (folder, images, videos))
+        run.report(
+            "dim",
+            "    %s  [%d image(s), %d video(s) at the top level]"
+            % (folder, images, videos),
+        )
 
     if not run.apply:
-        run.report("ok", "\nDry run: the grouper was not opened. "
-                         "Re-run with --apply.")
+        run.report(
+            "ok", "\nDry run: the grouper was not opened. " "Re-run with --apply."
+        )
         return 1
 
     install = grouper_paths(run)
@@ -1093,8 +1246,9 @@ def step_group(run):
         return 2
     python_exe, project_path = install
 
-    if not run.confirm("Open the grouper on %d folder(s) under\n    %s"
-                       % (len(folders), run.target)):
+    if not run.confirm(
+        "Open the grouper on %d folder(s) under\n    %s" % (len(folders), run.target)
+    ):
         run.report("warn", "Not confirmed; nothing was opened.")
         return 2
 
@@ -1102,8 +1256,10 @@ def step_group(run):
     for number, folder in enumerate(folders, start=1):
         reason = still_safe_to_open(folder, run)
         if reason is not None:
-            run.report("dim", "[%d/%d] skipping %s: %s"
-                       % (number, len(folders), folder.name, reason))
+            run.report(
+                "dim",
+                "[%d/%d] skipping %s: %s" % (number, len(folders), folder.name, reason),
+            )
             run.journal.write("group_skipped", folder=str(folder), reason=reason)
             skipped += 1
             continue
@@ -1121,29 +1277,41 @@ def step_group(run):
         if result.returncode != 0:
             # The bare exit code says nothing about what went wrong -- the
             # grouper's own message only reaches its stderr.
-            run.report(FAILED, "    ! grouper exited with code %d"
-                       % result.returncode)
-            run.flag(GROUPER_FAILURES, folder,
-                     "the grouper exited with code %d" % result.returncode)
-            run.report("dim", "      command: %s" % subprocess.list2cmdline(
-                grouper.grouper_command(python_exe, project_path, folder)))
+            run.report(FAILED, "    ! grouper exited with code %d" % result.returncode)
+            run.flag(
+                GROUPER_FAILURES,
+                folder,
+                "the grouper exited with code %d" % result.returncode,
+            )
+            run.report(
+                "dim",
+                "      command: %s"
+                % subprocess.list2cmdline(
+                    grouper.grouper_command(python_exe, project_path, folder)
+                ),
+            )
             for line in grouper.stderr_tail(result.stderr):
-                run.report("dim", "      %s" % line)
-            run.journal.write("group_failed", folder=str(folder),
-                              exit_code=result.returncode)
+                run.report("dim", "      %s" % line, speaker=False)
+            run.journal.write(
+                "group_failed", folder=str(folder), exit_code=result.returncode
+            )
             failures += 1
             continue
         run.journal.write("group_closed", folder=str(folder))
         opened += 1
 
-    run.report("bold", "\n%d folder(s) grouped, %d skipped, %d failure(s)."
-               % (opened, skipped, failures))
+    run.report(
+        "bold",
+        "\n%d folder(s) grouped, %d skipped, %d failure(s)."
+        % (opened, skipped, failures),
+    )
     return 1 if failures else 0
 
 
 # --------------------------------------------------------------------------
 # Steps 2 and 4 -- reunite companions with their subjects
 # --------------------------------------------------------------------------
+
 
 def dated_folders(run):
     """Every dated folder under the target, parents before children.
@@ -1159,8 +1327,9 @@ def dated_folders(run):
         for directory, _files in canonicalise.walk_bottom_up(tree, root_key, refused):
             if path_key(directory) == root_key:
                 continue
-            if (canonicalise.stamps.day_prefix(directory.name)
-                    and not parking.is_inside_parking_area(directory)):
+            if canonicalise.stamps.day_prefix(
+                directory.name
+            ) and not parking.is_inside_parking_area(directory):
                 found.append(directory)
     report_refused(run, refused)
     # Sorting the paths puts a parent before its children, which is the order
@@ -1179,9 +1348,11 @@ def archive_mover(run):
     not strand a folder half-reconciled.
     """
     if not run.apply:
+
         def record(source, target):
             run.planned.append((Path(source), Path(target)))
             return Path(target)
+
         return record
 
     attempts, delay_seconds = canonicalise.configured_retry()
@@ -1190,6 +1361,7 @@ def archive_mover(run):
         target = Path(target)
         os.makedirs(extended_path(target.parent), exist_ok=True)
         return canonicalise.rename_path(source, target, attempts, delay_seconds)
+
     return move
 
 
@@ -1199,19 +1371,23 @@ def archive_checksum(run):
     Chunked, at the size ``safety.hash_chunk_size`` configures, because a
     sidecar is small but a ".lrv" proxy is not and this runs over a share.
     """
-    chunk_size = canonicalise._config().get("safety", {}).get(
-        "hash_chunk_size", 1024 * 1024)
+    chunk_size = (
+        canonicalise._config().get("safety", {}).get("hash_chunk_size", 1024 * 1024)
+    )
 
     def checksum(path):
         return matching.default_checksum(Path(path), chunk_size)
+
     return checksum
 
 
 def archive_sidecar_writer(run):
     """Write ExifTool text once, exclusively, or record the dry-run action."""
     if not run.apply:
+
         def record(target, _text, source):
             run.planned_video_sidecars.append((Path(source), Path(target)))
+
         return record
 
     def write(target, text, source):
@@ -1221,8 +1397,10 @@ def archive_sidecar_writer(run):
         # os.rename rule: an unexpected destination is never replaced.
         with open(extended_path(target), "x", encoding="iso-8859-1") as output:
             output.write(text)
-        run.journal.write("video_sidecar_generated", video=str(source),
-                          sidecar=str(target))
+        run.journal.write(
+            "video_sidecar_generated", video=str(source), sidecar=str(target)
+        )
+
     return write
 
 
@@ -1235,19 +1413,20 @@ def generate_missing_raw_sidecars(run, placement, config, move):
         for extension in config.get("extensions", {}).get("raw_images", [])
     }
     raw_missing = [
-        path for path in placement.missing_sidecars
-        if path.suffix.lower() in raw_exts
+        path for path in placement.missing_sidecars if path.suffix.lower() in raw_exts
     ]
     other_missing = [
-        path for path in placement.missing_sidecars
+        path
+        for path in placement.missing_sidecars
         if path.suffix.lower() not in raw_exts
     ]
     settings = config.get("raw_sidecar_generation", {})
     if not raw_missing or settings.get("enabled", True) is False:
         return 0, 0
 
-    run.report("bold", "\nRAW sidecars: %d missing after tolerant matching"
-               % len(raw_missing))
+    run.report(
+        "bold", "\nRAW sidecars: %d missing after tolerant matching" % len(raw_missing)
+    )
     for raw in raw_missing:
         run.report("dim", "  %s" % raw)
 
@@ -1255,47 +1434,65 @@ def generate_missing_raw_sidecars(run, placement, config, move):
         run.planned_generations.extend(raw_missing)
         placement.missing_sidecars = other_missing
         placement.media_without_sidecar = len(other_missing)
-        run.report("ok", "  %d RAW sidecar(s) to generate with ExifTool "
-                         "under --apply." % len(raw_missing))
+        run.report(
+            "ok",
+            "  %d RAW sidecar(s) to generate with ExifTool "
+            "under --apply." % len(raw_missing),
+        )
         return len(raw_missing), 0
 
-    def log(message):
-        run.report("warn", "  %s" % message)
+    def log(message):  # ExifTool's own words
+        run.report("warn", "  %s" % message, speaker=False)
 
     generated = exif_sidecars.generate_adjacent_sidecars(
         raw_missing,
         config.get("external_tools", {}).get("exiftool", "exiftool"),
-        log=log)
+        log=log,
+    )
     completed = set()
     move_errors = 0
     for temporary in generated.created:
-        raw = Path(str(temporary)[:-len(exif_sidecars.SIDECAR_SUFFIX)])
-        destination = (Path(taxonomy.sidecar_subdir(raw.parent, config, "exif"))
-                       / temporary.name)
+        raw = Path(str(temporary)[: -len(exif_sidecars.SIDECAR_SUFFIX)])
+        destination = (
+            Path(taxonomy.sidecar_subdir(raw.parent, config, "exif")) / temporary.name
+        )
         try:
             move(temporary, destination)
         except Exception as error:
-            run.flag(RECONCILE_ERRORS, destination,
-                     "generated sidecar could not be placed: %s" % error)
-            run.report(FAILED, "  ! could not place generated sidecar %s: %s"
-                       % (temporary, error))
+            run.flag(
+                RECONCILE_ERRORS,
+                destination,
+                "generated sidecar could not be placed: %s" % error,
+            )
+            run.report(
+                FAILED,
+                "  ! could not place generated sidecar %s: %s" % (temporary, error),
+            )
             move_errors += 1
             continue
         completed.add(os.path.normcase(os.path.abspath(str(raw))))
-        run.journal.write("raw_sidecar_generated", raw=str(raw),
-                          sidecar=str(destination))
+        run.journal.write(
+            "raw_sidecar_generated", raw=str(raw), sidecar=str(destination)
+        )
         run.report("dim", "  + %s" % destination)
 
     failed_raws = [
-        raw for raw in raw_missing
+        raw
+        for raw in raw_missing
         if os.path.normcase(os.path.abspath(str(raw))) not in completed
     ]
     placement.missing_sidecars = other_missing + failed_raws
     placement.media_without_sidecar = len(placement.missing_sidecars)
     errors = generated.errors + move_errors
-    run.report("bold", "Generated and placed %d/%d RAW sidecar(s)%s."
-               % (len(completed), len(raw_missing),
-                  " with %d error(s)" % errors if errors else ""))
+    run.report(
+        "bold",
+        "Generated and placed %d/%d RAW sidecar(s)%s."
+        % (
+            len(completed),
+            len(raw_missing),
+            " with %d error(s)" % errors if errors else "",
+        ),
+    )
     return len(completed), errors
 
 
@@ -1315,8 +1512,10 @@ def find_parking_areas(run):
 def archive_empty_dir_remover(run):
     """Remove one verified-empty parking shell, or record that dry-run action."""
     if not run.apply:
+
         def record(folder):
             run.planned_removals.append(Path(folder))
+
         return record
 
     attempts, delay_seconds = canonicalise.configured_retry()
@@ -1324,8 +1523,10 @@ def archive_empty_dir_remover(run):
     def remove(folder):
         folder = Path(folder)
         canonicalise.with_retry(
-            lambda: os.rmdir(extended_path(folder)), attempts, delay_seconds)
+            lambda: os.rmdir(extended_path(folder)), attempts, delay_seconds
+        )
         run.journal.write("parking_shell_removed", folder=str(folder))
+
     return remove
 
 
@@ -1333,19 +1534,24 @@ def hoist_nested_parking(run, move):
     """Apply H2/H6 before any reconciliation pass descends into the tree."""
     areas = find_parking_areas(run)
 
-    def log(message):
-        run.report("dim", "  %s" % message.strip())
+    def log(message):  # the parking engine's own
+        run.report("dim", "  %s" % message.strip(), speaker=False)
 
     def journalled_move(source, target):
         result = move(source, target)
         if run.apply:
-            run.journal.write("parking_entry_hoisted", source=str(source),
-                              target=str(target))
+            run.journal.write(
+                "parking_entry_hoisted", source=str(source), target=str(target)
+            )
         return result
 
     report = parking.hoist_parking_areas(
-        areas, log=log, move=journalled_move,
-        remove_empty=archive_empty_dir_remover(run), dry_run=not run.apply)
+        areas,
+        log=log,
+        move=journalled_move,
+        remove_empty=archive_empty_dir_remover(run),
+        dry_run=not run.apply,
+    )
     if report.misplaced:
         run.report("bold", "Nested parking areas: %s" % report.summary())
     return report
@@ -1405,7 +1611,8 @@ def folder_holds_no_files(folder, run):
 
     refused = []
     for _directory, files in canonicalise.walk_bottom_up(
-            folder, path_key(folder), refused):
+        folder, path_key(folder), refused
+    ):
         if files:
             return False
     if refused:
@@ -1423,11 +1630,9 @@ def park_empty_dated_folders(run):
     before anything moves, so one run never both empties a group and parks it.
     """
     candidates = [
-        folder for folder in dated_folders(run)
-        if not parking.holds_dated_child(folder)
+        folder for folder in dated_folders(run) if not parking.holds_dated_child(folder)
     ]
-    candidates.sort(key=lambda path: (len(path.parts), str(path).lower()),
-                    reverse=True)
+    candidates.sort(key=lambda path: (len(path.parts), str(path).lower()), reverse=True)
 
     # Only the applying half of ``archive_mover``: a park a dry run planned is
     # collected on its own below rather than in ``run.planned``, so the
@@ -1440,18 +1645,25 @@ def park_empty_dated_folders(run):
         empty = folder_holds_no_files(folder, run)
         if empty is None:
             errors += 1
-            run.report(FAILED, "  ! left %s: cannot read all of it, so it "
-                               "cannot be called empty" % folder)
+            run.report(
+                FAILED,
+                "  ! left %s: cannot read all of it, so it "
+                "cannot be called empty" % folder,
+            )
             continue
         if not empty:
             continue
         area = parking.parking_area_for(folder)
         if area is None:
             errors += 1
-            run.report("warn", "  ! left %s: no month folder or group above it "
-                               "to park it in (H2)" % folder)
+            run.report(
+                "warn",
+                "  ! left %s: no month folder or group above it "
+                "to park it in (H2)" % folder,
+            )
             run.non_compliant.append(
-                (folder, "empty, but nothing above it may hold a parking area (H2)"))
+                (folder, "empty, but nothing above it may hold a parking area (H2)")
+            )
             continue
         # A name already parked gains "_2", "_3" ... which is exactly the
         # discriminator N10a allows on an EMPTY name: two days emptied out of
@@ -1469,19 +1681,27 @@ def park_empty_dated_folders(run):
             run.flag(PARK_FAILURES, folder, str(error))
             continue
         parked += 1
-        run.journal.write("empty_folder_parked", folder=str(folder),
-                          target=str(target))
-        run.report("ok", "  * parked empty %s in %s"
-                   % (folder.name, parking.EMPTY_SUBFOLDERS_FOLDER))
+        run.journal.write("empty_folder_parked", folder=str(folder), target=str(target))
+        run.report(
+            "ok",
+            "  * parked empty %s in %s"
+            % (folder.name, parking.EMPTY_SUBFOLDERS_FOLDER),
+        )
 
     if planned:
         run.planned_parkings.extend(planned)
-        run.report("bold", "\n%d empty folder(s) to park in %s. Nothing was "
-                           "changed. Re-run with --apply."
-                   % (len(planned), parking.EMPTY_SUBFOLDERS_FOLDER))
+        run.report(
+            "bold",
+            "\n%d empty folder(s) to park in %s. Nothing was "
+            "changed. Re-run with --apply."
+            % (len(planned), parking.EMPTY_SUBFOLDERS_FOLDER),
+        )
     elif parked or errors:
-        run.report("bold", "\nParked %d empty folder(s)%s."
-                   % (parked, " with %d error(s)" % errors if errors else ""))
+        run.report(
+            "bold",
+            "\nParked %d empty folder(s)%s."
+            % (parked, " with %d error(s)" % errors if errors else ""),
+        )
     if parked or errors:
         run.journal.write("park_empty", parked=parked, errors=errors)
     if errors:
@@ -1564,11 +1784,14 @@ def step_reconcile(run, label):
     companions = matching.ReconcileReport()
     placement = matching.PlacementReport()
 
-    run.report("bold", "%s %d live dated folder(s) in %d tree(s)"
-               % (label, len(folders), len(run.trees)))
+    run.report(
+        "bold",
+        "%s %d live dated folder(s) in %d tree(s)"
+        % (label, len(folders), len(run.trees)),
+    )
 
-    def log(message):
-        run.report("dim", "  %s" % message.strip())
+    def log(message):  # the matching engine's own
+        run.report("dim", "  %s" % message.strip(), speaker=False)
 
     # 2 -- drain legacy videos before companion placement indexes subjects.
     video_folders = legacy_videos.legacy_video_folders(folders, config)
@@ -1580,45 +1803,69 @@ def step_reconcile(run, label):
 
         try:
             video_migration = legacy_videos.migrate_legacy_videos(
-                video_folders, config,
+                video_folders,
+                config,
                 lambda folder: duplicates_folder(folder, run, config),
-                inspect_video, log, move=move, checksum=checksum,
-                write_sidecar=archive_sidecar_writer(run))
+                inspect_video,
+                log,
+                move=move,
+                checksum=checksum,
+                write_sidecar=archive_sidecar_writer(run),
+            )
         except Exception as error:
             run.report(FAILED, "  ! migrating legacy videos failed: %r" % error)
-            run.flag(RECONCILE_ERRORS, run.target,
-                     "migrating legacy videos failed: %r" % error)
+            run.flag(
+                RECONCILE_ERRORS,
+                run.target,
+                "migrating legacy videos failed: %r" % error,
+            )
             video_migration.errors += 1
 
         # All recognized companions travel in the same operation. Park the
         # shell now, before generic reconciliation prunes empty taxonomy dirs.
         legacy_videos.park_empty_legacy_video_folders(
-            video_folders, video_migration, log, move=move,
-            dry_run=not run.apply)
+            video_folders, video_migration, log, move=move, dry_run=not run.apply
+        )
 
     # 3 -- the legacy containers. Found by the same walk that indexes the tree,
     # so this asks for an index first and then acts on what it named.
     survey = matching.survey_trees(run.trees, config, log)
     if survey.legacy_containers:
         try:
-            migration.merge(matching.migrate_legacy_containers(
-                survey.legacy_containers, config,
-                lambda folder: duplicates_folder(folder, run, config), log,
-                move=move, checksum=checksum))
+            migration.merge(
+                matching.migrate_legacy_containers(
+                    survey.legacy_containers,
+                    config,
+                    lambda folder: duplicates_folder(folder, run, config),
+                    log,
+                    move=move,
+                    checksum=checksum,
+                )
+            )
         except Exception as error:
             run.report(FAILED, "  ! migrating legacy containers failed: %r" % error)
-            run.flag(RECONCILE_ERRORS, run.target,
-                     "migrating legacy containers failed: %r" % error)
+            run.flag(
+                RECONCILE_ERRORS,
+                run.target,
+                "migrating legacy containers failed: %r" % error,
+            )
             migration.errors += 1
 
     # 4 -- companions after their representative, per event folder.
     for folder in folders:
-        def folder_log(message, folder=folder):
-            run.report("dim", "  %s: %s" % (folder.name, message.strip()))
+
+        def folder_log(message, folder=folder):  # the matching engine's own
+            run.report(
+                "dim", "  %s: %s" % (folder.name, message.strip()), speaker=False
+            )
+
         try:
-            companions.merge(matching.reconcile_folder(
-                folder, config, folder_log, move=move, prune=run.apply))
-        except Exception as error:        # never abandon the rest of the tree
+            companions.merge(
+                matching.reconcile_folder(
+                    folder, config, folder_log, move=move, prune=run.apply
+                )
+            )
+        except Exception as error:  # never abandon the rest of the tree
             run.report(FAILED, "  ! reconciling %s failed: %r" % (folder.name, error))
             run.flag(RECONCILE_ERRORS, folder, "reconciling failed: %r" % error)
             companions.errors += 1
@@ -1626,18 +1873,26 @@ def step_reconcile(run, label):
     # 5 -- placement, over every tree at once so a sidecar stranded anywhere in
     # the target can still find its subject.
     try:
-        placement.merge(matching.place_companions(
-            run.trees, config, lambda folder: duplicates_folder(folder, run, config),
-            log, move=move, checksum=checksum, prune=run.apply))
+        placement.merge(
+            matching.place_companions(
+                run.trees,
+                config,
+                lambda folder: duplicates_folder(folder, run, config),
+                log,
+                move=move,
+                checksum=checksum,
+                prune=run.apply,
+            )
+        )
     except Exception as error:
         run.report(FAILED, "  ! placing companions failed: %r" % error)
-        run.flag(RECONCILE_ERRORS, run.target,
-                 "placing companions failed: %r" % error)
+        run.flag(RECONCILE_ERRORS, run.target, "placing companions failed: %r" % error)
         placement.errors += 1
 
     # 6 -- only genuinely uncovered RAW media reach generation.
     generated_raw_sidecars, generation_errors = generate_missing_raw_sidecars(
-        run, placement, config, move)
+        run, placement, config, move
+    )
 
     # Only genuinely uncovered media remain here. Historical stem-form and
     # case-variant sidecars were resolved above; RAWs successfully generated
@@ -1653,8 +1908,9 @@ def step_reconcile(run, label):
         run.report("bold", "\nLegacy containers: %s" % migration.summary())
     if video_migration.seen:
         run.report("bold", "\nLegacy videos: %s" % video_migration.summary())
-    run.report("bold", "\nCompanions following their representative: %s"
-               % companions.summary())
+    run.report(
+        "bold", "\nCompanions following their representative: %s" % companions.summary()
+    )
     run.report("bold", "Companion placement (X10/X13): %s" % placement.summary())
     run.report("dim", "%d media file(s) indexed" % placement.media)
 
@@ -1664,22 +1920,33 @@ def step_reconcile(run, label):
     for path, key in survey.legacy_containers:
         if key is None:
             run.non_compliant.append(
-                (path, "legacy container with no modern equivalent; "
-                       "its contents are a decision for a person"))
+                (
+                    path,
+                    "legacy container with no modern equivalent; "
+                    "its contents are a decision for a person",
+                )
+            )
 
     wants_a_look = [
-        (text, value) for text, value in (
-            ("with DIFFERENT bytes at the destination",
-             placement.parked_differing),
+        (text, value)
+        for text, value in (
+            ("with DIFFERENT bytes at the destination", placement.parked_differing),
             ("with no subject anywhere", placement.orphaned),
             ("whose subject is ambiguous", placement.ambiguous),
             ("media with no sidecar", placement.media_without_sidecar),
             ("errors", placement.errors),
-        ) if value]
+        )
+        if value
+    ]
     if placement.needs_attention:
-        run.report("warn", "\n%d thing(s) want a look: %s" % (
-            placement.needs_attention,
-            ", ".join("%d %s" % (value, text) for text, value in wants_a_look)))
+        run.report(
+            "warn",
+            "\n%d thing(s) want a look: %s"
+            % (
+                placement.needs_attention,
+                ", ".join("%d %s" % (value, text) for text, value in wants_a_look),
+            ),
+        )
         # Counts, not paths: what the engine knows about each of these is in
         # its own per-file report, and repeating that here would bury the one
         # thing the end of the run is for -- that something is waiting.
@@ -1693,69 +1960,85 @@ def step_reconcile(run, label):
         for text, value in wants_a_look:
             if text == "media with no sidecar":
                 continue
-            run.flag(WANTS_A_LOOK, "%d %s" % (value, text),
-                     "under %s" % run.target)
+            run.flag(WANTS_A_LOOK, "%d %s" % (value, text), "under %s" % run.target)
 
-    if not run.apply and (run.planned or run.planned_removals
-                          or run.planned_generations
-                          or run.planned_video_sidecars):
+    if not run.apply and (
+        run.planned
+        or run.planned_removals
+        or run.planned_generations
+        or run.planned_video_sidecars
+    ):
         if run.planned_removals:
-            pending = ("%d path(s) to move and %d empty parking shell(s) to remove"
-                       % (len(run.planned), len(run.planned_removals)))
+            pending = "%d path(s) to move and %d empty parking shell(s) to remove" % (
+                len(run.planned),
+                len(run.planned_removals),
+            )
         else:
             pending = "%d file(s) to move" % len(run.planned)
         if run.planned_generations:
             pending += "; %d RAW sidecar(s) to generate" % len(run.planned_generations)
         if run.planned_video_sidecars:
             pending += "; %d video sidecar(s) to generate" % len(
-                run.planned_video_sidecars)
-        run.report("ok", "\n%s. Nothing was changed. Re-run with --apply."
-                         % pending)
+                run.planned_video_sidecars
+            )
+        run.report("ok", "\n%s. Nothing was changed. Re-run with --apply." % pending)
 
-    run.journal.write("reconcile", folders=len(folders),
-                      legacy_renamed=migration.renamed,
-                      legacy_merged=migration.merged,
-                      legacy_files_moved=migration.files_moved,
-                      legacy_parked=migration.parked,
-                      companions_moved=companions.moved,
-                      companions_left=companions.left_behind,
-                      placed=placement.moved,
-                      placed_across_folders=placement.across_folders,
-                      parked_duplicate=placement.parked_duplicate,
-                      parked_differing=placement.parked_differing,
-                      orphaned=placement.orphaned,
-                      ambiguous=placement.ambiguous,
-                      media=placement.media,
-                      media_without_sidecar=placement.media_without_sidecar,
-                      raw_sidecars_generated=generated_raw_sidecars,
-                      legacy_video_folders=video_migration.folders,
-                      legacy_videos_moved_up=video_migration.moved_up,
-                      legacy_videos_named_from_metadata=(
-                          video_migration.named_from_metadata),
-                      legacy_videos_unresolved=video_migration.unresolved,
-                      legacy_video_companions_moved=(
-                          video_migration.companions_moved),
-                      legacy_video_sidecars_created=(
-                          video_migration.sidecars_created),
-                      legacy_video_empty_folders_parked=(
-                          video_migration.empty_folders_parked),
-                      nested_parking_areas=parking_report.misplaced,
-                      parking_entries_hoisted=parking_report.entries_moved,
-                      parking_shells_removed=parking_report.shells_removed,
-                      non_compliant=len(placement.non_compliant),
-                      errors=(companions.errors + placement.errors
-                              + migration.errors + parking_report.errors
-                              + video_migration.errors + generation_errors))
+    run.journal.write(
+        "reconcile",
+        folders=len(folders),
+        legacy_renamed=migration.renamed,
+        legacy_merged=migration.merged,
+        legacy_files_moved=migration.files_moved,
+        legacy_parked=migration.parked,
+        companions_moved=companions.moved,
+        companions_left=companions.left_behind,
+        placed=placement.moved,
+        placed_across_folders=placement.across_folders,
+        parked_duplicate=placement.parked_duplicate,
+        parked_differing=placement.parked_differing,
+        orphaned=placement.orphaned,
+        ambiguous=placement.ambiguous,
+        media=placement.media,
+        media_without_sidecar=placement.media_without_sidecar,
+        raw_sidecars_generated=generated_raw_sidecars,
+        legacy_video_folders=video_migration.folders,
+        legacy_videos_moved_up=video_migration.moved_up,
+        legacy_videos_named_from_metadata=(video_migration.named_from_metadata),
+        legacy_videos_unresolved=video_migration.unresolved,
+        legacy_video_companions_moved=(video_migration.companions_moved),
+        legacy_video_sidecars_created=(video_migration.sidecars_created),
+        legacy_video_empty_folders_parked=(video_migration.empty_folders_parked),
+        nested_parking_areas=parking_report.misplaced,
+        parking_entries_hoisted=parking_report.entries_moved,
+        parking_shells_removed=parking_report.shells_removed,
+        non_compliant=len(placement.non_compliant),
+        errors=(
+            companions.errors
+            + placement.errors
+            + migration.errors
+            + parking_report.errors
+            + video_migration.errors
+            + generation_errors
+        ),
+    )
 
-    if (companions.errors or placement.errors or migration.errors
-            or parking_report.errors or video_migration.errors
-            or video_migration.left):
+    if (
+        companions.errors
+        or placement.errors
+        or migration.errors
+        or parking_report.errors
+        or video_migration.errors
+        or video_migration.left
+    ):
         return 1
     if generation_errors:
         return 1
-    if not run.apply and (run.planned or run.planned_removals
-                          or run.planned_generations
-                          or run.planned_video_sidecars):
+    if not run.apply and (
+        run.planned
+        or run.planned_removals
+        or run.planned_generations
+        or run.planned_video_sidecars
+    ):
         return 1
     return 0
 
@@ -1781,6 +2064,7 @@ def step_reconcile(run, label):
 #
 # So this is the settled half of section 3: the marker and the two stamps.
 
+
 def dated_children(folder, refused):
     """The direct dated child folders of ``folder``, or None if unreadable.
 
@@ -1797,7 +2081,9 @@ def dated_children(folder, refused):
     children = []
     for entry in entries:
         if canonicalise.is_reparse_point(entry):
-            refused.append((entry.path, "reparse point (junction/symlink) not followed"))
+            refused.append(
+                (entry.path, "reparse point (junction/symlink) not followed")
+            )
             continue
         try:
             if not entry.is_dir(follow_symlinks=False):
@@ -1813,9 +2099,9 @@ def dated_children(folder, refused):
 class Subtree(NamedTuple):
     """What a group's name is computed from: the two capture ends and the last day."""
 
-    earliest: object          # datetime, or None when nothing under it is stamped
-    latest: object            # datetime, likewise
-    last_day: str | None      # "YYYY-MM-DD" of the last dated folder beneath it
+    earliest: object  # datetime, or None when nothing under it is stamped
+    latest: object  # datetime, likewise
+    last_day: str | None  # "YYYY-MM-DD" of the last dated folder beneath it
 
 
 def read_subtree(folder, refused):
@@ -1838,8 +2124,9 @@ def read_subtree(folder, refused):
     root_key = path_key(folder)
     names, days = [], []
     for directory, files in canonicalise.walk_bottom_up(folder, root_key, refused):
-        if (parking.is_parking_area(directory.name)
-                or parking.is_inside_parking_area(directory)):
+        if parking.is_parking_area(directory.name) or parking.is_inside_parking_area(
+            directory
+        ):
             continue
         names.extend(path.name for path in files)
         if path_key(directory) == root_key:
@@ -1847,9 +2134,11 @@ def read_subtree(folder, refused):
         day = stamps.day_prefix(directory.name)
         if day:
             days.append(day)
-    return Subtree(grouping.earliest_capture_time(names),
-                   grouping.latest_capture_time(names),
-                   max(days) if days else None)
+    return Subtree(
+        grouping.earliest_capture_time(names),
+        grouping.latest_capture_time(names),
+        max(days) if days else None,
+    )
 
 
 def placeholder_tail(name, config):
@@ -1882,7 +2171,8 @@ def description_to_keep(name, config):
     ``grouping_names``' question, not this tool's (T8).
     """
     return canonicalise.grouping.folder_description(
-        name, canonicalise.grouping.date_folder_suffix(config))
+        name, canonicalise.grouping.date_folder_suffix(config)
+    )
 
 
 def description_for_group(folder, children, config):
@@ -1914,7 +2204,8 @@ def description_for_group(folder, children, config):
         return kept, "kept"
     agreed = canonicalise.grouping.shared_child_description(
         [child.name for child in children],
-        canonicalise.grouping.date_folder_suffix(config))
+        canonicalise.grouping.date_folder_suffix(config),
+    )
     if agreed is not None:
         return agreed, "agreed"
     return canonicalise.grouping.TO_LABEL_MARKER, "unnamed"
@@ -1935,8 +2226,9 @@ def span_end_moment(end_day, latest):
     dated the evening before, and the span has to be able to say exactly that.
     """
     day = date_of(end_day)
-    return datetime.datetime(day.year, day.month, day.day,
-                             latest.hour, latest.minute, latest.second)
+    return datetime.datetime(
+        day.year, day.month, day.day, latest.hour, latest.minute, latest.second
+    )
 
 
 def group_target_name(folder, children, run, config, refused):
@@ -1963,9 +2255,11 @@ def group_target_name(folder, children, run, config, refused):
         description = description_to_keep(folder.name, config)
         if parsed.time:
             base += "__" + parsed.time
-        return (base + (grouping.LABEL_SEPARATOR + description
-                        if description else ""),
-                None, "kept")
+        return (
+            base + (grouping.LABEL_SEPARATOR + description if description else ""),
+            None,
+            "kept",
+        )
 
     placeholder = placeholder_tail(folder.name, config)
     if placeholder:
@@ -1975,12 +2269,23 @@ def group_target_name(folder, children, run, config, refused):
         # into a child of its own is C4, open question 5. Reported, not touched.
         counts = top_level_media(folder, run.grouping_settings)
         if counts is None or sum(counts) > 0:
-            return None, ("still carries %s with %s at its top level: it is a "
-                          "group by C1 and a day awaiting the grouper at once "
-                          "-- C4, open question 5"
-                          % (placeholder,
-                             "media" if counts is None
-                             else "%d image(s) and %d video(s)" % counts)), None
+            return (
+                None,
+                (
+                    "still carries %s with %s at its top level: it is a "
+                    "group by C1 and a day awaiting the grouper at once "
+                    "-- C4, open question 5"
+                    % (
+                        placeholder,
+                        (
+                            "media"
+                            if counts is None
+                            else "%d image(s) and %d video(s)" % counts
+                        ),
+                    )
+                ),
+                None,
+            )
 
     subtree = read_subtree(folder, refused)
     if subtree.earliest is None or subtree.latest is None:
@@ -1988,22 +2293,34 @@ def group_target_name(folder, children, run, config, refused):
     if subtree.last_day is None:
         return None, "no folder under it carries a readable date", None
     if subtree.last_day < parsed.date:
-        return None, ("a folder under it is dated %s, before its own %s (C13)"
-                      % (subtree.last_day, parsed.date)), None
+        return (
+            None,
+            (
+                "a folder under it is dated %s, before its own %s (C13)"
+                % (subtree.last_day, parsed.date)
+            ),
+            None,
+        )
 
     earliest, latest = subtree.earliest, subtree.latest
     if "%04d-%02d-%02d" % (earliest.year, earliest.month, earliest.day) < parsed.date:
         # C12 / open question 6: the start belongs under an earlier month
         # folder. Reported, never moved -- and the name is left alone, because
         # a start time from a day the folder does not claim would be a lie.
-        return None, ("its earliest file is dated %04d-%02d-%02d, before the "
-                      "folder's own %s -- moving it is open question 6 (C12)"
-                      % (earliest.year, earliest.month, earliest.day,
-                         parsed.date)), None
+        return (
+            None,
+            (
+                "its earliest file is dated %04d-%02d-%02d, before the "
+                "folder's own %s -- moving it is open question 6 (C12)"
+                % (earliest.year, earliest.month, earliest.day, parsed.date)
+            ),
+            None,
+        )
 
     base += "__%02d.%02d.%02d" % (earliest.hour, earliest.minute, earliest.second)
     base += stamps.format_range_end(
-        parsed.date, span_end_moment(subtree.last_day, latest))
+        parsed.date, span_end_moment(subtree.last_day, latest)
+    )
     # Last, so a folder this step refuses to name is never asked what it should
     # be called -- the children are read only for a group that is getting a name.
     description, source = description_for_group(folder, children, config)
@@ -2039,12 +2356,13 @@ def group_violations(folder, config):
     reasons = []
     if files:
         images, videos = grouping.count_media(
-            files, *grouping.extension_sets(config),
-            grouping.preview_extensions(config))
+            files, *grouping.extension_sets(config), grouping.preview_extensions(config)
+        )
         if images or videos:
-            reasons.append("holds %d image(s) and %d video(s) of its own -- C3; "
-                           "moving them down is C4, open question 5"
-                           % (images, videos))
+            reasons.append(
+                "holds %d image(s) and %d video(s) of its own -- C3; "
+                "moving them down is C4, open question 5" % (images, videos)
+            )
         other = len(files) - images - videos
         if other:
             reasons.append("holds %d loose file(s) that are not media (C3)" % other)
@@ -2061,8 +2379,10 @@ def group_violations(folder, config):
             if parking_areas > 1:
                 reasons.append("holds more than one %r (C3, H2)" % name)
             continue
-        reasons.append("holds %r, which is neither a dated folder nor %s (C3)"
-                       % (name, grouping.EMPTY_SUBFOLDERS_FOLDER))
+        reasons.append(
+            "holds %r, which is neither a dated folder nor %s (C3)"
+            % (name, grouping.EMPTY_SUBFOLDERS_FOLDER)
+        )
     return reasons
 
 
@@ -2087,7 +2407,7 @@ def step_group_markers(run):
             continue
         carries = grouping.carries_group_marker(folder.name)
         if not children and not carries:
-            continue                        # an ordinary leaf: nothing to say
+            continue  # an ordinary leaf: nothing to say
         if children:
             groups += 1
             for reason in group_violations(folder, config):
@@ -2095,8 +2415,9 @@ def step_group_markers(run):
         else:
             unmarked += 1
 
-        target, reason, source = group_target_name(folder, children, run,
-                                                   config, refused)
+        target, reason, source = group_target_name(
+            folder, children, run, config, refused
+        )
         if target is None:
             run.non_compliant.append((folder, reason))
             continue
@@ -2109,29 +2430,35 @@ def step_group_markers(run):
 
     report_refused(run, refused)
 
-    run.report("ok", "\n%d group(s); %d folder(s) carrying the marker with no "
-                     "dated children left; %d name(s) to correct."
-                     % (groups, unmarked, len(renames)))
+    run.report(
+        "ok",
+        "\n%d group(s); %d folder(s) carrying the marker with no "
+        "dated children left; %d name(s) to correct."
+        % (groups, unmarked, len(renames)),
+    )
     for source, target in renames:
         run.report("dim", "  %s\n      -> %s" % (source, target.name))
 
     if agreed:
-        run.report("ok", "\n%d group(s) named from what their children agree on:"
-                         % len(agreed))
+        run.report(
+            "ok", "\n%d group(s) named from what their children agree on:" % len(agreed)
+        )
         for folder, description in agreed:
             run.report("dim", "  %s\n      -> %s" % (folder.name, description))
     if awaiting:
         # Not a violation and not in ``non_compliant``: a group with no name is
         # a conforming group. This is the one thing in the step addressed to a
         # person rather than to the archive, so it is stated plainly and left.
-        run.report("warn", "\n%d group(s) nobody has named, marked %s -- their "
-                           "children disagree or are themselves unnamed, and a "
-                           "name for them is not this tool's to invent:"
-                           % (len(awaiting), grouping.TO_LABEL_MARKER))
+        run.report(
+            "warn",
+            "\n%d group(s) nobody has named, marked %s -- their "
+            "children disagree or are themselves unnamed, and a "
+            "name for them is not this tool's to invent:"
+            % (len(awaiting), grouping.TO_LABEL_MARKER),
+        )
         for folder in awaiting:
             run.report("dim", "  %s" % folder)
-            run.flag(AWAITING_A_NAME, folder,
-                     "marked %s" % grouping.TO_LABEL_MARKER)
+            run.flag(AWAITING_A_NAME, folder, "marked %s" % grouping.TO_LABEL_MARKER)
 
     failures = 0
     if run.apply:
@@ -2146,18 +2473,28 @@ def step_group_markers(run):
                 run.flag(RENAME_FAILURES, source, str(error))
                 failures += 1
 
-    run.journal.write("group_markers", groups=groups, unmarked=unmarked,
-                      renamed=len(renames), named_from_children=len(agreed),
-                      awaiting_a_name=len(awaiting), failures=failures,
-                      applied=bool(run.apply))
+    run.journal.write(
+        "group_markers",
+        groups=groups,
+        unmarked=unmarked,
+        renamed=len(renames),
+        named_from_children=len(agreed),
+        awaiting_a_name=len(awaiting),
+        failures=failures,
+        applied=bool(run.apply),
+    )
 
     if failures:
         return 2
     if not run.apply and renames:
-        run.report("ok", "\n%d folder(s) to rename. Nothing was changed. "
-                         "Re-run with --apply." % len(renames))
+        run.report(
+            "ok",
+            "\n%d folder(s) to rename. Nothing was changed. "
+            "Re-run with --apply." % len(renames),
+        )
         return 1
     return 0
+
 
 # --------------------------------------------------------------------------
 # Steps 7 and 8 -- compliance with the archive standard
@@ -2172,7 +2509,8 @@ _STANDARD_NOTICE = (
     "document is the specification it will be built to, and section 8 is the "
     "machine-readable form it will parse.\nSection 3 is the one part already "
     "settled and already enforced -- by step 6, which marks, times and spans "
-    "the groups." % STANDARD_PATH.name)
+    "the groups." % STANDARD_PATH.name
+)
 
 
 def step_standard_check(run):
@@ -2183,8 +2521,11 @@ def step_standard_check(run):
 
 def step_standard_fix(run):
     run.report("warn", "NOT IMPLEMENTED -- " + _STANDARD_NOTICE)
-    run.report("dim", "When it exists it will prompt before changing anything, "
-                      "the way step 2 does.")
+    run.report(
+        "dim",
+        "When it exists it will prompt before changing anything, "
+        "the way step 2 does.",
+    )
     run.journal.write("standard_fix", status="not_implemented")
     return 0
 
@@ -2200,15 +2541,31 @@ def step_standard_fix(run):
 # and the second would print the first's report word for word. Those are
 # skipped, with a line saying why, unless asked for on their own.
 STEPS = (
-    (1, "Canonicalise names and park the empty",
-     lambda run: step_canonicalise(run, "Canonicalising"), None),
-    (2, "Reunite companions and sidecars",
-     lambda run: step_reconcile(run, "Reconciling"), None),
+    (
+        1,
+        "Canonicalise names and park the empty",
+        lambda run: step_canonicalise(run, "Canonicalising"),
+        None,
+    ),
+    (
+        2,
+        "Reunite companions and sidecars",
+        lambda run: step_reconcile(run, "Reconciling"),
+        None,
+    ),
     (3, "Group the %s folders" % TO_SPLIT_MARKER, step_group, None),
-    (4, "Reunite companions and sidecars again",
-     lambda run: step_reconcile(run, "Reconciling (again)"), 2),
-    (5, "Canonicalise names and park again",
-     lambda run: step_canonicalise(run, "Canonicalising (again)"), 1),
+    (
+        4,
+        "Reunite companions and sidecars again",
+        lambda run: step_reconcile(run, "Reconciling (again)"),
+        2,
+    ),
+    (
+        5,
+        "Canonicalise names and park again",
+        lambda run: step_canonicalise(run, "Canonicalising (again)"),
+        1,
+    ),
     (6, "Mark and time the groups", step_group_markers, None),
     (7, "Check compliance with the archive standard", step_standard_check, None),
     (8, "Fix compliance with the archive standard", step_standard_fix, None),
@@ -2218,8 +2575,7 @@ STEPS = (
 def step_header(number, title, colour):
     """Open each step with a frame, so the run reads as a run of steps."""
     print()
-    frame(None, [line("bold", "STEP %d -- %s" % (number, title))],
-          "bold", colour)
+    frame(None, [line("bold", "STEP %d -- %s" % (number, title))], "bold", colour)
 
 
 def report_step_verdict(run, number, title, outcome, colour):
@@ -2240,26 +2596,34 @@ def report_step_verdict(run, number, title, outcome, colour):
     if not flags:
         if outcome == OK:
             key, headline = "ok", "%s STEP %d OK -- nothing to address." % (
-                glyph("tick"), number)
+                glyph("tick"),
+                number,
+            )
         elif outcome == PENDING:
             key, headline = "warn", (
                 "%s STEP %d -- changes pending, nothing to address."
-                % (glyph("warn"), number))
+                % (glyph("warn"), number)
+            )
         else:
-            key, headline = FAILED, ("%s STEP %d FAILED -- see its report "
-                                     "above." % (glyph("cross"), number))
+            key, headline = FAILED, (
+                "%s STEP %d FAILED -- see its report "
+                "above." % (glyph("cross"), number)
+            )
         print()
         frame(None, [line(key, headline)], key, colour)
         return
 
     groups = group_issues(flags, limit=STEP_VERDICT_ITEMS)
     total = sum(len(items) + hidden for _heading, items, hidden in groups)
-    lines = [line(FAILED, "%s STEP %d LEFT %d THING(S) TO ADDRESS"
-                  % (glyph("cross"), number, total)),
-             line("dim", "")] + issue_body(groups, notes=False)
+    lines = [
+        line(
+            FAILED,
+            "%s STEP %d LEFT %d THING(S) TO ADDRESS" % (glyph("cross"), number, total),
+        ),
+        line("dim", ""),
+    ] + issue_body(groups, notes=False)
     print()
-    frame("STEP %d -- %s" % (number, title), lines, FAILED, colour,
-          closed=False)
+    frame("STEP %d -- %s" % (number, title), lines, FAILED, colour, closed=False)
 
 
 def report_run_issues(run, outcomes, colour):
@@ -2273,15 +2637,23 @@ def report_run_issues(run, outcomes, colour):
     Returns how many there were, which is what the summary's verdict turns on.
     """
     flags = list(run.issues)
-    flags += [(None, STEPS_FAILED, "Step %d -- %s" % (number, title), None)
-              for number, title, outcome in outcomes if outcome == FAILED]
+    flags += [
+        (None, STEPS_FAILED, "Step %d -- %s" % (number, title), None)
+        for number, title, outcome in outcomes
+        if outcome == FAILED
+    ]
     groups = group_issues(flags)
     if not groups:
         return 0
     total = sum(len(items) for _heading, items, _hidden in groups)
     print()
-    frame("ISSUES TO ADDRESS  (%d)" % total, issue_body(groups), FAILED,
-          colour, closed=False)
+    frame(
+        "ISSUES TO ADDRESS  (%d)" % total,
+        issue_body(groups),
+        FAILED,
+        colour,
+        closed=False,
+    )
     return total
 
 
@@ -2295,43 +2667,67 @@ def report_summary(run, outcomes, worst, issues, colour):
     lines = []
     for number, title, outcome in outcomes:
         key = {OK: "ok", PENDING: "warn", SKIPPED: "dim"}.get(outcome, FAILED)
-        mark = {OK: glyph("tick"), PENDING: glyph("warn"),
-                SKIPPED: ""}.get(outcome, glyph("cross"))
+        mark = {OK: glyph("tick"), PENDING: glyph("warn"), SKIPPED: ""}.get(
+            outcome, glyph("cross")
+        )
         mark = mark.ljust(GLYPH_WIDTH)
         text = "%s %-8s %d. %s" % (mark, outcome, number, title)
-        lines.append(line(key, text,
-                          colourise("%s %-8s " % (mark, outcome), key, colour)
-                          + colourise("%d. %s" % (number, title),
-                                      "dim" if outcome == SKIPPED else "bold",
-                                      colour)))
+        lines.append(
+            line(
+                key,
+                text,
+                colourise("%s %-8s " % (mark, outcome), key, colour)
+                + colourise(
+                    "%d. %s" % (number, title),
+                    "dim" if outcome == SKIPPED else "bold",
+                    colour,
+                ),
+            )
+        )
     if run.journal.path is not None:
         lines.append(line("dim", ""))
         lines.append(line("dim", "Journal: %s" % run.journal.path))
 
     print()
-    frame("SUMMARY  (%s)" % ("applied" if run.apply else "dry run"),
-          lines, "bold", colour)
+    frame(
+        "SUMMARY  (%s)" % ("applied" if run.apply else "dry run"), lines, "bold", colour
+    )
 
     if issues:
-        banner("%s  %d ISSUE(S) TO ADDRESS  %s"
-               % (glyph("cross"), issues, glyph("cross")),
-               "Listed in the block above. None of them was fixed for you.",
-               FAILED, colour)
+        banner(
+            "%s  %d ISSUE(S) TO ADDRESS  %s" % (glyph("cross"), issues, glyph("cross")),
+            "Listed in the block above. None of them was fixed for you.",
+            FAILED,
+            colour,
+        )
     elif worst >= 2:
-        banner("%s  RUN STOPPED  %s" % (glyph("cross"), glyph("cross")),
-               "A step could not run; the steps after it never started.",
-               FAILED, colour)
+        banner(
+            "%s  RUN STOPPED  %s" % (glyph("cross"), glyph("cross")),
+            "A step could not run; the steps after it never started.",
+            FAILED,
+            colour,
+        )
     elif worst == 1 and not run.apply:
-        banner("%s  DRY RUN -- CHANGES PENDING  %s"
-               % (glyph("warn"), glyph("warn")),
-               "Nothing was changed. Re-run with --apply.", "warn", colour)
+        banner(
+            "%s  DRY RUN -- CHANGES PENDING  %s" % (glyph("warn"), glyph("warn")),
+            "Nothing was changed. Re-run with --apply.",
+            "warn",
+            colour,
+        )
     elif worst == 1:
-        banner("%s  CHANGES PENDING  %s" % (glyph("warn"), glyph("warn")),
-               "Re-run to carry on where this one stopped.", "warn", colour)
+        banner(
+            "%s  CHANGES PENDING  %s" % (glyph("warn"), glyph("warn")),
+            "Re-run to carry on where this one stopped.",
+            "warn",
+            colour,
+        )
     else:
-        banner("%s  ALL CLEAR  %s" % (glyph("tick"), glyph("tick")),
-               "Every step finished and nothing is left to address.",
-               "ok", colour)
+        banner(
+            "%s  ALL CLEAR  %s" % (glyph("tick"), glyph("tick")),
+            "Every step finished and nothing is left to address.",
+            "ok",
+            colour,
+        )
 
 
 class Run:
@@ -2371,10 +2767,20 @@ class Run:
         self.current_step = None
         self.journal = Journal(None)
 
-    def report(self, key, message):
+    def report(self, key, message, speaker=True):
+        """Print one line of the run's report.
+
+        ``speaker=False`` for a line relayed from a tool this one called: it
+        keeps that tool's own words and colours and takes no tag, which is
+        what makes the tagged lines mean anything.
+        """
         if self.quiet and key not in ("warn", "bold", FAILED):
             return
-        print(colourise(message, key, self.colour))
+        print(
+            speak(message, key, self.colour)
+            if speaker
+            else colourise(message, key, self.colour)
+        )
 
     def flag(self, heading, item, note=None):
         """Keep something for the step's verdict and the end-of-run block.
@@ -2398,10 +2804,13 @@ class Run:
         if self.assume_yes:
             return True
         if not (sys.stdin and sys.stdin.isatty()):
-            self.report(FAILED, "No terminal to confirm at. Re-run from a "
-                                "console, or pass --yes for an unattended run.")
+            self.report(
+                FAILED,
+                "No terminal to confirm at. Re-run from a "
+                "console, or pass --yes for an unattended run.",
+            )
             return False
-        print(colourise("\n" + question, "bold", self.colour))
+        print(speak("\n" + question, "bold", self.colour))
         try:
             answer = input("Type %s to continue: " % CONFIRM_WORD)
         except (EOFError, KeyboardInterrupt):
@@ -2421,7 +2830,8 @@ def selected_steps(text):
             continue
         if not piece.isdigit() or int(piece) not in numbers:
             raise argparse.ArgumentTypeError(
-                "%r is not a step number (1-%d)" % (piece, len(STEPS)))
+                "%r is not a step number (1-%d)" % (piece, len(STEPS))
+            )
         wanted.add(int(piece))
     # Fixed order regardless of how they were typed: "3,1" still canonicalises
     # before it canonicalises again.
@@ -2432,44 +2842,87 @@ def build_parser():
     parser = argparse.ArgumentParser(
         prog="restructure_archive",
         description="Bring an existing photo archive onto the current naming "
-                    "and structure conventions.",
-        epilog="Nothing is changed without --apply.")
-    parser.add_argument("target", nargs="?", default=None,
-                        help="year tree, archive root, or any folder inside "
-                             r"one; local or UNC (default: <root_folder>\<year>)")
-    parser.add_argument("--year", type=int, default=canonicalise.DEFAULT_YEAR,
-                        help="year tree to work on, under the configured root "
-                             "or under an explicitly named root "
-                             "(default: %(default)s)")
-    parser.add_argument("--apply", action="store_true",
-                        help="make the changes; without it this only reports")
-    parser.add_argument("--steps", default=None, metavar="N[,N...]",
-                        help="run only these steps (default: all of 1-%d)"
-                             % len(STEPS))
-    parser.add_argument("--list-to-split", action="store_true",
-                        help="list the folders step 2 would open, and stop")
-    parser.add_argument("--open-all", action="store_true",
-                        help="open every marked folder, including those with "
-                             "no image or video at their top level for the "
-                             "grouper to show")
-    parser.add_argument("--max-folders", type=int, default=None,
-                        help="open the grouper on at most this many folders "
-                             "(default: screenshot_grouping.max_folders, "
-                             "0 for no limit)")
-    parser.add_argument("--yes", action="store_true",
-                        help="answer every confirmation; for unattended runs")
-    parser.add_argument("--force-target", action="store_true",
-                        help="work on a target that does not look like an archive")
-    parser.add_argument("--allow-network-tool", action="store_true",
-                        help="run the grouper even though its interpreter or "
-                             "project sits on a network location")
-    parser.add_argument("--keep-drive-letter", action="store_true",
-                        help="do not pin a mapped network drive to its UNC")
-    parser.add_argument("--journal", default=None,
-                        help="where to record what an applied run did "
-                             "(default: a dated file inside the target)")
-    parser.add_argument("--quiet", action="store_true",
-                        help="only print each step's headline and summary")
+        "and structure conventions.",
+        epilog="Nothing is changed without --apply.",
+    )
+    parser.add_argument(
+        "target",
+        nargs="?",
+        default=None,
+        help="year tree, archive root, or any folder inside "
+        r"one; local or UNC (default: <root_folder>\<year>)",
+    )
+    parser.add_argument(
+        "--year",
+        type=int,
+        default=canonicalise.DEFAULT_YEAR,
+        help="year tree to work on, under the configured root "
+        "or under an explicitly named root "
+        "(default: %(default)s)",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="make the changes; without it this only reports",
+    )
+    parser.add_argument(
+        "--steps",
+        default=None,
+        metavar="N[,N...]",
+        help="run only these steps (default: all of 1-%d)" % len(STEPS),
+    )
+    parser.add_argument(
+        "--list-to-split",
+        action="store_true",
+        help="list the folders step 2 would open, and stop",
+    )
+    parser.add_argument(
+        "--open-all",
+        action="store_true",
+        help="open every marked folder, including those with "
+        "no image or video at their top level for the "
+        "grouper to show",
+    )
+    parser.add_argument(
+        "--max-folders",
+        type=int,
+        default=None,
+        help="open the grouper on at most this many folders "
+        "(default: screenshot_grouping.max_folders, "
+        "0 for no limit)",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="answer every confirmation; for unattended runs",
+    )
+    parser.add_argument(
+        "--force-target",
+        action="store_true",
+        help="work on a target that does not look like an archive",
+    )
+    parser.add_argument(
+        "--allow-network-tool",
+        action="store_true",
+        help="run the grouper even though its interpreter or "
+        "project sits on a network location",
+    )
+    parser.add_argument(
+        "--keep-drive-letter",
+        action="store_true",
+        help="do not pin a mapped network drive to its UNC",
+    )
+    parser.add_argument(
+        "--journal",
+        default=None,
+        help="where to record what an applied run did "
+        "(default: a dated file inside the target)",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="only print each step's headline and summary",
+    )
     parser.add_argument("--no-colour", action="store_true")
     return parser
 
@@ -2480,34 +2933,45 @@ def main(argv=None):
     # Which of the two ways the year arrived matters: an explicit --year
     # alongside an explicitly named root means "that year of that archive",
     # while the default year must not silently redirect a named target.
-    args.year_given = any(item == "--year" or item.startswith("--year=")
-                          for item in argv)
+    args.year_given = any(
+        item == "--year" or item.startswith("--year=") for item in argv
+    )
     colour = not args.no_colour and sys.stdout.isatty()
 
     def report(key, message):
         if args.quiet and key not in ("warn", "bold", FAILED):
             return
-        print(colourise(message, key, colour))
+        print(speak(message, key, colour))
 
     try:
         steps = selected_steps(args.steps)
     except argparse.ArgumentTypeError as error:
-        print(colourise("Bad --steps: %s" % error, FAILED, colour))
-        banner("%s  NOTHING RAN  %s" % (glyph("cross"), glyph("cross")),
-               "Bad --steps. Nothing was changed.", FAILED, colour)
+        print(speak("Bad --steps: %s" % error, FAILED, colour))
+        banner(
+            "%s  NOTHING RAN  %s" % (glyph("cross"), glyph("cross")),
+            "Bad --steps. Nothing was changed.",
+            FAILED,
+            colour,
+        )
         return 2
 
     target, error = resolve_run_target(args, report)
     if error:
-        print(colourise(error, FAILED, colour))
-        banner("%s  NOTHING RAN  %s" % (glyph("cross"), glyph("cross")),
-               "The target was refused. Nothing was changed.", FAILED, colour)
+        print(speak(error, FAILED, colour))
+        banner(
+            "%s  NOTHING RAN  %s" % (glyph("cross"), glyph("cross")),
+            "The target was refused. Nothing was changed.",
+            FAILED,
+            colour,
+        )
         return 2
 
     trees = scan_roots(target, report)
     if args.max_folders is None:
-        args.max_folders = canonicalise._config().get(
-            "screenshot_grouping", {}).get("max_folders", 0) or 0
+        args.max_folders = (
+            canonicalise._config().get("screenshot_grouping", {}).get("max_folders", 0)
+            or 0
+        )
 
     run = Run(args, target, trees, colour)
 
@@ -2521,31 +2985,53 @@ def main(argv=None):
         # summary -- but "how many, and is any of it a problem" is the same
         # question the end of a run answers, and it gets the same frame.
         print()
-        frame(None, [line("bold", "%d folder(s) carry the %s marker; "
-                                  "%d worth opening."
-                          % (len(marked), TO_SPLIT_MARKER, len(counted)))],
-              "bold", colour)
+        frame(
+            None,
+            [
+                line(
+                    "bold",
+                    "%d folder(s) carry the %s marker; "
+                    "%d worth opening." % (len(marked), TO_SPLIT_MARKER, len(counted)),
+                )
+            ],
+            "bold",
+            colour,
+        )
         if passed_over:
-            frame(None, issue_body(group_issues(run.issues)), FAILED, colour,
-                  closed=False)
+            frame(
+                None, issue_body(group_issues(run.issues)), FAILED, colour, closed=False
+            )
         return 1 if counted else 0
 
-    report("bold", "%s %s" % ("Restructuring" if args.apply else "Dry run over",
-                              target))
+    report(
+        "bold", "%s %s" % ("Restructuring" if args.apply else "Dry run over", target)
+    )
     report("dim", "Steps: %s" % ", ".join(str(number) for number in steps))
 
     if args.apply:
         if canonicalise.drive_is_network(target) and not run.confirm(
-                "This will rename files on a NETWORK location:\n    %s" % target):
-            print(colourise("Not confirmed; nothing was changed.", "warn", colour))
-            banner("%s  NOTHING RAN  %s" % (glyph("warn"), glyph("warn")),
-                   "Not confirmed. Nothing was changed.", "warn", colour)
+            "This will rename files on a NETWORK location:\n    %s" % target
+        ):
+            print(speak("Not confirmed; nothing was changed.", "warn", colour))
+            banner(
+                "%s  NOTHING RAN  %s" % (glyph("warn"), glyph("warn")),
+                "Not confirmed. Nothing was changed.",
+                "warn",
+                colour,
+            )
             return 2
         stamp = canonicalise.stamps.format_stamp(datetime.datetime.now())
-        run.journal = Journal(Path(args.journal) if args.journal else
-                              target / ("_restructure_journal_%s.jsonl" % stamp))
-        run.journal.write("run_started", target=str(target),
-                          trees=[str(tree) for tree in trees], steps=steps)
+        run.journal = Journal(
+            Path(args.journal)
+            if args.journal
+            else target / ("_restructure_journal_%s.jsonl" % stamp)
+        )
+        run.journal.write(
+            "run_started",
+            target=str(target),
+            trees=[str(tree) for tree in trees],
+            steps=steps,
+        )
 
     outcomes = []
     worst = 0
@@ -2557,9 +3043,12 @@ def main(argv=None):
         if not args.apply and repeats is not None and repeats in ran:
             # Nothing between the two passes changed anything, so the second
             # would report exactly what the first did.
-            report("dim", "\nSTEP %d -- %s: skipped, a dry run leaves nothing "
-                          "for a second pass to find (step %d already reported "
-                          "it)." % (number, title, repeats))
+            report(
+                "dim",
+                "\nSTEP %d -- %s: skipped, a dry run leaves nothing "
+                "for a second pass to find (step %d already reported "
+                "it)." % (number, title, repeats),
+            )
             outcomes.append((number, title, SKIPPED))
             continue
         step_header(number, title, colour)
@@ -2586,9 +3075,12 @@ def main(argv=None):
 
     issues = report_run_issues(run, outcomes, colour)
     if run.journal.path is not None:
-        run.journal.write("run_finished", exit_code=worst,
-                          non_compliant=len(run.non_compliant),
-                          issues=issues)
+        run.journal.write(
+            "run_finished",
+            exit_code=worst,
+            non_compliant=len(run.non_compliant),
+            issues=issues,
+        )
     report_summary(run, outcomes, worst, issues, colour)
     return worst
 

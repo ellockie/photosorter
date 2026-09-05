@@ -210,23 +210,23 @@ The standard proposes more that no code writes yet:
   are classified as previews rather than media, so a thumbnail no longer counts
   as an image or can be picked as a representative. Routing them into the folder
   is implemented in `place_companions` and run by the restructure tool, but
-  nothing *writes* one there during a live ingest yet.
+  nothing _writes_ one there during a live ingest yet.
 
 ### Shooting modes
 
 Three ways a shot arrives, each announced by the representative's own name, so
 the top level alone tells you whether there is a RAW worth developing instead:
 
-| Mode | Top level | Meaning |
-| --- | --- | --- |
-| JPG only | `…__SG23U.jpg` | no suffix — what the camera wrote is all there is |
-| JPG + RAW | `…__6D_HAS_RAW.jpg` | straight from the camera; a RAW sits in `__RAW` |
-| RAW only | `…__6D_FROM_RAW.jpg` | extracted from the RAW, which had no camera JPG |
+| Mode      | Top level            | Meaning                                           |
+| --------- | -------------------- | ------------------------------------------------- |
+| JPG only  | `…__SG23U.jpg`       | no suffix — what the camera wrote is all there is |
+| JPG + RAW | `…__6D_HAS_RAW.jpg`  | straight from the camera; a RAW sits in `__RAW`   |
+| RAW only  | `…__6D_FROM_RAW.jpg` | extracted from the RAW, which had no camera JPG   |
 
 ### Author markers
 
-The camera symbol says *what* took a shot. When the archive holds media from more
-than one person — a partner's camera at the same event — the name also says *who*:
+The camera symbol says _what_ took a shot. When the archive holds media from more
+than one person — a partner's camera at the same event — the name also says _who_:
 
 ```text
 …__I200__C6D.jpg        the archive owner's — no marker, so nothing already filed changes
@@ -245,9 +245,9 @@ a third-party tool can tell an author from a camera symbol without the table.
 `_HAS_*` names a sibling elsewhere, `_FROM_*` names this file's own provenance,
 and the two RAW suffixes never combine — `_FROM_RAW` already implies a RAW.
 A better edit under `__EDITED` adds `_HAS_EDIT` last. The earlier `_RAW`, `_EXT`
-and `_EDT` are still read but never written: `_RAW` on a camera JPG read as *this
-is a RAW*, the sense `RAW__` carries inside a filename, when it meant *a RAW
-exists*.
+and `_EDT` are still read but never written: `_RAW` on a camera JPG read as _this
+is a RAW_, the sense `RAW__` carries inside a filename, when it meant _a RAW
+exists_.
 
 **JPGs are not extracted when the camera already wrote one.** The camera JPG is
 the better representative and the RAW is preserved untouched; an automatic twin
@@ -300,12 +300,12 @@ the run as paused (everything already written to disk stays written).
 
 Prompts that block the run:
 
-| Prompt | What it is asking |
-| --- | --- |
-| `name_collision` | Two files claim one name and neither age nor size settles it. |
-| `crw_conversion` / `dpviewer_conversion` | Convert these RAWs before later stages move them. |
-| `raw_conversion` | Convert the staged workspace; it is swept the moment you answer. |
-| `grouping_review` | Event folders from this run are still unnamed. |
+| Prompt                                   | What it is asking                                                |
+| ---------------------------------------- | ---------------------------------------------------------------- |
+| `name_collision`                         | Two files claim one name and neither age nor size settles it.    |
+| `crw_conversion` / `dpviewer_conversion` | Convert these RAWs before later stages move them.                |
+| `raw_conversion`                         | Convert the staged workspace; it is swept the moment you answer. |
+| `grouping_review`                        | Event folders from this run are still unnamed.                   |
 
 ### Grouping review
 
@@ -314,7 +314,7 @@ the **Grouping Review** stage lists every folder from this run still carrying
 `__TO_SPLIT__`, `__TO_LABEL__`, or the bare `- 1. ######` placeholder, and holds
 the run there. Rename them — in the grouper or in Explorer — and press
 **Re-scan**; **Continue anyway** fast-forwards past folders you meant to leave
-unnamed. Either way the stage then re-scans the archive as it stands *now*, so
+unnamed. Either way the stage then re-scans the archive as it stands _now_, so
 companion reconciliation follows the folders the grouper actually created rather
 than paths captured before it ran. Configured under `grouping_review.enabled`
 (unset follows `screenshot_grouping.enabled`).
@@ -343,7 +343,7 @@ the folder itself is kept — its name still records which day it was and what i
 held. `__EMPTY_SUBFOLDERS` carries no day prefix, so the grouping review neither
 matches it nor descends into it, and a parked folder cannot hold up a run.
 
-Empty means empty *all the way down*. A day whose media was routed into
+Empty means empty _all the way down_. A day whose media was routed into
 `__VIDEOS` or `__RAW` is not empty — it is a day the GUI happens not to show,
 which is a different thing and is skipped where it stands. Nothing is ever
 overwritten: a name already parked means an earlier run put one there, so the
@@ -372,13 +372,13 @@ grouper is opened:
 2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=79_v=3)
 ```
 
-| Letter | Counts | Written when |
-| --- | --- | --- |
-| `i` | top-level images | there are any |
-| `v` | top-level videos | there are any |
-| `e` | `._exif` sidecars in the whole folder | the count does not match the media in that folder |
-| `s` | non-sidecar files below the top level | there are any |
-| `f` | subfolders in the whole subtree | the folder is `EMPTY` and has any |
+| Letter | Counts                                | Written when                                      |
+| ------ | ------------------------------------- | ------------------------------------------------- |
+| `i`    | top-level images                      | there are any                                     |
+| `v`    | top-level videos                      | there are any                                     |
+| `e`    | `._exif` sidecars in the whole folder | the count does not match the media in that folder |
+| `s`    | non-sidecar files below the top level | there are any                                     |
+| `f`    | subfolders in the whole subtree       | the folder is `EMPTY` and has any                 |
 
 `i` and `v` are the review job. The grouper GUI shows the top level only, so
 they state exactly what it will put in front of you. A day whose every file was
@@ -400,7 +400,7 @@ One `._exif` per media file is the norm, so `e` appears only when that breaks:
 grouper will not show you everything the folder holds.
 
 **`e` counts subjects, not files, and `c` is why.** The useful question is how
-many media are *covered* by a sidecar, not how many `._exif` are lying about — so
+many media are _covered_ by a sidecar, not how many `._exif` are lying about — so
 `e` counts the distinct subjects the folder's sidecars name, and `c` counts the
 files beyond the first for any one of them. Splitting the two is what stops one
 fault masking another: two sidecars naming the JPG and none naming the RAW used
@@ -428,7 +428,7 @@ An emptied folder holds nothing to read a capture time off, and a dated prefix
 without a time is the one shape the convention would rather not see — so
 `00.00.00` stands in. It is a real, sortable time that no camera is likely to
 have produced, sitting next to the `EMPTY` that says why it is there. A folder
-emptied *after* it was named keeps its real time: a genuine capture beats a
+emptied _after_ it was named keeps its real time: a genuine capture beats a
 placeholder. Dropping the counts is what makes two emptied folders on
 one day land on the same name, so the second and later take `_2`, `_3` … in the
 order Explorer sorts them. That numbering is the only place this tool resolves
@@ -471,7 +471,7 @@ It does two things:
   `e`/`s` audit markers above. `--skip-placeholders` turns this half off and
   rewrites timestamps only.
 
-Only the *time* is taken from the earliest file. The date stays as
+Only the _time_ is taken from the earliest file. The date stays as
 folder-sorting wrote it, since a shot after midnight but before the day boundary
 belongs to the previous day's folder, and rewriting the date would move the day
 out from under its month folder too.
@@ -502,7 +502,7 @@ A folder whose tail carries something a human wrote after the marker keeps that
 tail verbatim and only gains the time.
 
 A folder somebody has named gets the same dated half and nothing else. The
-label is their writing and is kept verbatim — only the *first* ` - ` separates
+label is their writing and is kept verbatim — only the _first_ `-` separates
 it, so `- Lens tests - flowers` survives whole — and it never gains counts, a
 bracket being the mark of a folder still awaiting review. The one thing it does
 shed is the legacy number folder-sorting left in front of it:
@@ -572,15 +572,15 @@ tree written by an older Photosorter, an older grouper or a third-party tool
 into the shape [`ARCHIVE_STANDARD.md`](ARCHIVE_STANDARD.md) describes, in the one
 order that makes sense, over one target, under one set of safety rules:
 
-| Step | What it does |
-| --- | --- |
-| 1 | Canonicalise names (the tool above) |
-| 2 | Reunite companions with their representatives, and sidecars/previews with their subjects |
-| 3 | Open the grouper GUI on every `__TO_SPLIT__` folder, one at a time |
-| 4 | Reunite companions and sidecars again |
-| 5 | Canonicalise names again |
-| 6 | Check compliance with the archive standard — **not implemented** |
-| 7 | Fix compliance with the archive standard — **not implemented** |
+| Step | What it does                                                                             |
+| ---- | ---------------------------------------------------------------------------------------- |
+| 1    | Canonicalise names (the tool above)                                                      |
+| 2    | Reunite companions with their representatives, and sidecars/previews with their subjects |
+| 3    | Open the grouper GUI on every `__TO_SPLIT__` folder, one at a time                       |
+| 4    | Reunite companions and sidecars again                                                    |
+| 5    | Canonicalise names again                                                                 |
+| 6    | Check compliance with the archive standard — **not implemented**                         |
+| 7    | Fix compliance with the archive standard — **not implemented**                           |
 
 ```powershell
 _restructure_archive.bat                                        # dry run over <root_folder>\<year>
@@ -601,7 +601,7 @@ The `.ps1` takes the same arguments and returns the same exit codes, and adds
 ```
 
 Two things it does that the `.bat` does not have to. PowerShell splits an
-unquoted `1,3` into an array *before* the script sees it, and splatting an array
+unquoted `1,3` into an array _before_ the script sees it, and splatting an array
 to a native command passes each element separately — so `--steps 1,3` would
 arrive as `--steps 1` plus a stray `3`, which argparse would quietly take for the
 target path. The script joins it back up, so both shells behave the same. And it
@@ -631,20 +631,28 @@ whose subject it could not find, a group nobody has named, a step that did not
 finish. None of them is fixed for you, and each is listed with the reason it
 was left where it is.
 
-The verdict answers *is there anything left for me?* The exit code answers *did
-the tool do its work?* — and they are not the same question: a run that finds
+The verdict answers _is there anything left for me?_ The exit code answers _did
+the tool do its work?_ — and they are not the same question: a run that finds
 twenty folders the standard cannot describe did its work perfectly, exits `0`,
 and still prints a red banner saying twenty things are waiting.
+
+Every line the tool says itself is tagged `[restructure]` and coloured cyan;
+every line it relays from a tool it called — the canonicaliser's rename report,
+the grouper's stderr, the matching engine's log, ExifTool's — is neither. The
+tag is always the same colour whoever is speaking, so the colour tells you
+_who_, while the message keeps the colour its own meaning earned: green for
+done, yellow for wants-a-look, red for broken, inside a cyan-tagged line.
 
 Frames are drawn with box characters where the console can encode them and with
 `+`/`-` where it cannot, so a legacy code page gets a plainer box rather than a
 traceback. Colour goes to a terminal only; `--no-colour` turns it off and leaves
-the frames, because a redirected log needs the shape as much as a console does.
+the frames and the tag, because a redirected log needs both as much as a console
+does.
 
 **Nothing is changed without `--apply`.** Exit codes match the canonicaliser's:
 `0` nothing left to do, `1` changes pending or failures, `2` error. An applied
 run journals what each step did and which folders were opened; the canonicaliser
-writes its own rename journal per year tree, and `--undo` on *that* tool replays
+writes its own rename journal per year tree, and `--undo` on _that_ tool replays
 those renames backwards. Step 2 is not undoable — what the GUI does inside a
 folder is your own work.
 
@@ -684,7 +692,7 @@ order and no other:
   used to leave a shell — is merged into the nearest allowed one above it, and
   no further: a sub-event emptied out of a group stays in that group. Name
   collisions gain `_2`, `_3` …; each emptied shell is removed only after it is
-  verified to hold nothing at all. One sitting *above* its level, under a year
+  verified to hold nothing at all. One sitting _above_ its level, under a year
   folder, is reported and never pushed down (H7). A parking area is then a
   traversal boundary wherever it sits, so parked days do not re-enter grouping
   or reconciliation.
@@ -705,7 +713,7 @@ order and no other:
   subdir follows the representative the grouper moved into a sibling sub-event.
   Matched on capture time, because the representative has been renamed since.
 - **`place_companions`** — **X10 and X13**: a companion goes into the folder
-  *directly inside* the one that holds its subject — an `._exif` into `__EXIF`,
+  _directly inside_ the one that holds its subject — an `._exif` into `__EXIF`,
   a `.thm`/`.lrv` into `__PREVIEWS`. Canonical names match directly; historical
   EXIF names without the media extension or with different case match by stem
   and X10 location, then are renamed onto X1 (X1a).
@@ -715,7 +723,7 @@ order and no other:
 
 The order is the dependency order. Parking is normalized first, then legacy
 migration gives everything after it one set of folder names. Reconciliation moves
-*subjects*: a RAW still in the wrong event folder has no business having its
+_subjects_: a RAW still in the wrong event folder has no business having its
 sidecar placed beside it yet. Placement settles old names before generation,
 so only genuinely absent RAW sidecars are created.
 
@@ -739,7 +747,7 @@ time. A day folder that never gained a time is still a day folder.
     __RAW\__EXIF\  …__RAW__f8.0__6D.CR2._exif   moved down out of __EXIF
 ```
 
-**Historical companions may arrive in stem form** — the subject's *stem* plus
+**Historical companions may arrive in stem form** — the subject's _stem_ plus
 the companion extension. That includes `shot._exif` from older extraction and
 `GX010042.LRV` beside `GX010042.MP4` — because nothing has ever renamed one. They
 are matched by stem and **renamed onto X1 as they move**: `GX010042.MP4.lrv`,
@@ -750,17 +758,17 @@ from its RAW; multiple candidates at that same location are left for review.
 
 The two files are compared by **MD5** rather than one being picked:
 
-| | |
-| --- | --- |
-| **identical** | the incoming copy is redundant — parked as `<name>_DUPE_<md5>_<n>` (F4) |
+|               |                                                                                                           |
+| ------------- | --------------------------------------------------------------------------------------------------------- |
+| **identical** | the incoming copy is redundant — parked as `<name>_DUPE_<md5>_<n>` (F4)                                   |
 | **different** | one is wrong and which is not knowable here — parked as `<name>_DIFFERS_<md5>_<n>` and counted separately |
 
-Both land in `<year>\__DUPLICATES`, one per year tree, chosen from the *subject's*
+Both land in `<year>\__DUPLICATES`, one per year tree, chosen from the _subject's_
 tree so a multi-year run does not pool them. **Nothing is overwritten and nothing
 is deleted** (T1, T2), and the parking folder is excluded from the next run's
 index so its contents are not re-reported as orphans.
 
-> `__DUPLICATES` under a *year* remains a deliberate extension of §4 and is
+> `__DUPLICATES` under a _year_ remains a deliberate extension of §4 and is
 > listed in the standard's open questions. Empty legacy containers now park in
 > the `__EMPTY_SUBFOLDERS` beside their dated folder under settled H2/L4.
 

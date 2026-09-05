@@ -1784,6 +1784,72 @@ def test_a_frame_and_its_margin_fit_the_terminal(monkeypatch):
     assert tool.frame_width() + len(tool.FRAME_MARGIN) <= 70
 
 
+# --------------------------------------------------------------------------
+# Whose voice a line is in
+# --------------------------------------------------------------------------
+
+def test_this_tool_tags_what_it_says_itself(tmp_path, config, capsys):
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - Lens tests")
+
+    run(str(root), "--steps", "2")
+
+    out = capsys.readouterr().out
+    assert "%s Reconciling" % tool.SPEAKER_TAG in out
+
+
+def test_what_it_relays_from_another_tool_is_not_tagged(tmp_path, config,
+                                                        capsys):
+    """The canonicaliser prints its own report; this tool does not sign it."""
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed) - 1. ######")
+
+    run(str(root), "--steps", "1")
+
+    tally = [row for row in capsys.readouterr().out.splitlines()
+             if "conflict(s)" in row]
+    assert tally and not any(tool.SPEAKER_TAG in row for row in tally)
+
+
+def test_the_tag_is_cyan_whatever_the_line_means():
+    for key in ("bold", "dim", "ok", "warn", tool.FAILED):
+        assert tool.speak("x", key, True).startswith(
+            tool.SPEAKER_COLOUR + tool.SPEAKER_TAG)
+
+
+def test_emphasis_becomes_cyan_and_meaning_keeps_its_colour():
+    # "bold" and "dim" say how loudly, not what -- so they are the tool's own
+    # colour. "warn" says something wants a look, and stays yellow.
+    assert "\033[1;96m" in tool.speak("x", "bold", True)
+    assert "\033[2;96m" in tool.speak("x", "dim", True)
+    assert "\033[93m" in tool.speak("x", "warn", True)
+    assert "96m" not in tool.speak("x", "warn", True).split(
+        tool.SPEAKER_TAG)[1]
+
+
+def test_a_multi_line_message_is_tagged_once_and_aligned_after():
+    spoken = tool.speak("first\n    -> second", "dim", False).splitlines()
+    assert spoken[0].startswith(tool.SPEAKER_TAG)
+    assert spoken[1].startswith(tool.SPEAKER_GUTTER + " ")
+    assert tool.SPEAKER_TAG not in spoken[1]
+
+
+def test_a_blank_line_stays_a_blank_line():
+    assert tool.speak("\nsomething", "bold", False).splitlines()[0] == ""
+
+
+def test_no_colour_leaves_the_tag_and_drops_the_escapes(tmp_path, config,
+                                                        capsys):
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - Lens tests")
+
+    run(str(root), "--steps", "2", "--no-colour")
+
+    out = capsys.readouterr().out
+    assert tool.SPEAKER_TAG in out
+    assert "\033[" not in out
+
+
 def test_a_clean_run_ends_in_an_all_clear_banner(tmp_path, config, capsys):
     root = make_archive(tmp_path)
     make_event(root, "2026-07-15_(Wed)__08.14.02 - Lens tests")
