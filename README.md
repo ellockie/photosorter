@@ -182,13 +182,17 @@ month's `__EMPTY_SUBFOLDERS` (V12/L4).
 
 **Groups (§3) are written.** A dated folder holding dated child folders carries
 `____GROUP____` as the first element of its tail and states the whole span it
-covers in its prefix -- start stamp, then `#` and the last day with the time of
-the last shot in the subtree:
+covers in its prefix -- start stamp, then `#` and the end. The end says all of
+the date or none of it: the time alone when the span closes the day it opened,
+and the whole canonical stamp when it crosses a day.
 
-    2026-08-20_(Thu)__09.14.02#27__18.31.50 - ____GROUP____(d=7) - Norway
+    2026-08-20_(Thu)__09.14.02#2026-08-27_(Thu)__18.31.50 - ____GROUP____(d=7) - Norway
+    2026-08-14_(Fri)__13.40.23#17.47.04 - ____GROUP____(d=3) - Kajaki z Marco
 
 Both stamps and the `d` count are the tool's, rebuilt from the subtree on every
-run; the description after them is the only part a person owns. Step 6 of
+run; the description after them is the only part a person owns -- and a group
+nobody has named carries `__TO_LABEL__` there until somebody does, or until its
+children agree on a name of their own (C16). Step 6 of
 `tools/restructure_archive.py` maintains them, adds the marker to a folder that
 has gained dated children and takes it off one that has lost its last. What it
 holds (C3) is only reported: moving media down into a child of its own is C4,
@@ -611,6 +615,31 @@ wants the long form:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "<path>\_restructure_archive.ps1" --apply
 ```
+
+#### Reading the output
+
+Every step closes with a framed verdict — green when it left nothing to
+address, red when it did, naming what it found. The run closes with two frames
+and nothing after them: **every issue it gathered**, in full and grouped by
+kind, and then the **summary**, with the verdict in a heavy box of its own.
+The summary is last on purpose — whichever block is printed last is the one
+still on screen when the run ends.
+
+An issue is anything the tool deliberately declined to settle: a folder that
+fits no shape in the standard, a junction it would not follow, a companion
+whose subject it could not find, a group nobody has named, a step that did not
+finish. None of them is fixed for you, and each is listed with the reason it
+was left where it is.
+
+The verdict answers *is there anything left for me?* The exit code answers *did
+the tool do its work?* — and they are not the same question: a run that finds
+twenty folders the standard cannot describe did its work perfectly, exits `0`,
+and still prints a red banner saying twenty things are waiting.
+
+Frames are drawn with box characters where the console can encode them and with
+`+`/`-` where it cannot, so a legacy code page gets a plainer box rather than a
+traceback. Colour goes to a terminal only; `--no-colour` turns it off and leaves
+the frames, because a redirected log needs the shape as much as a console does.
 
 **Nothing is changed without `--apply`.** Exit codes match the canonicaliser's:
 `0` nothing left to do, `1` changes pending or failures, `2` error. An applied

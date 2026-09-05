@@ -937,8 +937,10 @@ def test_non_compliant_folders_are_reported_at_the_end(tmp_path, config, capsys)
     out = capsys.readouterr().out
     assert "NON-COMPLIANT FOLDERS  (1)" in out
     assert str(junk) in out
-    # After the summary, which is the whole point of gathering them.
-    assert out.index("SUMMARY") < out.index("NON-COMPLIANT FOLDERS")
+    # Before the summary, and the summary last: whichever is printed last is
+    # the one still on the screen when the run ends, and that is the verdict.
+    assert out.index("NON-COMPLIANT FOLDERS") < out.index("SUMMARY")
+    assert out.index("SUMMARY") < out.index("ISSUE(S) TO ADDRESS")
 
 
 def test_nothing_to_report_prints_no_section(tmp_path, config, capsys):
@@ -1272,6 +1274,7 @@ def test_the_whole_run_end_to_end(tmp_path, config, fake_grouper, capsys):
     out = capsys.readouterr().out
     assert "NOT IMPLEMENTED" in out           # steps 4 and 5
     assert "SUMMARY" in out
+    assert "ALL CLEAR" in out
 
 
 def test_a_dry_run_changes_nothing(tmp_path, config, fake_grouper):
@@ -1351,7 +1354,7 @@ def test_a_parent_of_dated_folders_is_marked_timed_and_spanned(tmp_path, config)
     })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-15_(Wed)__08.14.02#16__19.02.44 - ____GROUP____(d=2) - Sopot weekend"]
+        "2026-07-15_(Wed)__08.14.02#2026-07-16_(Thu)__19.02.44 - ____GROUP____(d=2) - Sopot weekend"]
 
 
 def test_a_single_day_group_still_states_both_ends(tmp_path, config):
@@ -1363,7 +1366,7 @@ def test_a_single_day_group_still_states_both_ends(tmp_path, config):
     })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-18_(Sat)__11.03.27#18__22.14.09 - ____GROUP____(d=2) - pier"]
+        "2026-07-18_(Sat)__11.03.27#22.14.09 - ____GROUP____(d=2) - pier"]
 
 
 def test_a_leaf_folder_is_left_alone(tmp_path, config):
@@ -1393,7 +1396,7 @@ def test_the_legacy_marker_is_converted_and_the_description_kept(tmp_path, confi
         })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-15_(Wed)__08.14.02#16__17.40.11 - ____GROUP____(d=2) - Malbork trip"]
+        "2026-07-15_(Wed)__08.14.02#2026-07-16_(Thu)__17.40.11 - ____GROUP____(d=2) - Malbork trip"]
 
 
 def test_a_stale_count_and_a_stale_span_are_both_rebuilt(tmp_path, config):
@@ -1406,7 +1409,7 @@ def test_a_stale_count_and_a_stale_span_are_both_rebuilt(tmp_path, config):
         })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-15_(Wed)__08.14.02#16__19.02.44 - ____GROUP____(d=2) - Sopot"]
+        "2026-07-15_(Wed)__08.14.02#2026-07-16_(Thu)__19.02.44 - ____GROUP____(d=2) - Sopot"]
 
 
 def test_a_folder_that_lost_its_children_loses_the_marker_and_the_span(
@@ -1437,11 +1440,11 @@ def test_a_nested_group_spans_everything_beneath_it(tmp_path, config):
 
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(outer) == [
-        "2026-07-15_(Wed)__08.14.02#18__20.11.19 - ____GROUP____(d=2) - Norway"]
+        "2026-07-15_(Wed)__08.14.02#2026-07-18_(Sat)__20.11.19 - ____GROUP____(d=2) - Norway"]
     renamed = outer.parent / month_entries(outer)[0]
     assert sorted(path.name for path in renamed.iterdir()) == [
         "2026-07-15_(Wed)__08.14.02",
-        "2026-07-16_(Thu)__09.10.44#18__20.11.19 - ____GROUP____(d=2) - the fjords",
+        "2026-07-16_(Thu)__09.10.44#2026-07-18_(Sat)__20.11.19 - ____GROUP____(d=2) - the fjords",
     ]
 
 
@@ -1517,8 +1520,9 @@ def test_a_split_day_with_nothing_left_at_its_top_level_becomes_a_group(
     """The ordinary case: the grouper split the day, so the parent is a group now.
 
     The counts go with the marker -- "(i=79)" is what the day held before it
-    was split, not a name -- and the folder comes out unnamed, which is exactly
-    what it is.
+    was split, not a name -- and the folder comes out carrying ``__TO_LABEL__``,
+    because neither it nor its children has ever been named and a group waiting
+    for a name should look like it is waiting (N11).
     """
     root = make_archive(tmp_path)
     group = make_group(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=2)", {
@@ -1527,7 +1531,8 @@ def test_a_split_day_with_nothing_left_at_its_top_level_becomes_a_group(
     })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-15_(Wed)__08.14.02#15__16.20.31 - ____GROUP____(d=2)"]
+        "2026-07-15_(Wed)__08.14.02#16.20.31 - ____GROUP____(d=2) "
+        "- __TO_LABEL__"]
 
 
 def test_a_half_split_day_keeps_its_marker_and_is_reported(tmp_path, config, capsys):
@@ -1557,7 +1562,7 @@ def test_a_name_a_person_wrote_survives_becoming_a_group(tmp_path, config):
     })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-15_(Wed)__08.14.02#15__08.14.02 - ____GROUP____(d=1) - Sopot weekend"]
+        "2026-07-15_(Wed)__08.14.02#08.14.02 - ____GROUP____(d=1) - Sopot weekend"]
 
 
 def test_the_legacy_placeholder_is_not_mistaken_for_a_name(tmp_path, config):
@@ -1567,7 +1572,101 @@ def test_the_legacy_placeholder_is_not_mistaken_for_a_name(tmp_path, config):
     })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-15_(Wed)__08.14.02#15__08.14.02 - ____GROUP____(d=1)"]
+        "2026-07-15_(Wed)__08.14.02#08.14.02 - ____GROUP____(d=1) "
+        "- __TO_LABEL__"]
+
+
+# --------------------------------------------------------------------------
+# Naming a group nobody has named (N11)
+# --------------------------------------------------------------------------
+
+def test_a_group_takes_the_description_all_its_children_agree_on(tmp_path, config):
+    """Agreement invents nothing: if every child says Sopot, the group is Sopot."""
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=2)", {
+        "2026-07-15_(Wed)__08.14.02 - Sopot": ["2026-07-15_(Wed)__08.14.02"],
+        "2026-07-15_(Wed)__14.31.09 - Sopot": ["2026-07-15_(Wed)__16.20.31"],
+    })
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(group) == [
+        "2026-07-15_(Wed)__08.14.02#16.20.31 - ____GROUP____(d=2) - Sopot"]
+
+
+def test_children_that_disagree_leave_the_group_asking_for_a_name(tmp_path, config):
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=2)", {
+        "2026-07-15_(Wed)__08.14.02 - Sopot": ["2026-07-15_(Wed)__08.14.02"],
+        "2026-07-15_(Wed)__14.31.09 - the pier": ["2026-07-15_(Wed)__16.20.31"],
+    })
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(group) == [
+        "2026-07-15_(Wed)__08.14.02#16.20.31 - ____GROUP____(d=2) "
+        "- __TO_LABEL__"]
+
+
+def test_one_unnamed_child_is_enough_to_withhold_the_name(tmp_path, config):
+    """A group spans everything under it, so a name has to cover everything."""
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=2)", {
+        "2026-07-15_(Wed)__08.14.02 - Sopot": ["2026-07-15_(Wed)__08.14.02"],
+        "2026-07-15_(Wed)__14.31.09": ["2026-07-15_(Wed)__16.20.31"],
+    })
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(group) == [
+        "2026-07-15_(Wed)__08.14.02#16.20.31 - ____GROUP____(d=2) "
+        "- __TO_LABEL__"]
+
+
+def test_to_label_is_not_sticky(tmp_path, config):
+    """The marker is a question, so it is re-asked -- and answered when it can be.
+
+    A group marked on one run and given agreeing children before the next comes
+    out named. Were ``__TO_LABEL__`` read as a description, T7 would protect it
+    and the one marker meant to be replaced would be the one nothing replaces.
+    """
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=1)", {
+        "2026-07-15_(Wed)__08.14.02 - Sopot": ["2026-07-15_(Wed)__08.14.02"],
+    })
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    named = root / "2026" / "07. July" / month_entries(group)[0]
+    assert named.name.endswith("- Sopot")
+
+    # A second child arrives, agreeing with the first: the name still holds.
+    child = named / "2026-07-15_(Wed)__14.31.09 - Sopot"
+    child.mkdir()
+    (child / "2026-07-15_(Wed)__16.20.31__f1.7__SG23U.jpg").write_bytes(b"x")
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(named) == [
+        "2026-07-15_(Wed)__08.14.02#16.20.31 - ____GROUP____(d=2) - Sopot"]
+
+
+def test_a_person_replacing_the_marker_is_never_overwritten(tmp_path, config):
+    """T7: once somebody types a name over the question, it is theirs."""
+    root = make_archive(tmp_path)
+    group = make_group(
+        root,
+        "2026-07-15_(Wed)__08.14.02#15__16.20.31 - ____GROUP____(d=2) - Sopot weekend",
+        {
+            "2026-07-15_(Wed)__08.14.02 - Sopot": ["2026-07-15_(Wed)__08.14.02"],
+            "2026-07-15_(Wed)__14.31.09 - Sopot": ["2026-07-15_(Wed)__16.20.31"],
+        })
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(group) == [
+        "2026-07-15_(Wed)__08.14.02#16.20.31 - ____GROUP____(d=2) "
+        "- Sopot weekend"]
+
+
+def test_a_group_falling_back_to_a_leaf_drops_the_marker_and_the_question(
+        tmp_path, config):
+    """C2: no dated children, no marker -- and no question about a group either."""
+    root = make_archive(tmp_path)
+    group = make_group(
+        root,
+        "2026-07-15_(Wed)__08.14.02 - ____GROUP____(d=1) - __TO_LABEL__", {})
+    (group / "2026-07-15_(Wed)__08.14.02__f1.7__SG23U.jpg").write_bytes(b"x")
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(group) == ["2026-07-15_(Wed)__08.14.02"]
 
 
 # --------------------------------------------------------------------------
@@ -1645,3 +1744,159 @@ def test_a_parking_area_above_its_level_is_left_alone(tmp_path, config):
     assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
 
     assert parked.is_dir()
+
+
+# --------------------------------------------------------------------------
+# The framed verdicts: after each step, and at the very end
+# --------------------------------------------------------------------------
+#
+# These assert on what is on the screen, because that is the whole of what
+# they are for. A finding somebody has to scroll back to has not been
+# reported.
+
+FRAME_EDGES = ("\u250c", "\u2514", "\u2502", "\u2554", "\u255a", "\u2551",
+               "+", "|")
+
+
+def framed(out):
+    """The lines that are part of a frame, in either character set."""
+    return [row for row in out.splitlines()
+            if row.lstrip()[:1] in FRAME_EDGES]
+
+
+def test_every_frame_stands_two_columns_in_from_the_edge(tmp_path, config,
+                                                         capsys):
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - Lens tests")
+    (root / "2026" / "07. July" / "Random Junk Folder").mkdir()
+
+    run(str(root), "--steps", "2")
+
+    rows = framed(capsys.readouterr().out)
+    assert rows                                   # headers, verdicts, banner
+    assert all(row.startswith(tool.FRAME_MARGIN + row.lstrip()[0])
+               for row in rows)
+
+
+def test_a_frame_and_its_margin_fit_the_terminal(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "70")
+    monkeypatch.setenv("LINES", "24")
+    assert tool.frame_width() + len(tool.FRAME_MARGIN) <= 70
+
+
+def test_a_clean_run_ends_in_an_all_clear_banner(tmp_path, config, capsys):
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - Lens tests")
+
+    assert run(str(root), "--steps", "2") == 0
+
+    out = capsys.readouterr().out
+    assert "ALL CLEAR" in out
+    assert "ISSUE(S) TO ADDRESS" not in out
+    # In a frame, not loose in the report.
+    assert any("ALL CLEAR" in row for row in framed(out))
+
+
+def test_every_step_closes_with_its_own_verdict(tmp_path, config, capsys):
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - Lens tests")
+
+    run(str(root), "--steps", "2,6")
+
+    out = capsys.readouterr().out
+    assert "STEP 2 OK" in out
+    assert "STEP 6 OK" in out
+
+
+def test_a_step_that_found_something_says_so_in_its_own_frame(tmp_path, config,
+                                                              capsys):
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - Lens tests")
+    junk = root / "2026" / "07. July" / "Random Junk Folder"
+    junk.mkdir()
+
+    run(str(root), "--steps", "2")
+
+    out = capsys.readouterr().out
+    assert "STEP 2 LEFT 1 THING(S) TO ADDRESS" in out
+    # And again at the end, where the whole run's findings are gathered.
+    assert out.count("NON-COMPLIANT FOLDERS") == 2
+
+
+def test_the_end_of_run_banner_counts_the_issues(tmp_path, config, capsys):
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - Lens tests")
+    (root / "2026" / "07. July" / "Random Junk Folder").mkdir()
+    (root / "2026" / "07. July" / "Another Junk Folder").mkdir()
+
+    run(str(root), "--steps", "2")
+
+    out = capsys.readouterr().out
+    assert "ISSUES TO ADDRESS  (2)" in out
+    assert "2 ISSUE(S) TO ADDRESS" in out
+    assert "ALL CLEAR" not in out
+
+
+def test_a_dry_run_with_changes_pending_says_which_it_was(tmp_path, config,
+                                                          capsys):
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed) - 1. ######")
+
+    assert run(str(root), "--steps", "1") == 1
+
+    out = capsys.readouterr().out
+    assert "DRY RUN -- CHANGES PENDING" in out
+    assert "Re-run with --apply" in out
+
+
+def test_quiet_still_prints_the_verdict(tmp_path, config, capsys):
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - Lens tests")
+
+    run(str(root), "--steps", "2", "--quiet")
+
+    out = capsys.readouterr().out
+    assert "ALL CLEAR" in out
+    assert "SUMMARY" in out
+
+
+def test_the_summary_is_the_last_thing_printed(tmp_path, config, capsys):
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - Lens tests")
+
+    run(str(root), "--steps", "2")
+
+    rows = [row for row in capsys.readouterr().out.splitlines() if row.strip()]
+    assert "ALL CLEAR" in "\n".join(rows[-6:])
+
+
+def test_frames_fall_back_to_ascii_on_a_legacy_code_page(monkeypatch, capsys):
+    """A console that cannot encode a box character gets one made of "+"."""
+    class Cp1250Stdout:
+        encoding = "cp1250"
+
+    monkeypatch.setattr(tool.sys, "stdout", Cp1250Stdout())
+    assert tool.frame_chars()["h"] == "-"
+    assert tool.glyph("tick") == "[+]"
+
+
+def test_issues_are_grouped_deduplicated_and_ordered():
+    flags = [
+        (2, tool.NON_COMPLIANT, "c:\\a", "no shape"),
+        (2, tool.REFUSED_PATHS, "c:\\j", "junction"),
+        (4, tool.REFUSED_PATHS, "c:\\j", "junction"),   # the same one again
+        (6, tool.RENAME_FAILURES, "c:\\b", "in use"),
+    ]
+    groups = tool.group_issues(flags)
+    assert [heading for heading, _items, _hidden in groups] == [
+        tool.RENAME_FAILURES, tool.REFUSED_PATHS, tool.NON_COMPLIANT]
+    assert [len(items) for _heading, items, _hidden in groups] == [1, 1, 1]
+
+
+def test_a_step_verdict_holds_back_the_long_tail():
+    flags = [(1, tool.PARK_FAILURES, "c:\\%d" % index, None)
+             for index in range(tool.STEP_VERDICT_ITEMS + 5)]
+    (_heading, items, hidden), = tool.group_issues(
+        flags, limit=tool.STEP_VERDICT_ITEMS)
+    assert len(items) == tool.STEP_VERDICT_ITEMS
+    assert hidden == 5

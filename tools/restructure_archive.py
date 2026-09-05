@@ -187,6 +187,37 @@ output somebody has to act on by hand. Reported, never fixed -- what to do with
 a folder the standard does not describe is a decision, and steps 7 and 8 are
 where that will live once the standard leaves draft.
 
+What the output is shaped around
+--------------------------------
+A run prints thousands of lines, and two questions decide what happens next:
+did this step leave anything for a person, and did the run as a whole succeed.
+Neither survives being read out of a wall of renames, so neither is left in
+one.
+
+**Every step closes with a framed verdict** -- green when it left nothing, red
+when it did, naming what it flagged. **The run closes with two frames and
+nothing after them**: every issue it gathered, in full, grouped by kind; and
+then the summary, with the verdict in a heavy box of its own. The summary is
+last deliberately: whichever block is printed last is the one still on the
+screen when the run ends.
+
+An issue is anything the tool deliberately declined to settle -- a folder that
+fits no shape, a reparse point it would not follow, a companion with no
+subject, a group nobody has named, a step that did not finish. None of them is
+fixed for you, and each is listed with the reason it was left.
+
+The frames are box-drawing characters where the console can encode them and
+ASCII where it cannot: this prints to whatever code page the machine happens
+to have, and a ``UnicodeEncodeError`` raised while drawing the summary would
+lose the very lines the frame exists to make unmissable. Colour goes to a
+terminal only, and ``--no-colour`` turns it off; the frames stay either way,
+because a redirected log needs the shape as much as a console does.
+
+The verdict answers "is there anything left for me?"; the **exit code** answers
+"did the tool do its work?" -- and they are not the same question. A run that
+finds twenty folders the standard cannot describe did its work perfectly and
+exits 0, with a red banner saying twenty things are waiting.
+
 A dry run does each thing once
 ------------------------------
 Steps 4 and 5 repeat 2 and 1 to clean up after the grouper. In a dry run the
@@ -295,8 +326,10 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 from typing import NamedTuple
 
@@ -388,8 +421,290 @@ inside = canonicalise.inside
 
 
 # --------------------------------------------------------------------------
+# Frames -- the two lines of a run that somebody has to read
+# --------------------------------------------------------------------------
+#
+# A run prints thousands of lines and two of them decide what happens next:
+# did this step leave anything for a person, and did the run as a whole
+# succeed. In a wall of renames both scroll past. So each step closes with a
+# framed verdict, and the run closes with the issues it gathered and then the
+# summary -- framed, coloured, and the last thing on the screen.
+#
+# Box-drawing characters where the console can encode them, ASCII where it
+# cannot. This prints to whatever code page the machine happens to have, and a
+# UnicodeEncodeError raised while drawing the summary would lose the very
+# lines the frame exists to make unmissable.
+
+FRAME_LIGHT = {"tl": "\u250c", "tr": "\u2510", "bl": "\u2514", "br": "\u2518",
+               "h": "\u2500", "v": "\u2502"}
+FRAME_HEAVY = {"tl": "\u2554", "tr": "\u2557", "bl": "\u255a", "br": "\u255d",
+               "h": "\u2550", "v": "\u2551"}
+FRAME_LIGHT_ASCII = {"tl": "+", "tr": "+", "bl": "+", "br": "+",
+                     "h": "-", "v": "|"}
+FRAME_HEAVY_ASCII = {"tl": "+", "tr": "+", "bl": "+", "br": "+",
+                     "h": "=", "v": "|"}
+
+GLYPHS = {"tick": "\u2714", "cross": "\u2716", "warn": "\u25b6", "dot": "\u2022"}
+# Bracketed rather than spelled out: the summary already says OK or FAILED in
+# the column beside the mark, and a glyph that repeats the word reads as a
+# stutter ("OK OK  6. ...").
+GLYPHS_ASCII = {"tick": "[+]", "cross": "[!]", "warn": "[~]", "dot": "*"}
+
+# One column for the mark whichever set is in use, so the outcome words below
+# each other line up: a box-drawing tick is one character wide and its ASCII
+# stand-in is three.
+GLYPH_WIDTH = 3
+
+# Wide enough to hold a step title, narrow enough that the eye takes the box
+# in as one shape rather than reading along it.
+FRAME_MAX_WIDTH = 100
+FRAME_MIN_WIDTH = 44
+
+# Every frame stands two columns in from the left edge. A box flush against
+# the edge of the window reads as part of the window; two columns of nothing
+# are what make it read as a thing placed on the page, and they give the eye
+# the vertical line to run down when several frames follow each other. Taken
+# off the width rather than added to it, so a frame still fits the terminal it
+# is indented inside.
+FRAME_MARGIN = "  "
+
+# How many items of one kind a step's own verdict lists before it stops. The
+# end-of-run block lists every one of them; a step that flagged four hundred
+# folders must not push its own headline off the screen.
+STEP_VERDICT_ITEMS = 8
+
+
+def console_can_print(text):
+    """True when stdout's encoding can carry ``text``.
+
+    Asked of the box characters and the glyphs before either is used, so a
+    console on a legacy code page gets the ASCII frame instead of a traceback.
+    """
+    encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+    try:
+        text.encode(encoding)
+    except (LookupError, UnicodeError):
+        return False
+    return True
+
+
+def frame_chars(heavy=False):
+    if console_can_print(FRAME_LIGHT["h"] + FRAME_HEAVY["h"]):
+        return FRAME_HEAVY if heavy else FRAME_LIGHT
+    return FRAME_HEAVY_ASCII if heavy else FRAME_LIGHT_ASCII
+
+
+def glyph(name):
+    """The mark that goes with the frame -- and it goes with the frame.
+
+    Asked against the box characters as well as the glyph itself, so a console
+    that gets the ASCII frame gets the ASCII marks with it. A bullet is
+    encodable on code pages that no box character survives, and one Unicode
+    mark inside a box made of plus signs reads as a mistake.
+    """
+    if console_can_print(FRAME_LIGHT["h"] + FRAME_HEAVY["h"] + GLYPHS[name]):
+        return GLYPHS[name]
+    return GLYPHS_ASCII[name]
+
+
+def frame_width():
+    return max(FRAME_MIN_WIDTH,
+               min(shutil.get_terminal_size((100, 24)).columns - 1
+                   - len(FRAME_MARGIN),
+                   FRAME_MAX_WIDTH))
+
+
+def line(key, text, rendered=None):
+    """One line of a frame: its colour, its text, and how to print it.
+
+    ``text`` is what the box is measured against and ``rendered`` is what goes
+    on the screen, so a line that colours only part of itself -- the outcome
+    word of a summary row -- still pads to the right edge.
+    """
+    return (key, text, rendered)
+
+
+def frame(title, lines, key, colour, heavy=False, closed=True):
+    """Print ``lines`` inside a titled box drawn in ``key``'s colour.
+
+    Each line keeps its own colour, so an OK and a FAILED read apart inside
+    one box.
+
+    ``closed=False`` leaves the right edge open, which is what a list of paths
+    wants: the full path is the actionable half of an issue, and padding or
+    truncating it to fit a box would make it uncopyable. A line too long for a
+    closed box loses its right edge for the same reason, rather than the box
+    losing its shape.
+    """
+    box = frame_chars(heavy)
+    width = frame_width()
+    head = box["tl"] + box["h"]
+    if title:
+        head += " %s " % title
+    head += box["h"] * max(1, width - len(head) - 1) + box["tr"]
+    print(FRAME_MARGIN + colourise(head, key, colour))
+
+    edge = colourise(box["v"], key, colour)
+    inner = width - 4                       # "| " ... " |"
+    for line_key, text, rendered in lines:
+        body = rendered if rendered is not None else colourise(text, line_key,
+                                                               colour)
+        if closed and len(text) <= inner:
+            print("%s%s %s%s %s" % (FRAME_MARGIN, edge, body,
+                                    " " * (inner - len(text)), edge))
+        else:
+            print("%s%s %s" % (FRAME_MARGIN, edge, body))
+    print(FRAME_MARGIN + colourise(box["bl"] + box["h"] * (width - 2)
+                                   + box["br"], key, colour))
+
+
+def banner(headline, detail, key, colour):
+    """The verdict: one heavy box, centred, and nothing else near it.
+
+    This is the last thing a run prints and the one line somebody reading over
+    a shoulder should be able to act on -- so it says the outcome in words, in
+    colour, inside a frame of its own, rather than leaving it to be inferred
+    from an exit code.
+    """
+    box = frame_chars(heavy=True)
+    width = frame_width()
+    inner = width - 4
+    edge = colourise(box["v"], key, colour)
+    print(FRAME_MARGIN + colourise(box["tl"] + box["h"] * (width - 2)
+                                   + box["tr"], key, colour))
+    for text, emphasis in (("", False), (headline, True), (detail, False),
+                           ("", False)):
+        text = text[:inner]
+        pad = inner - len(text)
+        left = pad // 2
+        body = colourise(text, key, colour)
+        if emphasis and colour and text:
+            body = "\033[1m" + body
+        print("%s%s %s%s%s %s" % (FRAME_MARGIN, edge, " " * left, body,
+                                  " " * (pad - left), edge))
+    print(FRAME_MARGIN + colourise(box["bl"] + box["h"] * (width - 2)
+                                   + box["br"], key, colour))
+
+
+# --------------------------------------------------------------------------
+# Issues -- what a run leaves for a person
+# --------------------------------------------------------------------------
+#
+# Every step reports as it goes, and every step's report scrolls. Flagging is
+# what keeps a finding for the two places it will be read: the step's own
+# closing frame, and the block at the end of the run. The step still reports
+# it in place; the flag is what stops it being missed.
+#
+# A heading is a kind of problem, and its note says what the tool did about it
+# -- which for all of these is "nothing", deliberately. None of them is a
+# thing a tool can decide.
+
+NON_COMPLIANT = "NON-COMPLIANT FOLDERS"
+STEPS_FAILED = "STEPS THAT DID NOT FINISH"
+REFUSED_PATHS = "PATHS REFUSED"
+GROUPER_FAILURES = "FOLDERS THE GROUPER COULD NOT OPEN"
+PASSED_OVER = "MARKED FOLDERS WITH NOTHING TO SHOW"
+PARK_FAILURES = "EMPTY FOLDERS THAT COULD NOT BE PARKED"
+RECONCILE_ERRORS = "RECONCILIATION ERRORS"
+WANTS_A_LOOK = "COMPANIONS AND SIDECARS THAT WANT A LOOK"
+AWAITING_A_NAME = "GROUPS NOBODY HAS NAMED"
+RENAME_FAILURES = "FOLDERS THAT COULD NOT BE RENAMED"
+
+ISSUE_NOTES = {
+    NON_COMPLIANT: "reported, never fixed -- what to do with a folder the "
+                   "standard does not describe is a decision for a person",
+    STEPS_FAILED: "the run stopped here; whatever follows a stopped step "
+                  "never ran",
+    REFUSED_PATHS: "not followed and not read, so nothing below them was "
+                   "seen by this run at all",
+    GROUPER_FAILURES: "the folder still carries its marker -- re-run step 3 "
+                      "once the grouper starts",
+    PASSED_OVER: "the grouper shows a folder's top level only; --open-all "
+                 "opens these anyway",
+    PARK_FAILURES: "the folder holds no file anywhere and is still sitting "
+                   "in the month",
+    RECONCILE_ERRORS: "a companion or a sidecar was left exactly where it was",
+    WANTS_A_LOOK: "nothing was moved on a guess -- every one of these is a "
+                  "judgement call",
+    AWAITING_A_NAME: "their children disagree or are themselves unnamed, and "
+                     "a name is not this tool's to invent",
+    RENAME_FAILURES: "the name on the disk still says what it said before",
+}
+
+# Failures first, because they change what the rest of the run means; the
+# folders the standard cannot describe last, because they are the only group
+# no future step will ever settle on its own.
+ISSUE_ORDER = [STEPS_FAILED, GROUPER_FAILURES, RENAME_FAILURES, PARK_FAILURES,
+               RECONCILE_ERRORS, REFUSED_PATHS, PASSED_OVER, WANTS_A_LOOK,
+               AWAITING_A_NAME, NON_COMPLIANT]
+
+
+def group_issues(flags, limit=None):
+    """``[(step, heading, item, note)]`` -> ``[(heading, items, hidden)]``.
+
+    Deduplicated on heading and item, so a reparse point four separate walks
+    all refused is one line, and ordered by ``ISSUE_ORDER``. ``limit`` caps
+    each heading's list and reports how many it held back.
+    """
+    seen, index, headings = set(), {}, []
+    for _step, heading, item, note in flags:
+        key = (heading, item.casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        if heading not in index:
+            index[heading] = []
+            headings.append(heading)
+        index[heading].append((item, note))
+    headings.sort(key=lambda heading: (ISSUE_ORDER.index(heading)
+                                       if heading in ISSUE_ORDER
+                                       else len(ISSUE_ORDER)))
+    groups = []
+    for heading in headings:
+        items = index[heading]
+        shown = items if limit is None else items[:limit]
+        groups.append((heading, shown, len(items) - len(shown)))
+    return groups
+
+
+def issue_body(groups, notes=True):
+    """The lines inside an issues frame: a counted heading, then its items."""
+    lines = []
+    for heading, items, hidden in groups:
+        if lines:
+            lines.append(line("dim", ""))
+        lines.append(line(FAILED, "%s  (%d)" % (heading, len(items) + hidden)))
+        note = ISSUE_NOTES.get(heading) if notes else None
+        for index, piece in enumerate(
+                textwrap.wrap(note, max(30, frame_width() - 12))
+                if note else []):
+            lines.append(line("dim", "    %s %s"
+                              % ("--" if index == 0 else "  ", piece)))
+        for item, item_note in items:
+            lines.append(line("warn", "    %s %s" % (glyph("dot"), item)))
+            if item_note:
+                lines.append(line("dim", "        %s" % item_note))
+        if hidden:
+            lines.append(line("dim", "    ... and %d more, listed in full at "
+                                     "the end of the run" % hidden))
+    return lines
+
+
+# --------------------------------------------------------------------------
 # Target resolution
 # --------------------------------------------------------------------------
+
+def report_refused(run, refused, indent=""):
+    """Say what a walk would not follow, and keep it for the end of the run.
+
+    A refused reparse point is not a failure -- refusing it is the point (T4)
+    -- but it does mean a part of the target went unread, and that is
+    something only a person can decide about.
+    """
+    for path, reason in refused:
+        run.report("warn", "%sREFUSED %s: %s" % (indent, path, reason))
+        run.flag(REFUSED_PATHS, path, reason)
+
 
 def path_is_reparse_point(path):
     """True for a junction, symlink or mount point at ``path``.
@@ -563,6 +878,7 @@ def step_canonicalise(run, label):
             code = stop.code if isinstance(stop.code, int) else 2
         except OSError as error:
             run.report(FAILED, "Canonicalise failed on %s: %s" % (tree, error))
+            run.flag(STEPS_FAILED, tree, "canonicalise failed: %s" % error)
             code = 2
         run.journal.write("canonicalise", tree=str(tree), exit_code=code)
         worst = max(worst, code)
@@ -591,8 +907,7 @@ def find_to_split_folders(run):
             if (TO_SPLIT_MARKER in directory.name
                     and not parking.is_inside_parking_area(directory)):
                 found.append(directory)
-    for path, reason in refused:
-        run.report("warn", "REFUSED %s: %s" % (path, reason))
+    report_refused(run, refused)
     # Alphabetical is oldest-day-first, because every name opens with
     # "YYYY-MM-DD", and it is the order Explorer shows -- so it is always
     # obvious which folder the GUI is on and which are still to come.
@@ -675,6 +990,7 @@ def report_passed_over(run, passed_over):
                % len(passed_over))
     for folder, reason in passed_over:
         run.report("dim", "    %s  (%s)" % (folder.name, reason))
+        run.flag(PASSED_OVER, folder, reason)
     run.report("dim", "    The GUI shows a folder's top level only. "
                       "Pass --open-all to open these anyway.")
 
@@ -798,6 +1114,7 @@ def step_group(run):
             result = grouper.run_grouper(python_exe, project_path, folder)
         except OSError as error:
             run.report(FAILED, "    ! could not launch the grouper: %s" % error)
+            run.flag(GROUPER_FAILURES, folder, "could not launch: %s" % error)
             run.journal.write("group_failed", folder=str(folder), error=str(error))
             failures += 1
             continue
@@ -806,6 +1123,8 @@ def step_group(run):
             # grouper's own message only reaches its stderr.
             run.report(FAILED, "    ! grouper exited with code %d"
                        % result.returncode)
+            run.flag(GROUPER_FAILURES, folder,
+                     "the grouper exited with code %d" % result.returncode)
             run.report("dim", "      command: %s" % subprocess.list2cmdline(
                 grouper.grouper_command(python_exe, project_path, folder)))
             for line in grouper.stderr_tail(result.stderr):
@@ -843,8 +1162,7 @@ def dated_folders(run):
             if (canonicalise.stamps.day_prefix(directory.name)
                     and not parking.is_inside_parking_area(directory)):
                 found.append(directory)
-    for path, reason in refused:
-        run.report("warn", "REFUSED %s: %s" % (path, reason))
+    report_refused(run, refused)
     # Sorting the paths puts a parent before its children, which is the order
     # the two passes want: companions are distributed out of the event folder
     # the grouper was opened on, and sidecars are placed from the top down.
@@ -957,6 +1275,8 @@ def generate_missing_raw_sidecars(run, placement, config, move):
         try:
             move(temporary, destination)
         except Exception as error:
+            run.flag(RECONCILE_ERRORS, destination,
+                     "generated sidecar could not be placed: %s" % error)
             run.report(FAILED, "  ! could not place generated sidecar %s: %s"
                        % (temporary, error))
             move_errors += 1
@@ -987,8 +1307,7 @@ def find_parking_areas(run):
         for directory, _files in canonicalise.walk_bottom_up(tree, root_key, refused):
             if parking.is_parking_area(directory.name):
                 found.append(directory)
-    for path, reason in refused:
-        run.report("warn", "REFUSED %s: %s" % (path, reason))
+    report_refused(run, refused)
     found.sort(key=lambda path: (len(path.parts), str(path).lower()), reverse=True)
     return found
 
@@ -1090,8 +1409,7 @@ def folder_holds_no_files(folder, run):
         if files:
             return False
     if refused:
-        for path, reason in refused:
-            run.report("warn", "  REFUSED %s: %s" % (path, reason))
+        report_refused(run, refused, indent="  ")
         return None
     return True
 
@@ -1148,6 +1466,7 @@ def park_empty_dated_folders(run):
         except Exception as error:
             errors += 1
             run.report(FAILED, "  ! could not park empty %s: %s" % (folder, error))
+            run.flag(PARK_FAILURES, folder, str(error))
             continue
         parked += 1
         run.journal.write("empty_folder_parked", folder=str(folder),
@@ -1267,6 +1586,8 @@ def step_reconcile(run, label):
                 write_sidecar=archive_sidecar_writer(run))
         except Exception as error:
             run.report(FAILED, "  ! migrating legacy videos failed: %r" % error)
+            run.flag(RECONCILE_ERRORS, run.target,
+                     "migrating legacy videos failed: %r" % error)
             video_migration.errors += 1
 
         # All recognized companions travel in the same operation. Park the
@@ -1286,6 +1607,8 @@ def step_reconcile(run, label):
                 move=move, checksum=checksum))
         except Exception as error:
             run.report(FAILED, "  ! migrating legacy containers failed: %r" % error)
+            run.flag(RECONCILE_ERRORS, run.target,
+                     "migrating legacy containers failed: %r" % error)
             migration.errors += 1
 
     # 4 -- companions after their representative, per event folder.
@@ -1297,6 +1620,7 @@ def step_reconcile(run, label):
                 folder, config, folder_log, move=move, prune=run.apply))
         except Exception as error:        # never abandon the rest of the tree
             run.report(FAILED, "  ! reconciling %s failed: %r" % (folder.name, error))
+            run.flag(RECONCILE_ERRORS, folder, "reconciling failed: %r" % error)
             companions.errors += 1
 
     # 5 -- placement, over every tree at once so a sidecar stranded anywhere in
@@ -1307,6 +1631,8 @@ def step_reconcile(run, label):
             log, move=move, checksum=checksum, prune=run.apply))
     except Exception as error:
         run.report(FAILED, "  ! placing companions failed: %r" % error)
+        run.flag(RECONCILE_ERRORS, run.target,
+                 "placing companions failed: %r" % error)
         placement.errors += 1
 
     # 6 -- only genuinely uncovered RAW media reach generation.
@@ -1341,18 +1667,34 @@ def step_reconcile(run, label):
                 (path, "legacy container with no modern equivalent; "
                        "its contents are a decision for a person"))
 
+    wants_a_look = [
+        (text, value) for text, value in (
+            ("with DIFFERENT bytes at the destination",
+             placement.parked_differing),
+            ("with no subject anywhere", placement.orphaned),
+            ("whose subject is ambiguous", placement.ambiguous),
+            ("media with no sidecar", placement.media_without_sidecar),
+            ("errors", placement.errors),
+        ) if value]
     if placement.needs_attention:
         run.report("warn", "\n%d thing(s) want a look: %s" % (
             placement.needs_attention,
-            ", ".join(
-                "%d %s" % (value, text) for text, value in (
-                    ("with DIFFERENT bytes at the destination",
-                     placement.parked_differing),
-                    ("with no subject anywhere", placement.orphaned),
-                    ("whose subject is ambiguous", placement.ambiguous),
-                    ("media with no sidecar", placement.media_without_sidecar),
-                    ("errors", placement.errors),
-                ) if value)))
+            ", ".join("%d %s" % (value, text) for text, value in wants_a_look)))
+        # Counts, not paths: what the engine knows about each of these is in
+        # its own per-file report, and repeating that here would bury the one
+        # thing the end of the run is for -- that something is waiting.
+        #
+        # A media file with no sidecar is not flagged. It is reported, dim,
+        # where it is found, and it is the ordinary state of most of an
+        # archive that predates sidecars -- flagging it would put a red count
+        # on every run for something nobody is going to act on folder by
+        # folder. The four that are flagged are the ones where this tool
+        # deliberately declined to guess.
+        for text, value in wants_a_look:
+            if text == "media with no sidecar":
+                continue
+            run.flag(WANTS_A_LOOK, "%d %s" % (value, text),
+                     "under %s" % run.target)
 
     if not run.apply and (run.planned or run.planned_removals
                           or run.planned_generations
@@ -1527,26 +1869,55 @@ def placeholder_tail(name, config):
 
 
 def description_to_keep(name, config):
-    """What a group about to be renamed should still be called, or None.
+    """What a folder about to be renamed should still be called, or None.
 
-    Three sources, in order: a group's existing description, which survives
-    every rewrite of the stamps (C11, T7); the label on a folder a person named
-    before it ever held children, which is the same claim written before the
-    marker existed; and nothing at all, for a folder still carrying a tool's
-    placeholder -- ``__TO_SPLIT__(i=79)`` is a count, not a name.
+    A person's claim on the name and nothing else: a group's existing
+    description, which survives every rewrite of the stamps (C11, T7), or the
+    label on a folder somebody named before it ever held children, which is the
+    same claim written before the marker existed. A tool's placeholder is not a
+    name -- ``__TO_SPLIT__(i=79)`` is a count and ``__TO_LABEL__`` is a request
+    -- and comes back as None.
+
+    Which of those shapes a name is, and what each one means, is
+    ``grouping_names``' question, not this tool's (T8).
     """
-    grouping = canonicalise.grouping
-    described = grouping.group_description(name)
-    if described is not None:
-        return described
-    if grouping.carries_group_marker(name):
-        return None                     # a bare marker: a group nobody has named
-    if placeholder_tail(name, config):
-        return None
-    labelled = grouping.split_labelled_name(name)
-    if labelled is None:
-        return None
-    return grouping.strip_label_numbering(labelled[1]) or None
+    return canonicalise.grouping.folder_description(
+        name, canonicalise.grouping.date_folder_suffix(config))
+
+
+def description_for_group(folder, children, config):
+    """What a group is to be called, and where that name came from.
+
+    Returns ``(description, source)`` with ``source`` one of ``"kept"``,
+    ``"agreed"`` or ``"unnamed"``, so the step can say what it did rather than
+    only what it wrote.
+
+    Three sources, in order of authority:
+
+      1. **a person.** The group's own description, or the label it carried
+         before it had children. Never overwritten, never re-derived (T7).
+      2. **agreement among its children.** When every dated child carries the
+         same description, the group is about that thing and saying so invents
+         nothing -- see ``grouping_names.shared_child_description``.
+      3. **nobody.** ``__TO_LABEL__`` (N11), which is a question addressed to a
+         person, not an answer. It is deliberately not sticky: a group marked
+         this way is re-asked on every run, so it picks up a name the moment
+         its children agree on one or somebody types one in.
+
+    The alternative to (3) is the bare marker this step used to leave --
+    ``- ____GROUP____(d=3)`` and nothing after it -- which says the same thing
+    by saying nothing, and reads in Explorer as a folder that is simply named
+    that way. A group waiting for a name should look like it is waiting.
+    """
+    kept = description_to_keep(folder.name, config)
+    if kept is not None:
+        return kept, "kept"
+    agreed = canonicalise.grouping.shared_child_description(
+        [child.name for child in children],
+        canonicalise.grouping.date_folder_suffix(config))
+    if agreed is not None:
+        return agreed, "agreed"
+    return canonicalise.grouping.TO_LABEL_MARKER, "unnamed"
 
 
 def date_of(text):
@@ -1569,27 +1940,32 @@ def span_end_moment(end_day, latest):
 
 
 def group_target_name(folder, children, run, config, refused):
-    """The name section 3 wants on ``folder``, or ``(None, reason)``.
+    """The name section 3 wants on ``folder``, as ``(name, reason, source)``.
+
+    ``name`` is None when the folder cannot be named, and ``reason`` says why;
+    otherwise ``reason`` is None and ``source`` says where the description came
+    from -- see ``description_for_group``.
 
     No ``children`` means the marker has to come off (C2): the folder is a leaf
-    again, and a leaf carries neither marker nor span. Otherwise both stamps
-    are rebuilt from the subtree and whatever the folder was called is carried
-    across verbatim, legacy marker or not.
+    again, and a leaf carries neither marker nor span. It also loses a
+    ``__TO_LABEL__`` the group carried, which was a question about a group and
+    is not one this tool asks of a leaf -- N11 is read on a day folder, never
+    written onto one.
     """
     stamps = canonicalise.stamps
     grouping = canonicalise.grouping
     parsed = stamps.split_dated_folder(folder.name)
     if parsed is None:
-        return None, "not a dated folder"
-    description = description_to_keep(folder.name, config)
+        return None, "not a dated folder", None
     base = stamps.format_day_prefix(date_of(parsed.date))
 
     if not children:
+        description = description_to_keep(folder.name, config)
         if parsed.time:
             base += "__" + parsed.time
         return (base + (grouping.LABEL_SEPARATOR + description
                         if description else ""),
-                None)
+                None, "kept")
 
     placeholder = placeholder_tail(folder.name, config)
     if placeholder:
@@ -1604,16 +1980,16 @@ def group_target_name(folder, children, run, config, refused):
                           "-- C4, open question 5"
                           % (placeholder,
                              "media" if counts is None
-                             else "%d image(s) and %d video(s)" % counts))
+                             else "%d image(s) and %d video(s)" % counts)), None
 
     subtree = read_subtree(folder, refused)
     if subtree.earliest is None or subtree.latest is None:
-        return None, "no file under it carries a capture stamp (C5, C8)"
+        return None, "no file under it carries a capture stamp (C5, C8)", None
     if subtree.last_day is None:
-        return None, "no folder under it carries a readable date"
+        return None, "no folder under it carries a readable date", None
     if subtree.last_day < parsed.date:
         return None, ("a folder under it is dated %s, before its own %s (C13)"
-                      % (subtree.last_day, parsed.date))
+                      % (subtree.last_day, parsed.date)), None
 
     earliest, latest = subtree.earliest, subtree.latest
     if "%04d-%02d-%02d" % (earliest.year, earliest.month, earliest.day) < parsed.date:
@@ -1622,12 +1998,16 @@ def group_target_name(folder, children, run, config, refused):
         # a start time from a day the folder does not claim would be a lie.
         return None, ("its earliest file is dated %04d-%02d-%02d, before the "
                       "folder's own %s -- moving it is open question 6 (C12)"
-                      % (earliest.year, earliest.month, earliest.day, parsed.date))
+                      % (earliest.year, earliest.month, earliest.day,
+                         parsed.date)), None
 
     base += "__%02d.%02d.%02d" % (earliest.hour, earliest.minute, earliest.second)
     base += stamps.format_range_end(
         parsed.date, span_end_moment(subtree.last_day, latest))
-    return grouping.group_name(base, len(children), description), None
+    # Last, so a folder this step refuses to name is never asked what it should
+    # be called -- the children are read only for a group that is getting a name.
+    description, source = description_for_group(folder, children, config)
+    return grouping.group_name(base, len(children), description), None, source
 
 
 def group_violations(folder, config):
@@ -1698,6 +2078,9 @@ def step_group_markers(run):
     folders.sort(key=lambda path: (len(path.parts), str(path).lower()), reverse=True)
 
     renames, groups, unmarked = [], 0, 0
+    # Where each group's description came from, so the step can say whether it
+    # carried a name across, read one off the children, or is asking for one.
+    agreed, awaiting = [], []
     for folder in folders:
         children = dated_children(folder, refused)
         if children is None:
@@ -1712,21 +2095,43 @@ def step_group_markers(run):
         else:
             unmarked += 1
 
-        target, reason = group_target_name(folder, children, run, config, refused)
+        target, reason, source = group_target_name(folder, children, run,
+                                                   config, refused)
         if target is None:
             run.non_compliant.append((folder, reason))
             continue
+        if children and source == "agreed":
+            agreed.append((folder, grouping.group_description(target)))
+        elif children and source == "unnamed":
+            awaiting.append(folder)
         if target != folder.name:
             renames.append((folder, folder.with_name(target)))
 
-    for path, reason in refused:
-        run.report("warn", "REFUSED %s: %s" % (path, reason))
+    report_refused(run, refused)
 
     run.report("ok", "\n%d group(s); %d folder(s) carrying the marker with no "
                      "dated children left; %d name(s) to correct."
                      % (groups, unmarked, len(renames)))
     for source, target in renames:
         run.report("dim", "  %s\n      -> %s" % (source, target.name))
+
+    if agreed:
+        run.report("ok", "\n%d group(s) named from what their children agree on:"
+                         % len(agreed))
+        for folder, description in agreed:
+            run.report("dim", "  %s\n      -> %s" % (folder.name, description))
+    if awaiting:
+        # Not a violation and not in ``non_compliant``: a group with no name is
+        # a conforming group. This is the one thing in the step addressed to a
+        # person rather than to the archive, so it is stated plainly and left.
+        run.report("warn", "\n%d group(s) nobody has named, marked %s -- their "
+                           "children disagree or are themselves unnamed, and a "
+                           "name for them is not this tool's to invent:"
+                           % (len(awaiting), grouping.TO_LABEL_MARKER))
+        for folder in awaiting:
+            run.report("dim", "  %s" % folder)
+            run.flag(AWAITING_A_NAME, folder,
+                     "marked %s" % grouping.TO_LABEL_MARKER)
 
     failures = 0
     if run.apply:
@@ -1738,10 +2143,12 @@ def step_group_markers(run):
                 canonicalise.rename_path(source, target, attempts, delay_seconds)
             except OSError as error:
                 run.report(FAILED, "FAILED %s: %s" % (source, error))
+                run.flag(RENAME_FAILURES, source, str(error))
                 failures += 1
 
     run.journal.write("group_markers", groups=groups, unmarked=unmarked,
-                      renamed=len(renames), failures=failures,
+                      renamed=len(renames), named_from_children=len(agreed),
+                      awaiting_a_name=len(awaiting), failures=failures,
                       applied=bool(run.apply))
 
     if failures:
@@ -1808,29 +2215,123 @@ STEPS = (
 )
 
 
-def report_non_compliant(run, colour):
-    """The last thing the run prints: folders that fit no allowed shape.
-
-    In red, at the end, and nowhere else. A structural problem noticed halfway
-    through a rename report scrolls past; the point of gathering them is that
-    they are the one part of the output somebody has to act on by hand.
-
-    Reported, never fixed. What to do with a folder the standard does not
-    describe is a decision, and steps 7 and 8 are where that will live once the
-    standard leaves draft.
-    """
-    if not run.non_compliant:
-        return
+def step_header(number, title, colour):
+    """Open each step with a frame, so the run reads as a run of steps."""
     print()
-    print(colourise("NON-COMPLIANT FOLDERS  (%d) -- reported, not touched"
-                    % len(run.non_compliant), FAILED, colour))
-    seen = set()
-    for path, reason in sorted(run.non_compliant, key=lambda item: str(item[0]).lower()):
-        if path_key(path) in seen:
-            continue
-        seen.add(path_key(path))
-        print(colourise("  %s" % path, FAILED, colour))
-        print(colourise("      %s" % reason, "dim", colour))
+    frame(None, [line("bold", "STEP %d -- %s" % (number, title))],
+          "bold", colour)
+
+
+def report_step_verdict(run, number, title, outcome, colour):
+    """Close each step with the one thing that decides what happens next.
+
+    A step prints hundreds of lines and whether it left anything for a person
+    is not one of them -- it is spread through them. So every step ends in a
+    frame of its own: green when it left nothing, red when it did, naming what
+    it flagged rather than making anybody scroll back through the report to
+    find out.
+
+    Only the step's own flags, and only the first ``STEP_VERDICT_ITEMS`` of
+    each kind: the end-of-run block is where the full list lives, and a step
+    that flagged four hundred folders must not push its own headline off the
+    screen.
+    """
+    flags = [entry for entry in run.issues if entry[0] == number]
+    if not flags:
+        if outcome == OK:
+            key, headline = "ok", "%s STEP %d OK -- nothing to address." % (
+                glyph("tick"), number)
+        elif outcome == PENDING:
+            key, headline = "warn", (
+                "%s STEP %d -- changes pending, nothing to address."
+                % (glyph("warn"), number))
+        else:
+            key, headline = FAILED, ("%s STEP %d FAILED -- see its report "
+                                     "above." % (glyph("cross"), number))
+        print()
+        frame(None, [line(key, headline)], key, colour)
+        return
+
+    groups = group_issues(flags, limit=STEP_VERDICT_ITEMS)
+    total = sum(len(items) + hidden for _heading, items, hidden in groups)
+    lines = [line(FAILED, "%s STEP %d LEFT %d THING(S) TO ADDRESS"
+                  % (glyph("cross"), number, total)),
+             line("dim", "")] + issue_body(groups, notes=False)
+    print()
+    frame("STEP %d -- %s" % (number, title), lines, FAILED, colour,
+          closed=False)
+
+
+def report_run_issues(run, outcomes, colour):
+    """Everything the whole run left for a person, in one framed block.
+
+    Two sources: what the steps flagged as they went, and the steps that did
+    not finish. Printed once, in full, in red, immediately before the summary
+    -- because a finding that has to be scrolled back to has not been
+    reported.
+
+    Returns how many there were, which is what the summary's verdict turns on.
+    """
+    flags = list(run.issues)
+    flags += [(None, STEPS_FAILED, "Step %d -- %s" % (number, title), None)
+              for number, title, outcome in outcomes if outcome == FAILED]
+    groups = group_issues(flags)
+    if not groups:
+        return 0
+    total = sum(len(items) for _heading, items, _hidden in groups)
+    print()
+    frame("ISSUES TO ADDRESS  (%d)" % total, issue_body(groups), FAILED,
+          colour, closed=False)
+    return total
+
+
+def report_summary(run, outcomes, worst, issues, colour):
+    """The last thing printed: what each step did, then the verdict.
+
+    Deliberately after the issues rather than before them. The summary is the
+    shape of the run and the issues are the work still to do, and whichever is
+    printed last is the one that is still on the screen when the run ends.
+    """
+    lines = []
+    for number, title, outcome in outcomes:
+        key = {OK: "ok", PENDING: "warn", SKIPPED: "dim"}.get(outcome, FAILED)
+        mark = {OK: glyph("tick"), PENDING: glyph("warn"),
+                SKIPPED: ""}.get(outcome, glyph("cross"))
+        mark = mark.ljust(GLYPH_WIDTH)
+        text = "%s %-8s %d. %s" % (mark, outcome, number, title)
+        lines.append(line(key, text,
+                          colourise("%s %-8s " % (mark, outcome), key, colour)
+                          + colourise("%d. %s" % (number, title),
+                                      "dim" if outcome == SKIPPED else "bold",
+                                      colour)))
+    if run.journal.path is not None:
+        lines.append(line("dim", ""))
+        lines.append(line("dim", "Journal: %s" % run.journal.path))
+
+    print()
+    frame("SUMMARY  (%s)" % ("applied" if run.apply else "dry run"),
+          lines, "bold", colour)
+
+    if issues:
+        banner("%s  %d ISSUE(S) TO ADDRESS  %s"
+               % (glyph("cross"), issues, glyph("cross")),
+               "Listed in the block above. None of them was fixed for you.",
+               FAILED, colour)
+    elif worst >= 2:
+        banner("%s  RUN STOPPED  %s" % (glyph("cross"), glyph("cross")),
+               "A step could not run; the steps after it never started.",
+               FAILED, colour)
+    elif worst == 1 and not run.apply:
+        banner("%s  DRY RUN -- CHANGES PENDING  %s"
+               % (glyph("warn"), glyph("warn")),
+               "Nothing was changed. Re-run with --apply.", "warn", colour)
+    elif worst == 1:
+        banner("%s  CHANGES PENDING  %s" % (glyph("warn"), glyph("warn")),
+               "Re-run to carry on where this one stopped.", "warn", colour)
+    else:
+        banner("%s  ALL CLEAR  %s" % (glyph("tick"), glyph("tick")),
+               "Every step finished and nothing is left to address.",
+               "ok", colour)
 
 
 class Run:
@@ -1861,12 +2362,31 @@ class Run:
         # the run goes and printed together at the end (in red) rather than
         # scrolling past in the middle of a rename report.
         self.non_compliant = []
+        # Everything a person has to act on, tagged with the step that found
+        # it: ``(step, heading, item, note)``. Each step closes with its own
+        # share of these and the run closes with all of them.
+        self.issues = []
+        # Set by the run loop around each step's action, so a flag raised deep
+        # inside a step knows which step's verdict it belongs in.
+        self.current_step = None
         self.journal = Journal(None)
 
     def report(self, key, message):
         if self.quiet and key not in ("warn", "bold", FAILED):
             return
         print(colourise(message, key, self.colour))
+
+    def flag(self, heading, item, note=None):
+        """Keep something for the step's verdict and the end-of-run block.
+
+        The step has already reported it in place, where it will scroll past.
+        This is the copy that does not: see ``group_issues``, which is what
+        both frames are built from. Deduplicated per step, so one walk that
+        meets the same refused junction twice states it once.
+        """
+        entry = (self.current_step, heading, str(item), note)
+        if entry not in self.issues:
+            self.issues.append(entry)
 
     def confirm(self, question):
         """Ask, and mean it: only the confirmation word is a yes.
@@ -1973,11 +2493,15 @@ def main(argv=None):
         steps = selected_steps(args.steps)
     except argparse.ArgumentTypeError as error:
         print(colourise("Bad --steps: %s" % error, FAILED, colour))
+        banner("%s  NOTHING RAN  %s" % (glyph("cross"), glyph("cross")),
+               "Bad --steps. Nothing was changed.", FAILED, colour)
         return 2
 
     target, error = resolve_run_target(args, report)
     if error:
         print(colourise(error, FAILED, colour))
+        banner("%s  NOTHING RAN  %s" % (glyph("cross"), glyph("cross")),
+               "The target was refused. Nothing was changed.", FAILED, colour)
         return 2
 
     trees = scan_roots(target, report)
@@ -1992,10 +2516,18 @@ def main(argv=None):
         counted, passed_over = partition_groupable(marked, run)
         for folder, images, videos in counted:
             print("%s  [i=%d v=%d]" % (folder, images, videos))
-        print(colourise("\n%d folder(s) carry the %s marker; %d worth opening."
-                        % (len(marked), TO_SPLIT_MARKER, len(counted)),
-                        "bold", colour))
         report_passed_over(run, passed_over)
+        # A listing stops before the first step, so it never reaches the
+        # summary -- but "how many, and is any of it a problem" is the same
+        # question the end of a run answers, and it gets the same frame.
+        print()
+        frame(None, [line("bold", "%d folder(s) carry the %s marker; "
+                                  "%d worth opening."
+                          % (len(marked), TO_SPLIT_MARKER, len(counted)))],
+              "bold", colour)
+        if passed_over:
+            frame(None, issue_body(group_issues(run.issues)), FAILED, colour,
+                  closed=False)
         return 1 if counted else 0
 
     report("bold", "%s %s" % ("Restructuring" if args.apply else "Dry run over",
@@ -2006,6 +2538,8 @@ def main(argv=None):
         if canonicalise.drive_is_network(target) and not run.confirm(
                 "This will rename files on a NETWORK location:\n    %s" % target):
             print(colourise("Not confirmed; nothing was changed.", "warn", colour))
+            banner("%s  NOTHING RAN  %s" % (glyph("warn"), glyph("warn")),
+                   "Not confirmed. Nothing was changed.", "warn", colour)
             return 2
         stamp = canonicalise.stamps.format_stamp(datetime.datetime.now())
         run.journal = Journal(Path(args.journal) if args.journal else
@@ -2028,13 +2562,21 @@ def main(argv=None):
                           "it)." % (number, title, repeats))
             outcomes.append((number, title, SKIPPED))
             continue
-        report("bold", "\n" + "=" * 60)
-        report("bold", "STEP %d -- %s" % (number, title))
-        report("bold", "=" * 60)
+        step_header(number, title, colour)
+        run.current_step = number
+        seen_non_compliant = len(run.non_compliant)
         code = action(run)
+        # The folders the step found no shape for become flags like every
+        # other finding, so one gathering serves both frames. They are still
+        # kept in ``run.non_compliant`` for the journal's count.
+        for path, reason in run.non_compliant[seen_non_compliant:]:
+            run.flag(NON_COMPLIANT, path, reason)
         ran.add(number)
         worst = max(worst, code)
-        outcomes.append((number, title, {0: OK, 1: PENDING}.get(code, FAILED)))
+        outcome = {0: OK, 1: PENDING}.get(code, FAILED)
+        outcomes.append((number, title, outcome))
+        report_step_verdict(run, number, title, outcome, colour)
+        run.current_step = None
         if code == 2:
             # An error is a stopped run: step 3 has nothing to tidy up after a
             # step 2 that never opened anything, and step 1 failing at all
@@ -2042,20 +2584,12 @@ def main(argv=None):
             report(FAILED, "\nStep %d could not run; stopping here." % number)
             break
 
-    print()
-    report("bold", "SUMMARY  (%s)" % ("applied" if args.apply else "dry run"))
-    for number, title, outcome in outcomes:
-        key = {OK: "ok", PENDING: "warn", SKIPPED: "dim"}.get(outcome, FAILED)
-        print("  %s  %s" % (colourise("%-7s" % outcome, key, colour),
-                            "%d. %s" % (number, title)))
-    report_non_compliant(run, colour)
-
+    issues = report_run_issues(run, outcomes, colour)
     if run.journal.path is not None:
         run.journal.write("run_finished", exit_code=worst,
-                          non_compliant=len(run.non_compliant))
-        print(colourise("\nJournal: %s" % run.journal.path, "dim", colour))
-    if not args.apply and worst == 1:
-        print(colourise("\nNothing was changed. Re-run with --apply.", "ok", colour))
+                          non_compliant=len(run.non_compliant),
+                          issues=issues)
+    report_summary(run, outcomes, worst, issues, colour)
     return worst
 
 

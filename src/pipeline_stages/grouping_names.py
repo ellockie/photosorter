@@ -803,9 +803,96 @@ def group_description(name: str) -> str | None:
 
     Kept verbatim across every rewrite of the stamps and the count (C11/T7),
     including the rewrite that converts a legacy marker.
+
+    ``__TO_LABEL__`` in the description slot is **not** a description: it is
+    N11's word for a folder still waiting for one, written by a tool and
+    addressed to a person. Reading it as a name would make it permanent -- T7
+    protects a description from every later rewrite, so the one marker meant to
+    be replaced would be the one thing nothing could replace.
     """
     _, separator, tail = name.partition(LABEL_SEPARATOR)
     if not separator:
         return None
     parsed = split_group_tail(LABEL_SEPARATOR + tail)
-    return parsed[1] if parsed else None
+    if not parsed or parsed[1] == TO_LABEL_MARKER:
+        return None
+    return parsed[1]
+
+
+def awaits_label(name: str) -> bool:
+    """True when a tool has marked ``name`` as still waiting for a description.
+
+    Either shape of N11: the bare tail on a leaf day (" - __TO_LABEL__") and
+    the marker sitting in a group's description slot
+    (" - ____GROUP____(d=3) - __TO_LABEL__"). One question -- has anybody named
+    this yet -- so one answer, whichever kind of folder is asking.
+    """
+    _, separator, tail = name.partition(LABEL_SEPARATOR)
+    if not separator:
+        return False
+    parsed = split_group_tail(LABEL_SEPARATOR + tail)
+    if parsed is not None:
+        return parsed[1] == TO_LABEL_MARKER
+    return tail == TO_LABEL_MARKER
+
+
+def folder_description(
+        name: str,
+        date_folder_suffix: str = DEFAULT_DATE_FOLDER_SUFFIX) -> str | None:
+    """What a human called this dated folder -- group or leaf -- or None.
+
+    The one reading of "has a person named this?", so a group and its children
+    are asked the same question in the same words. Three shapes answer it:
+
+      * a **group**: the description after the marker (C11/T7), which is None
+        for a bare marker and for ``__TO_LABEL__``;
+      * a **placeholder**: ``__TO_SPLIT__(i=79)`` is a count, ``__TO_LABEL__``
+        is a request, and " - 1. ######" is what folder-sorting wrote before
+        either existed. None of the three is a name;
+      * a **label**: everything else after the separator, less the legacy
+        numbering a person typed around rather than over.
+    """
+    if carries_group_marker(name):
+        return group_description(name)
+    for marker in (TO_SPLIT_MARKER, TO_LABEL_MARKER):
+        if LABEL_SEPARATOR + marker in name:
+            return None
+    if name.endswith(date_folder_suffix):
+        return None
+    labelled = split_labelled_name(name)
+    if labelled is None:
+        return None
+    return strip_label_numbering(labelled[1]) or None
+
+
+def shared_child_description(
+        names,
+        date_folder_suffix: str = DEFAULT_DATE_FOLDER_SUFFIX) -> str | None:
+    """The one description every dated child agrees on, or None.
+
+    A group nobody has named still has to be called something, and the only
+    honest source is its own contents. Agreement is the whole test: when every
+    child says "Sopot" the group is about Sopot, and saying so invents nothing.
+    Anything short of that -- one child unnamed, or two children disagreeing --
+    is a name the group would be making up, and N6's refusal to derive a date
+    from contents is the same refusal one step over. Those get ``__TO_LABEL__``
+    from the caller instead, which asks a person rather than guessing.
+
+    **Every** child must be named, not merely the ones that are: a group spans
+    everything under it, so a description drawn from half of them would claim
+    the other half too. Matching ignores case only, never punctuation or word
+    order -- two labels that differ at all are two claims, and the spelling
+    handed back is the first child's, so the group reads as the archive is
+    written rather than as a comparison key.
+    """
+    agreed = None
+    seen = False
+    for name in names:
+        description = folder_description(name, date_folder_suffix)
+        if description is None:
+            return None
+        if not seen:
+            agreed, seen = description, True
+        elif description.casefold() != agreed.casefold():
+            return None
+    return agreed if seen else None

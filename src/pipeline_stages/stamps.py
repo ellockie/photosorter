@@ -95,18 +95,32 @@ def day_prefix(name: str) -> str | None:
     return match.group(1) if match else None
 
 
-# The end of a group's span (C6-C9): the shortest tail of a date that still
-# says which day it is -- "#22" (same year and month), "#09-11" (same year) or
-# "#2027-01-03" -- followed by the time of the subtree's latest file. The
-# number of date fields disambiguates, so nothing is guessed.
+# The end of a group's span (C6-C9). Two shapes, and which one is written is
+# decided by one question -- does the span cross a day?
 #
-# The time is optional *to read* and required to write. A span written before
-# v0.9 carries a date and no time, and one typed by hand may too; both must
-# still parse, the same read-old/write-new rule as N5. ``format_range_end`` is
-# the only thing here that writes one, and it always writes the time.
+#   "#17.47.04"                    ends the day it starts: the time alone
+#   "#2026-08-16_(Sun)__19.02.44"  ends on another day: the whole canonical stamp
+#
+# Either nothing about the date or all of it. A same-day group repeating its
+# own date said nothing the start had not already said two characters to the
+# left, and a cross-day one abbreviating it ("#16") made the reader carry the
+# start's year and month across the "#" to work out which day was meant. The
+# weekday comes with the full form for the same reason the start carries one:
+# a bare date is not a day anybody reads at a glance.
+#
+# Read-old/write-new (N5). Every earlier shape still parses and none is written
+# again: the abbreviated tails "#22" (same year and month) and "#09-11" (same
+# year), the full "#2027-01-03" with no weekday, and any of those with the time
+# missing, which is how a span written before v0.9 looks.
+# ``format_range_end`` is the only thing here that writes one.
+#
+# The time-only branch is tried FIRST, and that ordering is load-bearing:
+# "#17.47.04" offered to the date branch matches "#17" and leaves ".47.04"
+# behind as tail, silently reading a time as the 17th of the month.
 RANGE_END_PATTERN = (
-    r"#(?:(?:(\d{4})-)?(\d{2})-)?(\d{2})"
-    rf"(?:__({TIME_PATTERN}))?"
+    rf"#(?:({TIME_PATTERN})"
+    r"|(?:(?:(\d{4})-)?(\d{2})-)?(\d{2})"
+    rf"(?:{DATE_TIME_SEPARATOR_PATTERN}({TIME_PATTERN}))?)"
 )
 
 # A dated folder's whole prefix: the date, the decorative weekday, the canonical
@@ -124,7 +138,7 @@ class DatedFolder(NamedTuple):
 
     date: str                 # YYYY-MM-DD, always the *start* of the span
     time: str | None          # HH.MM.SS, or None for a date-only prefix
-    range_end: str | None     # the raw "#..." span end, or None for one day
+    range_end: str | None     # the raw "#..." span end, or None when it states none
     tail: str                 # everything after the prefix, unparsed
 
 
@@ -145,19 +159,24 @@ def split_dated_folder(name: str) -> DatedFolder | None:
 
 
 def resolve_range_end(start_date: str, range_end: str | None) -> str | None:
-    """Expand a ``#`` span end against its start date, or None.
+    """The ``YYYY-MM-DD`` a ``#`` span end names, or None when there is no span.
 
-    ``2026-08-20`` + ``#22`` -> ``2026-08-22``; ``#09-11`` -> ``2026-09-11``;
-    ``#2027-01-03`` -> itself. Fields the end omits are taken from the start,
-    which is the whole point of the short forms: the common case is a few days
-    in one month and repeating the year and month there would only add noise.
+    A time-only end says the span closes the day it opened, so it resolves to
+    ``start_date`` itself -- that is what makes writing the date there
+    unnecessary. The full form carries its own date and needs no start to read.
+
+    The abbreviated forms are still expanded against the start for the archive
+    written before this: ``2026-08-20`` + ``#22`` -> ``2026-08-22``, ``#09-11``
+    -> ``2026-09-11``, ``#2027-01-03`` -> itself.
     """
     if not range_end:
         return None
     match = re.fullmatch(RANGE_END_PATTERN, range_end)
     if not match:
         return None
-    year, month, day, _time = match.groups()
+    same_day, year, month, day, _time = match.groups()
+    if same_day is not None:
+        return start_date
     start_year, start_month, _ = start_date.split("-")
     return f"{year or start_year}-{month or start_month}-{day}"
 
@@ -166,28 +185,26 @@ def range_end_time(range_end: str | None) -> str | None:
     """The ``HH.MM.SS`` half of a span end, or None when it carries none.
 
     None means the name predates C6 (or was typed by hand), not that the span
-    ends at midnight -- which is why it is returned rather than defaulted.
+    ends at midnight -- which is why it is returned rather than defaulted. Only
+    a legacy end can answer None: both forms written today carry the time, and
+    the same-day one is nothing else.
     """
     if not range_end:
         return None
     match = re.fullmatch(RANGE_END_PATTERN, range_end)
-    return match.group(4) if match else None
+    if not match:
+        return None
+    return match.group(1) or match.group(5)
 
 
 def format_range_end(start_date: str, end: datetime.datetime) -> str:
     """The ``#`` span end for a group starting on ``start_date`` (C6-C9).
 
-    The date is trimmed to the shortest tail that still identifies the day --
-    the year goes when it matches the start's, then the month -- and the time
-    is always written. A span ending on the day it starts is written in full
-    all the same (C9): one shape for a reader and for a parser, whether the
-    group covers an afternoon or a fortnight.
+    The time alone when the span ends on the day it began, and the whole
+    canonical stamp when it does not -- literally ``format_stamp``, so the two
+    ends of a span are written in one grammar and a reader meets the same shape
+    either side of the ``#``.
     """
-    start_year, start_month, _ = start_date.split("-")
-    if f"{end:%Y}" != start_year:
-        day = f"{end:%Y-%m-%d}"
-    elif f"{end:%m}" != start_month:
-        day = f"{end:%m-%d}"
-    else:
-        day = f"{end:%d}"
-    return f"#{day}__{end:%H.%M.%S}"
+    if f"{end:%Y-%m-%d}" == start_date:
+        return f"#{end:%H.%M.%S}"
+    return f"#{format_stamp(end)}"

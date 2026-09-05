@@ -77,9 +77,25 @@ def test_split_dated_folder_reads_every_prefix_form():
     assert split_dated_folder("__EXIF") is None
 
 
-def test_multi_day_span_end_is_read_and_expanded():
-    """C8: a container covering several days states the end after "#", written
-    as the shortest tail of a date that still identifies the day."""
+def test_a_span_end_states_all_of_the_date_or_none_of_it():
+    """C6-C9: the time alone when the span closes the day it opened, and the
+    whole canonical stamp when it does not."""
+    from src.pipeline_stages.stamps import (range_end_time, resolve_range_end,
+                                            split_dated_folder)
+
+    same_day = split_dated_folder("2026-08-14_(Fri)__13.40.23#17.47.04 - Kajaki")
+    assert same_day.range_end == "#17.47.04"
+    assert resolve_range_end(same_day.date, same_day.range_end) == "2026-08-14"
+    assert range_end_time(same_day.range_end) == "17.47.04"
+
+    crosses = split_dated_folder(
+        "2026-08-20_(Thu)__09.14.02#2026-08-27_(Thu)__18.31.50 - Norway")
+    assert resolve_range_end(crosses.date, crosses.range_end) == "2026-08-27"
+    assert range_end_time(crosses.range_end) == "18.31.50"
+
+
+def test_every_earlier_span_end_is_still_read_and_expanded():
+    """N5: the abbreviated tails written before C7 changed still parse."""
     from src.pipeline_stages.stamps import resolve_range_end, split_dated_folder
 
     same_month = split_dated_folder("2026-08-20_(Thu)__09.14.02#22 - Malbork")
