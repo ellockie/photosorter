@@ -122,3 +122,9 @@ poetry run pytest
 - Depends on external binaries: `exiftool.exe`, IrfanView, Canon DPP, Sony IED
 - ExifTool wrapper: `pip install git+https://github.com/smarnach/pyexiftool.git`
 - Project uses Poetry; `_photosorter.bat` auto-installs missing deps
+- `git push`/`fetch` over HTTPS on this machine can fail with `OpenSSL: unable
+  to get local issuer certificate` — Norton's SSL-inspection root cert isn't
+  in git-for-windows' bundled OpenSSL trust store. Fix per-command with
+  `git -c http.sslBackend=schannel push …` (uses the Windows cert store,
+  which already trusts it), or set it once with
+  `git config --global http.sslBackend schannel`.
