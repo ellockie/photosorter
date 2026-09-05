@@ -85,6 +85,9 @@ LEGACY_GROUP_MARKER = "__CONTAINER__"
 # and the two must not drift over the spelling.
 EMPTY_SUBFOLDERS_FOLDER = "__EMPTY_SUBFOLDERS"
 
+# V8: the unresolved-video prefix is shared by counting and migration.
+TO_RENAME_PREFIX = "__TO_RENAME__"
+
 # What stands between a folder's dated half and whatever it is called.
 LABEL_SEPARATOR = " - "
 
@@ -120,15 +123,14 @@ DEFAULT_OCR_EXTENSIONS = (".OCR.txt",)
 # "c" sits next to "e" because it is the other half of the same question: "e"
 # says how many subjects here have a sidecar, "c" how many sidecars are fighting
 # over one.
-COUNT_LETTERS = ("d", "i", "v", "e", "c", "s", "f")
+COUNT_LETTERS = ("d", "i", "v", "e", "c", "s", "w", "f")
 
 # What each letter means, in one line, for a tool to print after it has written
 # a name carrying one. Mirrors "count_meaning" in ARCHIVE_STANDARD.md section 8;
 # a legend spelled out in a tool would be a second definition, and the one that
 # drifts is always the one nobody is testing (T8).
 #
-# "w" is in the standard's list and not here, for the same reason it is not in
-# COUNT_LETTERS: nothing writes it yet.
+# "w" remains until a human resolves the tagged videos (V9).
 COUNT_MEANINGS = {
     "d": "direct dated child folders -- the only count a group carries",
     "i": "top-level images -- the review job, what a grouper GUI will show",
@@ -138,6 +140,7 @@ COUNT_MEANINGS = {
     "c": "sidecars beyond the first for one subject -- two files claiming one shot",
     "s": "files below the top level that are not sidecars, which the GUI will "
          "not put in front of you",
+    "w": "unresolved videos awaiting a real capture time",
     "f": "subfolders still standing in a folder holding no files",
 }
 
@@ -587,7 +590,8 @@ def with_corrected_time(base: str, media) -> str:
 def to_split_suffix(images: int, videos: int,
                     sidecars: int | None = None,
                     clashes: int | None = None,
-                    subfolder_files: int | None = None) -> str:
+                    subfolder_files: int | None = None,
+                  waiting: int = 0) -> str:
     """The count bracket: ``(i=79_v=3_e=83_s=4)``, or "" when it has nothing to say.
 
     ``images`` and ``videos`` are omitted when zero, since a day with no video
@@ -609,6 +613,8 @@ def to_split_suffix(images: int, videos: int,
         parts.append(f"c={clashes}")
     if subfolder_files is not None:
         parts.append(f"s={subfolder_files}")
+    if waiting:
+        parts.append(f"w={waiting}")
     return "(" + "_".join(parts) + ")" if parts else ""
 
 
@@ -655,7 +661,8 @@ def carries_empty_bracket(name: str) -> bool:
 def to_split_name(base: str, images: int, videos: int,
                   sidecars: int | None = None,
                   clashes: int | None = None,
-                  subfolder_files: int | None = None) -> str:
+                  subfolder_files: int | None = None,
+                  waiting: int = 0) -> str:
     """The full ``__TO_SPLIT__`` folder name for a dated ``base`` prefix.
 
     ``base`` is expected to already carry whatever time it needs (see
@@ -664,7 +671,7 @@ def to_split_name(base: str, images: int, videos: int,
     writing the plain ``(i=N_v=M)`` name it always has.
     """
     return (f"{base} - {TO_SPLIT_MARKER}"
-            f"{to_split_suffix(images, videos, sidecars, clashes, subfolder_files)}")
+            f"{to_split_suffix(images, videos, sidecars, clashes, subfolder_files, waiting)}")
 
 
 def split_labelled_name(name: str) -> tuple[str, str] | None:
@@ -896,3 +903,9 @@ def shared_child_description(
         elif description.casefold() != agreed.casefold():
             return None
     return agreed if seen else None
+
+
+def unresolved_video_count(paths, video_extensions):
+    """V8/V9: tagged videos count as a pending naming job, not previews."""
+    return sum(Path(path).name.startswith(TO_RENAME_PREFIX)
+               and Path(path).suffix.casefold() in video_extensions for path in paths)

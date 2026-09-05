@@ -1272,7 +1272,8 @@ def test_the_whole_run_end_to_end(tmp_path, config, fake_grouper, capsys):
     assert [path.name for path in opened_folders(fake_grouper)] == [
         "2026-07-15_(Wed)__08.14.00 - __TO_SPLIT__(i=1_e=0)"]
     out = capsys.readouterr().out
-    assert "NOT IMPLEMENTED" in out           # steps 4 and 5
+    assert "NOT IMPLEMENTED" not in out
+    assert "Archive standard: 0 outstanding" in out
     assert "SUMMARY" in out
     assert "ALL CLEAR" in out
 

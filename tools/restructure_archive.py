@@ -13,8 +13,8 @@ sense, over one target, with one set of safety rules.
     5. Canonicalise names and park again
                                    tools/canonicalise_timestamp_names.py
     6. Mark and time the groups    ARCHIVE_STANDARD.md section 3
-    7. Check compliance with the archive standard      [not implemented]
-    8. Fix compliance with the archive standard        [not implemented]
+    7. Check compliance with the archive standard
+    8. Fix compliance with the archive standard (prompted C4/C12 migrations)
 
 What steps 1 and 5 settle about a folder
 ----------------------------------------
@@ -105,9 +105,8 @@ computed from.
 
 It rewrites only the marker and the two stamps. The date a group starts on is
 never derived from its contents (N6), media is never moved out of a group (C4)
-and no group is ever moved between month folders (C12): those are open
-questions 4-6 in the standard, and a folder that runs into one is reported with
-the rule number rather than changed.
+and no group is moved between month folders (C12) by step 6. These settled
+migrations belong to step 8, which displays and confirms them before writing.
 
 What reconciliation does
 ------------------------
@@ -235,19 +234,18 @@ would print the first's report word for word. Those are skipped, with a line
 saying why. Asked for on their own (``--steps 5``) they still run: nothing came
 before them to repeat.
 
-Steps 7 and 8 are placeholders
-------------------------------
-``ARCHIVE_STANDARD.md`` is **v1.0, settled but only partly enforced**. Nothing
-in it is open to argument any more -- what is missing is the fixing tool its
-section 7 specifies, and this is where it will go. Until then both steps
-announce themselves and do nothing; the plumbing -- ordering, prompting,
-journalling, exit codes -- is here so that implementing them is a change to one
-function each, against that specification.
+Steps 7 and 8: inspect, then repair
+-----------------------------------
+Step 7 checks active year/month/event structure, group and leaf names, taxonomy
+nesting, group geodata, file placement and unresolved videos, reporting rule
+IDs. Step 8 offers C4/C12 migrations and V11 capture-time decisions, then
+refreshes names and checks the result. Unknown structure and ambiguous
+attributions remain pending. Reports and dry runs never prompt or write.
 
-The obligations settled in v1.0 are the ones to build first, and both are
-prompt-then-write, never silent: gathering loose media out of a group into a
-``__TO_LABEL__`` child (C4) and moving a group whose start has crossed into
-another month folder (C12). Step 6 reports both today.
+``--video-times decisions.json`` supplies human capture-time decisions keyed by
+video path relative to the explicit run target, with ISO local timestamps as
+values. Without it an applied interactive run asks for each unresolved video;
+blank input leaves it waiting. ``--yes`` never invents an answer.
 
 TARGETS
 -------
@@ -2063,7 +2061,7 @@ def step_reconcile(run, label):
 #     earliest file falls before its own date is reported instead.
 #   * It never moves media out of a group (C4) and never moves a group between
 #     month folders (C12). Both rules are settled; both belong to the fixing
-#     tool, which does not exist yet.
+#     tool, implemented in step 8.
 #
 # So this is the implemented half of section 3: the marker and the two stamps.
 
@@ -2126,20 +2124,27 @@ def read_subtree(folder, refused):
     grouping = canonicalise.grouping
     root_key = path_key(folder)
     names, days = [], []
+    config = canonicalise._config()
+    geolocations = taxonomy.taxonomy_folder(config, "geolocations").casefold()
     for directory, files in canonicalise.walk_bottom_up(folder, root_key, refused):
         if parking.is_parking_area(directory.name) or parking.is_inside_parking_area(
             directory
         ):
             continue
+        if any(part.casefold() == geolocations for part in directory.relative_to(folder).parts):
+            continue  # C3a: a track never determines the photography's span.
         names.extend(path.name for path in files)
         if path_key(directory) == root_key:
             continue
         day = stamps.day_prefix(directory.name)
         if day:
             days.append(day)
+    dating = grouping.select_media(
+        names, *grouping.extension_sets(config), grouping.preview_extensions(config)
+    ) or grouping.select_sidecars(names, grouping.sidecar_extensions(config))
     return Subtree(
-        grouping.earliest_capture_time(names),
-        grouping.latest_capture_time(names),
+        grouping.earliest_capture_time(dating),
+        grouping.latest_capture_time(dating),
         max(days) if days else None,
     )
 
@@ -2486,7 +2491,13 @@ def step_group_markers(run):
         attempts, delay_seconds = canonicalise.configured_retry()
         for source, target in renames:
             try:
+                if path_key(source) != path_key(target) and os.path.lexists(extended_path(target)):
+                    raise FileExistsError("N4 target already exists: %s" % target)
+                run.journal.write("group_rename_intent", source=str(source), target=str(target))
+                if run.journal.path is None:
+                    raise OSError("T3 group rename requires a writable journal")
                 canonicalise.rename_path(source, target, attempts, delay_seconds)
+                run.journal.write("group_rename", **{"from": str(source), "to": str(target)})
             except OSError as error:
                 run.report(FAILED, "FAILED %s: %s" % (source, error))
                 run.flag(RENAME_FAILURES, source, str(error))
@@ -2519,35 +2530,27 @@ def step_group_markers(run):
 # Steps 7 and 8 -- compliance with the archive standard
 # --------------------------------------------------------------------------
 
-_STANDARD_NOTICE = (
-    "%s is settled at v1.0 -- it carries no open questions -- but the tool "
-    "that enforces it does not exist yet. What is missing here is code, not "
-    "decisions.\nThis step is a placeholder and does nothing. 'The fixing "
-    "tool' under section 7 of that document is the specification it will be "
-    "built to, and section 8 is the machine-readable form it will parse.\n"
-    "Section 3 is the part already enforced -- by step 6, which marks, times "
-    "and spans the groups, and which reports the two moves v1.0 settled and "
-    "left to this step: gathering loose media out of a group (C4), and moving "
-    "a group whose start has crossed into another month folder (C12). Both "
-    "write only under --apply and only after a prompt." % STANDARD_PATH.name
-)
+compliance = load_module("archive_compliance", REPO_ROOT / "tools" / "archive_compliance.py")
+
+
+def _standard_step(run, action):
+    # File-path loading intentionally need not register this module in sys.modules.
+    import types
+    api = types.SimpleNamespace(**globals())
+    try:
+        return action(api, run)
+    except (OSError, ValueError, KeyError) as error:
+        run.report(FAILED, "Archive standard could not be read or checked: %s" % error)
+        run.flag("Archive standard", STANDARD_PATH, str(error))
+        return 2
 
 
 def step_standard_check(run):
-    run.report("warn", "NOT IMPLEMENTED -- " + _STANDARD_NOTICE)
-    run.journal.write("standard_check", status="not_implemented")
-    return 0
+    return _standard_step(run, compliance.check)
 
 
 def step_standard_fix(run):
-    run.report("warn", "NOT IMPLEMENTED -- " + _STANDARD_NOTICE)
-    run.report(
-        "dim",
-        "When it exists it will prompt before changing anything, "
-        "the way step 2 does.",
-    )
-    run.journal.write("standard_fix", status="not_implemented")
-    return 0
+    return _standard_step(run, compliance.fix)
 
 
 # --------------------------------------------------------------------------
@@ -2763,6 +2766,7 @@ class Run:
         self.allow_network_tool = args.allow_network_tool
         self.max_folders = args.max_folders
         self.open_all = args.open_all
+        self.video_times = getattr(args, "video_times", None)
         # The extension sets that say what counts as an image or a video, read
         # once from the same config the pipeline uses.
         self.grouping_settings = canonicalise.GroupingSettings(canonicalise._config())
@@ -2915,6 +2919,10 @@ def build_parser():
         "--yes",
         action="store_true",
         help="answer every confirmation; for unattended runs",
+    )
+    parser.add_argument(
+        "--video-times", default=None, metavar="JSON",
+        help="human decisions for V11: JSON mapping archive-relative video paths to ISO capture times",
     )
     parser.add_argument(
         "--force-target",
@@ -3086,6 +3094,11 @@ def main(argv=None):
         for path, reason in run.non_compliant[seen_non_compliant:]:
             run.flag(NON_COMPLIANT, path, reason)
         ran.add(number)
+        if number == 8 and args.apply and code == 0:
+            outcomes = [(n, title, OK if n == 7 and status == PENDING else status)
+                        for n, title, status in outcomes]
+            worst = max(({OK: 0, SKIPPED: 0, PENDING: 1, FAILED: 2}[status]
+                         for _, _, status in outcomes), default=0)
         worst = max(worst, code)
         outcome = {0: OK, 1: PENDING}.get(code, FAILED)
         outcomes.append((number, title, outcome))

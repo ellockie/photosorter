@@ -494,7 +494,8 @@ def canonical_event_folder_name(folder, name, media_files, settings,
         media, settings.image_exts, settings.video_exts, settings.preview_exts)
     sidecars, clashes, subfolder_files = folder_audit(everything, nested, settings)
     return grouping.to_split_name(
-        dated, images, videos, sidecars, clashes, subfolder_files)
+        dated, images, videos, sidecars, clashes, subfolder_files,
+        grouping.unresolved_video_count(everything, settings.video_exts))
 
 
 # --------------------------------------------------------------------------

@@ -113,7 +113,7 @@ def legacy_container_names(config: dict) -> set[str]:
 # subject (standard X10), so unlike every other taxonomy folder these may nest
 # one level inside another -- "__RAW\__EXIF\" is the RAW's sidecar, and is legal
 # where "__RAW\__EDITED\" is not (S2, X11, X12).
-SIDECAR_KEYS = ("exif", "previews")
+SIDECAR_KEYS = ("exif", "previews", "ocr")
 
 # These folders are only ever created/recognized by the pipeline; their
 # contents are curated by hand and must never be populated automatically.

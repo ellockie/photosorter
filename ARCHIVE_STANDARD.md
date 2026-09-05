@@ -14,7 +14,8 @@ are **not** otherwise assumed compliant.
 **What v1.0 means, and what it does not.** Every rule here is decided: a tool
 implementing one is implementing its final form, not a proposal that may move
 underneath it. It does not mean the archive complies, and it does not mean this
-repo implements all of it — §7's fixing tool is still to be built. The sections
+repo implements all of it. The maintenance checker and prompted fixer in §7
+are implemented; report-only findings still require human decisions. The sections
 marked *Implemented* say what is enforced today; the rest is a contract waiting
 for its tool.
 
@@ -282,9 +283,8 @@ conforming group.
 
 C3 is **reported, never fixed**: media, loose files and taxonomy subfolders
 inside a group are named with the rule they break and left where they are.
-Moving them down is C4 and moving a group between month folders is C12 — both
-settled rules since v1.0, and both the job of §7's fixing tool, which is not
-built yet. Step 6 names them and says exactly that. The same goes for a day
+Moving them down is C4 and moving a group between month folders is C12.
+Step 6 reports them; step 8 now implements both under `--apply` and a prompt. The same goes for a day
 that carries `__TO_SPLIT__` *and* has dated children *and* still has shots at
 its top level: it is a group by C1 and a day awaiting the grouper at once, and
 dropping either half would strand something.
@@ -463,8 +463,8 @@ settled in earlier versions and struck then.
   wrong answer.
 
 Settling is not implementing. Q1 is what the placement pass already does; Q4 is
-a folder a person files into; Q5 and Q6 are obligations of §7's fixing tool,
-which does not exist yet and reports in the meantime.
+a folder a person files into; Q5 and Q6 are implemented by step 8's
+prompted migrations. Unknown or ambiguous attribution is still reported.
 
 ---
 
@@ -558,10 +558,18 @@ numbers video separately from stills (`VID_0034` beside `IMG_0033`) interleaves
 wrongly, and a mixed-source day breaks it outright. Until that is settled, V4
 stands: no invented times.
 
-**To be implemented — the cleanup tool.** Expected to be the interactive
-counterpart of the fixing tool (§7): it lists `w=N` folders, shows each unresolved
-video with its anchors, takes the user's decision, and applies it under the same
-T1–T8 obligations. Not yet designed.
+**Implemented — video cleanup in step 8.** The canonicaliser writes `w=N`
+for tagged videos (V9). An applied interactive run shows each waiting video
+and its dated anchors and accepts a real local capture time, or blank to defer.
+For repeatable runs, `--video-times decisions.json` reads explicit human
+capture-time decisions; it never derives a time from neighbouring shots.
+The JSON maps a video path relative to the run target (forward slashes) to an
+ISO local datetime such as `2026-07-15T12:00:00`. `--yes` only confirms supplied
+decisions; it never supplies missing times. A time belonging to another event
+day, a collision, an ambiguous companion or an unreadable path stays pending.
+The complete video/companion move is displayed before confirmation, journalled,
+and rolled back on a move failure when the filesystem allows it. Counts are
+refreshed after all decisions in an event have been applied.
 
 **Legacy migration is implemented.** `legacy_videos.py`, called by reconciliation
 in `tools/restructure_archive.py`, applies V12 before general companion placement.
@@ -752,7 +760,7 @@ two spellings equal character for character, checks they read a table of sample
 names identically, and fails if either module ever grows a project import —
 that being the only thing making the copy legitimate.
 
-### The fixing tool (to be implemented)
+### The fixing tool (implemented maintenance steps 7 and 8)
 
 Reports, does not fix, by default (T3). Reports every directory below a month
 folder that is neither a dated folder nor an allowed subfolder — including
@@ -772,6 +780,33 @@ recognises the two placements v1.0 settled and **creates neither**: a group's
 `__GEOLOCATIONS` (C3a), because which tracks span a whole group is a reading of
 the tracks, and the year-level `__DUPLICATES` (S7), which belongs to the
 placement pass that parks collision losers in it.
+
+**Implementation and use.** `tools/archive_compliance.py` implements the
+inspection and migration plans; `tools/restructure_archive.py` supplies the
+existing path guards, prompts, name grammars, movers and journal. Run a report:
+
+```powershell
+_restructure_archive.bat "D:\__PHOTOS_BACKUP" --steps 7,8
+```
+
+Add `--apply` to execute the repairs. C4 and C12 each display their source and
+destination and request confirmation. C4 groups loose stamped media by the
+configured N7 boundary and carries attributable taxonomy and companions with
+it. An unkeyed or ambiguous companion prevents that group's migration. C12
+moves the group to the year/month of its **stated** start: N6 still forbids
+inventing a replacement date from a stray capture. The existing canonicaliser
+and marker engine refresh leaf counts/times and group names after migration.
+A final scan determines which findings remain. `0` means clean, `1` means
+pending findings or failed repairs, and `2` means the check could not run.
+
+The checker covers active structure (P3–P6, S1/S2, H2/H7), dated prefixes and
+leaf counts/times, group names and contents (C1–C3a/C11/C12), companion location
+and folder contents (X1/X10/X12), representative placement (F1/F7), and video
+waiting state (V8–V11). Step 8 also reruns the shared companion-placement engine after moving
+subjects (X5/X10), with deletion disabled. The existing reconciliation passes
+remain responsible for legacy migration and missing RAW sidecars. Unknown structure, invalid dates and matters requiring
+attribution remain reports; a successful repair does not guess their answers.
+Root working areas and parked records remain outside this check (P1/H1/P6).
 
 ---
 
@@ -821,14 +856,16 @@ stamp:
   # every form that must be READ; groups = y,m,d,H,M,S
   read: '^(\d{4})-(\d{2})-(\d{2})(?:[ _]+\([A-Za-z]{3}\))?[ _]+(\d{2})\.(\d{2})\.(\d{2})'
   # folder prefixes only: the time half is optional
-  read_folder_prefix: '^(\d{4})-(\d{2})-(\d{2})(?:[ _]+\([A-Za-z]{3}\))?(?:[ _]+(\d{2})\.(\d{2})\.(\d{2}))?(?:#(?:(?:(\d{4})-)?(\d{2})-)?(\d{2})(?:__(\d{2})\.(\d{2})\.(\d{2}))?)?'
-  # C6-C10: end of a group's span; groups = year?, month?, day, H?, M?, S?
-  range_end: '#(?:(?:(\d{4})-)?(\d{2})-)?(\d{2})(?:__(\d{2})\.(\d{2})\.(\d{2}))?'
-  range_end_forms: ["#DD__HH.MM.SS", "#MM-DD__HH.MM.SS", "#YYYY-MM-DD__HH.MM.SS"]
+  read_folder_prefix: '^(\d{4}-\d{2}-\d{2})(?:[ _]+\([A-Za-z]{3}\))?(?:[ _]+(\d{2}\.\d{2}\.\d{2}))?(?:(#(?:(\d{2}\.\d{2}\.\d{2})|(?:(?:(\d{4})-)?(\d{2})-)?(\d{2})(?:(?:[ _]+\([A-Za-z]{3}\))?[ _]+(\d{2}\.\d{2}\.\d{2}))?)))?'
+  # C6-C10: time-only or dated span end; historical forms are still read
+  range_end: '#(?:(\d{2}\.\d{2}\.\d{2})|(?:(?:(\d{4})-)?(\d{2})-)?(\d{2})(?:(?:[ _]+\([A-Za-z]{3}\))?[ _]+(\d{2}\.\d{2}\.\d{2}))?)'
+  range_end_forms: ["#HH.MM.SS", "#YYYY-MM-DD_(Ddd)__HH.MM.SS"]
+  legacy_range_end_forms: ["#DD__HH.MM.SS", "#MM-DD__HH.MM.SS", "#YYYY-MM-DD__HH.MM.SS"]
   # date fields omitted from the end are taken from the start; the time is never omitted
   range_end_applies_to: group_only
   range_end_required: true            # C6/C9 - on every group, single-day span included
-  range_end_carries_weekday: false    # C8
+  range_end_carries_weekday: true     # C7/C8: cross-day; same-day is time only
+  range_end_write_definitions: group  # group.span_end_same_day / span_end_cross_day
   weekday_is_decorative: true
   day_boundary: "04.44.44"          # capture <= this belongs to the previous day
   day_boundary_config_key: day_boundary_time   # top level; "legacy" block still read
@@ -838,7 +875,7 @@ folder_tail:
   named:      ' - (?P<description>.+)$'
   group:      ' - ____GROUP____(?:\((?P<counts>d=\d+)\))?(?: - (?P<description>.+))?$'
   legacy_group: ' - __CONTAINER__(?:\((?P<counts>[divsew]=\d+(?:_[divsew]=\d+)*)\))?(?: - (?P<description>.+))?$'
-  to_split:   ' - __TO_SPLIT__\((?:(?P<counts>[divsewf]=\d+(?:_[divsewf]=\d+)*)|(?:(?P<empty_counts>[divsewf]=\d+(?:_[divsewf]=\d+)*)_)?(?P<empty>EMPTY))\)(?:_(?P<discriminator>\d+))?$'
+  to_split:   ' - __TO_SPLIT__\((?:(?P<counts>[divecswf]=\d+(?:_[divecswf]=\d+)*)|(?:(?P<empty_counts>[divecswf]=\d+(?:_[divecswf]=\d+)*)_)?(?P<empty>EMPTY))\)(?:_(?P<discriminator>\d+))?$'
   to_label:   ' - __TO_LABEL__$'
   legacy_placeholder: ' - 1\. ######$'
   markers: ["____GROUP____", "__TO_SPLIT__", "__TO_LABEL__"]
@@ -1011,7 +1048,7 @@ videos:
     warn: true
     folder_count_letter: w
     resolved_by: [write_real_stamp, drop_tag, move_to_top_level, decrement_w]  # V11
-    cleared_by: interactive_cleanup_tool   # V9, not yet implemented
+    cleared_by: interactive_cleanup_tool   # V9: restructure step 8
   legacy_videos_migration:            # V12
     source_folder: "__VIDEOS"
     source_folder_match: case_insensitive

@@ -37,7 +37,7 @@ from src.pipeline_stages.taxonomy import \
 from src.utils.checksums import file_md5
 
 
-TO_RENAME_PREFIX = "__TO_RENAME__"
+from src.pipeline_stages.grouping_names import TO_RENAME_PREFIX
 
 
 # The one implementation, under this module's own name (T8). A caller with a
