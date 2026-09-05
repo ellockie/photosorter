@@ -152,6 +152,15 @@ MAX_COMFORTABLE_PATH = 240
 # Interim name for a rename that only changes letter case.
 CASE_CHANGE_SUFFIX = ".__casefix__"
 
+# A year folder's only permitted children are month folders (ARCHIVE_STANDARD
+# P2/P4), so this tool's own bookkeeping must never be written inside one.
+YEAR_FOLDER_RE = re.compile(r"^\d{4}$")
+
+# Where a run journal is written -- a folder next to the year folders
+# themselves (or next to whatever ``target`` is when it isn't a year folder),
+# never inside a year folder's own contents.
+LOG_FOLDER_NAME = "__LOGS"
+
 CHANGED, CONFLICT, FAILED, REFUSED, UNPARSEABLE = (
     "CHANGED", "CONFLICT", "FAILED", "REFUSED", "UNPARSEABLE")
 
@@ -581,6 +590,20 @@ def inside(root_key, candidate):
     return key == root_key or key.startswith(root_key.rstrip("\\/") + os.sep)
 
 
+def log_directory(target):
+    """Where this tool's own journals belong -- never inside a year folder.
+
+    ``target`` is usually a year folder, whose only permitted children are
+    month folders, so the journal goes one level up: beside the year folders
+    themselves, the same working-area level as ``____INGEST_PIPELINE``
+    (ARCHIVE_STANDARD PS-3, §0). When ``target`` is not a year folder -- a
+    bare test fixture, an arbitrary ``--target`` -- ``__LOGS`` sits directly
+    under it instead.
+    """
+    base = target.parent if YEAR_FOLDER_RE.fullmatch(target.name) else target
+    return base / LOG_FOLDER_NAME
+
+
 def walk_bottom_up(root, root_key, refused, skip_keys=()):
     """Yield ``(directory, files)`` deepest-first, never leaving the root.
 
@@ -864,7 +887,7 @@ def build_parser():
                         help="perform the renames; without it this only reports")
     parser.add_argument("--journal", default=None,
                         help="where to record applied renames "
-                             "(default: a dated file inside the target)")
+                             "(default: a dated file in the target's __LOGS)")
     parser.add_argument("--undo", default=None, metavar="JOURNAL",
                         help="revert the renames recorded in a journal")
     parser.add_argument("--keep-times", action="store_true",
@@ -910,7 +933,7 @@ def main(argv=None):
     # The year check looks at the folder actually being processed, so it also
     # catches "--target c:\__PHOTOS\2019" and not just a stale default.
     current_year = datetime.date.today().year
-    if re.fullmatch(r"\d{4}", target.name):
+    if YEAR_FOLDER_RE.fullmatch(target.name):
         if int(target.name) != current_year:
             report("warn", colourise(
                 "WARNING: %s is not the current year (%d)."
@@ -936,15 +959,22 @@ def main(argv=None):
     skip_keys = set()
     if args.apply:
         # Named canonically, so the tool's own bookkeeping obeys the convention
-        # it enforces.
-        journal_path = Path(args.journal) if args.journal else (
-            target / ("_rename_journal_%s.jsonl"
-                      % stamps.format_stamp(datetime.datetime.now())))
+        # it enforces. Kept in __LOGS rather than beside the media (PS-3): a
+        # year folder's only permitted children are month folders.
+        if args.journal:
+            journal_path = Path(args.journal)
+        else:
+            journal_path = log_directory(target) / (
+                "_rename_journal_%s.jsonl" % stamps.format_stamp(datetime.datetime.now()))
         # The journal usually sits inside the target, where the walk would find
         # it, try to rename it, and fail because it is still open. Whatever the
-        # caller chose, it is never a rename candidate.
+        # caller chose, it -- and the __LOGS folder holding it -- is never a
+        # rename candidate.
         skip_keys.add(path_key(journal_path))
+        skip_keys.add(path_key(journal_path.parent))
         try:
+            if not args.journal:
+                os.makedirs(extended_path(journal_path.parent), exist_ok=True)
             journal_handle = open(extended_path(journal_path), "a", encoding="utf-8")
         except OSError as error:
             print(colourise("Cannot open journal %s: %s" % (journal_path, error),

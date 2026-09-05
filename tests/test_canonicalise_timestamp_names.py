@@ -970,14 +970,15 @@ def test_the_journal_records_one_line_per_rename(tmp_path):
 
 
 def test_the_journal_is_not_itself_a_rename_candidate(tmp_path):
-    # The default journal lives inside the target and is dated, so the walk
-    # would find it, try to rename it, and fail: it is still open.
+    # The default journal lives in __LOGS beside the year folder (PS-3), never
+    # inside it -- a year folder's only permitted children are month folders.
     year = tmp_path / "2026"
     _tree(year)
 
     assert tool.main([str(year), "--apply", "--no-colour"]) == 0
 
-    journals = list(year.glob("_rename_journal_*.jsonl"))
+    assert list(year.glob("_rename_journal_*.jsonl")) == []
+    journals = list((tmp_path / "__LOGS").glob("_rename_journal_*.jsonl"))
     assert len(journals) == 1
     assert tool.canonical_name(journals[0].name) == journals[0].name
 

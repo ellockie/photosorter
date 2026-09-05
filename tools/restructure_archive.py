@@ -946,11 +946,10 @@ def resolve_run_target(args, report):
 class Journal:
     """An append-only record of what an applied run did.
 
-    Opened and closed around each write rather than held open, because it
-    normally sits inside the target, where step 3's walk will meet it: a file
-    this tool still had a handle on could not be renamed, and the canonicaliser
-    would report that as a failure. Its own name is already canonical, so in
-    practice nothing tries to.
+    Opened and closed around each write rather than held open: it lives in
+    __LOGS (PS-3), which a degenerate target without real year folders can
+    still place inside the tree step 3 walks, and a file this tool still had a
+    handle on could not be renamed.
     """
 
     def __init__(self, path):
@@ -2916,7 +2915,7 @@ def build_parser():
         "--journal",
         default=None,
         help="where to record what an applied run did "
-        "(default: a dated file inside the target)",
+        "(default: a dated file in the target's __LOGS)",
     )
     parser.add_argument(
         "--quiet",
@@ -3021,11 +3020,16 @@ def main(argv=None):
             )
             return 2
         stamp = canonicalise.stamps.format_stamp(datetime.datetime.now())
-        run.journal = Journal(
-            Path(args.journal)
-            if args.journal
-            else target / ("_restructure_journal_%s.jsonl" % stamp)
-        )
+        # Kept in __LOGS rather than beside the media (PS-3): the same folder
+        # the canonicaliser writes its own per-tree journal into.
+        if args.journal:
+            journal_path = Path(args.journal)
+        else:
+            journal_path = canonicalise.log_directory(target) / (
+                "_restructure_journal_%s.jsonl" % stamp
+            )
+            os.makedirs(extended_path(journal_path.parent), exist_ok=True)
+        run.journal = Journal(journal_path)
         run.journal.write(
             "run_started",
             target=str(target),

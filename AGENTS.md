@@ -68,6 +68,18 @@ photosorter — Python 3.13 photo processing pipeline: rename, sort, and organis
 | Companion + sidecar matching | `src/pipeline_stages/companion_matching.py` | Leaf module: the engine. `reconcile_folder` (per event folder, capture time), `place_companions` (whole target, gather-then-distribute, name match; X10/X13 + MD5 on collision), `migrate_legacy_containers` (`##   EXIFs   ##`->`__EXIF`), `survey_trees` (read-only: non-compliant folders, legacy containers). Pipeline stage AND restructure tool both run it |
 | Tests | `tests/test_organise_date_folders.py` | Pytest, 6 cases |
 
+## ISSUE TRACKING
+
+GitHub issues are referenced with a `PS-<issue number>` prefix (e.g. `PS-2` =
+[issue #2](https://github.com/ellockie/photosorter/issues/2)). Issue titles
+carry the prefix themselves (`PS-2 docs: finish ARCHIVE_STANDARD.md draft`) and
+use a conventional-commit-style `type: summary` after it. Reference the
+relevant `PS-<n>` in commit messages for work tied to an open issue, e.g.:
+
+```text
+docs: settle ARCHIVE_STANDARD.md S4 subfolder set (PS-2)
+```
+
 ## CONVENTIONS
 
 - Task functions **must** be named `_TASK_*()` — enforced at runtime by `verify_if_function_is_a_task`

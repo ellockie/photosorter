@@ -41,6 +41,7 @@ other root entry or report its contents. Present at the root today:
 | `____INGEST_PIPELINE` | Pipeline working folder (`INBOX`, `READY`, `.TMP`) | Transient |
 | `____TO_SORT` | Legacy working folder | Transient |
 | `__PROCESSED` | Edits and derivatives made outside the pipeline | **Migration source** — see §0.1 |
+| `__LOGS` | Rename/restructure run journals (`_rename_journal_*.jsonl`, `_restructure_journal_*.jsonl`) | Tool bookkeeping — see §0.3 |
 | `_Innych` | Media from other people, e.g. a second photographer at the same event | **Opt-in ingest source** — see §0.2 |
 
 ### §0.1 `__PROCESSED` — derivatives to be reunited
@@ -75,6 +76,28 @@ processed behind your back.
 | G2 | Merging is **opt-in and per-batch**: a person points a run at it deliberately. There is no configuration that turns it on for good. |
 | G3 | Once merged, the files are ordinary archive media — renamed, stamped and sorted by the normal rules, so they interleave with the event's own shots by capture time, which is the point of merging them at all. |
 | G4 | A merged file **carries an author marker** (F8). The camera symbol names the device, not the person: two people shooting the same model are indistinguishable by it, which is exactly the case merging creates. |
+
+### §0.3 `__LOGS` — run journals
+
+`tools/restructure_archive.py` and `tools/canonicalise_timestamp_names.py` each
+append-only journal what an applied run did, so the run can be replayed
+backwards (`--undo`) or audited afterwards. A journal is dated and reopened on
+every applied run, so it cannot sit inside a `<YYYY>` tree without becoming a
+standing violation: a year folder's only permitted children are month folders
+(P2/P4), and a journal that outlives one run would keep appearing on the next
+walk. It is written instead to `__LOGS`, directly under the same root its
+target's year folder sits under — the same working-area level as
+`____INGEST_PIPELINE`.
+
+| ID | Rule |
+| --- | --- |
+| J1 | A journal is **never** written inside a `<YYYY>` tree. Its default location is `__LOGS` beside the year folders, resolved from whatever `target` a run was given — one level up when `target` is itself a year folder, directly under it otherwise. |
+| J2 | `__LOGS` is **tool bookkeeping only**: no rule in §1–§7 governs its contents, and a conforming tool MUST NOT report what is in it as a violation. |
+| J3 | An explicit `--journal <path>` overrides the default outright; that path is used exactly as given, `__LOGS` or not. |
+
+**Implemented** — `log_directory` in `tools/canonicalise_timestamp_names.py` is
+the one definition (T8); `tools/restructure_archive.py` calls it for its own
+journal rather than restating the rule.
 
 ---
 
@@ -719,9 +742,10 @@ path:
     "10": "10. October"
     "11": "11. November"
     "12": "12. December"
-  out_of_scope_root_entries: ["____INGEST_PIPELINE", "____TO_SORT", "__PROCESSED", "_Innych"]
+  out_of_scope_root_entries: ["____INGEST_PIPELINE", "____TO_SORT", "__PROCESSED", "_Innych", "__LOGS"]
   migration_sources: {"__PROCESSED": derivatives}       # section 0.1
   opt_in_ingest_sources: {"_Innych": foreign_origin}    # section 0.2, never automatic
+  tool_bookkeeping: {"__LOGS": run_journals}            # section 0.3, never reported as a violation
 
 stamp:
   weekdays: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
