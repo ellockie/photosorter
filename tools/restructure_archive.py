@@ -254,7 +254,9 @@ configured archive root (``paths.root_folder`` in config.json), chosen with
 ``--year``. Beyond that, anything can be named explicitly::
 
     (no target)                       <root_folder>\<year>
+    --year ALL                        <root_folder>, every year it holds
     "d:\__PHOTOS_BACKUP" --year 2024  a year tree on another local disk
+    "d:\__PHOTOS_BACKUP" --year ALL   every year tree of that archive
     "d:\__PHOTOS_BACKUP"              a whole archive root: every year tree
     "\\NAS\PhotoBackup" --year 2024   the same, on a network device
     "z:\Photos\2024\07. July\..."     any folder inside an archive
@@ -264,6 +266,16 @@ run to those year trees, because rule P1 of the standard, and its section 0,
 put everything else at a root ("____INGEST_PIPELINE", "____TO_SORT") out of
 scope. A tool that walked into the ingest pipeline would be renaming files
 still in flight.
+
+``--year ALL`` (PS-6) reads the root for the years it actually holds and runs
+each of them as a run of its own -- its own journal, its own summary -- oldest
+first, closing with one frame covering the lot. That is not the same as naming
+the root, which is a single run over every year tree at once: a year is what
+every step is scoped to and what the canonicaliser journals against, so a year
+per run is what leaves a per-year record to undo. A network root is confirmed
+once, up front, rather than once per year, and a year that stops does not stop
+the years after it. Nothing needs listing or keeping up to date: a gap year
+costs nothing and a year added since the last run is picked up unnamed.
 
 SAFETY
 ------
@@ -321,7 +333,7 @@ must run on a bare interpreter with none of that installed. See
 ``load_leaf_package`` for how the last of those is reached.
 
 Usage:
-    python tools/restructure_archive.py [TARGET] [--year YYYY] [--apply]
+    python tools/restructure_archive.py [TARGET] [--year YYYY|ALL] [--apply]
     python tools/restructure_archive.py [TARGET] --steps 2,4 --apply
     python tools/restructure_archive.py [TARGET] --list-to-split
 
@@ -351,6 +363,11 @@ STANDARD_PATH = REPO_ROOT / "ARCHIVE_STANDARD.md"
 
 # A year folder: exactly four digits and nothing else (ARCHIVE_STANDARD P2).
 YEAR_FOLDER_RE = re.compile(r"^\d{4}$")
+
+# What ``--year`` is given to mean "every year tree the root holds" (PS-6).
+# A sentinel rather than a number, so ``args.year`` stays a year everywhere it
+# is used as one and the whole-archive case has to be handled deliberately.
+ALL_YEARS = "ALL"
 
 # What a confirmation wants typed. A word, not "y": the point of the prompt is
 # that the path printed above it has been read.
@@ -905,6 +922,37 @@ def scan_roots(target, report):
     return years
 
 
+def years_to_run(target, report):
+    """``(year_trees, error_message)``: what ``--year ALL`` covers (PS-6).
+
+    The root is read for the years it actually holds rather than a range being
+    guessed, so a gap year costs nothing and a year added since the last run is
+    picked up without being named. Each of them is then a run of its own -- its
+    own journal, its own summary -- exactly as if it had been asked for by
+    number, because a year is what every step is scoped to and what the
+    canonicaliser journals against. Each year's journals go to its own
+    ``<year>\__LOGS`` (J1), so no two years can ever share a file.
+
+    A year folder named directly is its own only year: ``--year ALL`` on
+    ``...\\2024`` is that one tree, not a reason to climb back out to the root.
+    """
+    if YEAR_FOLDER_RE.fullmatch(target.name):
+        return [target], None
+    years = year_children(target)
+    if not years:
+        return None, (
+            "--year ALL needs an archive root -- a folder holding year "
+            "folders -- and %s holds none.\nNothing was touched. Name the "
+            "root, or a single year with --year YYYY." % target
+        )
+    report(
+        "bold",
+        "--year ALL: %d year tree(s) to run, oldest first -- %s"
+        % (len(years), ", ".join(path.name for path in years)),
+    )
+    return years, None
+
+
 def resolve_run_target(args, report):
     """``(target, error_message)``: the folder to work on, fully checked.
 
@@ -915,8 +963,16 @@ def resolve_run_target(args, report):
         target = Path(args.target)
         # An explicit --year alongside an explicitly named root is how a
         # backup archive gets addressed: "\\NAS\PhotoBackup --year 2024".
-        if args.year_given and (target / str(args.year)).is_dir():
+        # "--year ALL" names no one tree, so it never descends: the target
+        # stays the root, and ``years_to_run`` opens it up afterwards.
+        if (
+            args.year_given
+            and args.year != ALL_YEARS
+            and (target / str(args.year)).is_dir()
+        ):
             target = target / str(args.year)
+    elif args.year == ALL_YEARS:
+        target = Path(canonicalise.configured_root_folder())
     else:
         target = Path(canonicalise.configured_root_folder()) / str(args.year)
 
@@ -947,10 +1003,10 @@ def resolve_run_target(args, report):
 class Journal:
     """An append-only record of what an applied run did.
 
-    Opened and closed around each write rather than held open: it lives in
-    __LOGS (PS-3), which a degenerate target without real year folders can
-    still place inside the tree step 3 walks, and a file this tool still had a
-    handle on could not be renamed.
+    Opened and closed around each write rather than held open: it lives in the
+    target's own __LOGS (J1), inside the tree step 3 walks, and a file this
+    tool still had a handle on could not be renamed. The walk skips __LOGS by
+    name, but an explicit --journal can put it anywhere (J3).
     """
 
     def __init__(self, path):
@@ -2753,6 +2809,119 @@ def report_summary(run, outcomes, worst, issues, colour):
         )
 
 
+def report_years_summary(results, worst, applying, colour):
+    """The last thing a ``--year ALL`` run prints: one row per year (PS-6).
+
+    Each year has already closed with a summary and a verdict of its own,
+    hundreds of lines back. This is the one frame that answers "and how did the
+    archive do", naming the years that still want work rather than leaving the
+    last year's banner standing for all of them.
+
+    ``results`` is ``(year_name, exit_code, issue_count)`` per year, in the
+    order they ran.
+    """
+    lines = []
+    for year, code, issues in results:
+        outcome = {0: OK, 1: PENDING}.get(code, FAILED)
+        key = {OK: "ok", PENDING: "warn"}.get(outcome, FAILED)
+        mark = {OK: glyph("tick"), PENDING: glyph("warn")}.get(
+            outcome, glyph("cross")
+        ).ljust(GLYPH_WIDTH)
+        note = "%d issue(s)" % issues if issues else ""
+        text = "%s %-8s %s   %s" % (mark, outcome, year, note)
+        lines.append(
+            line(
+                key,
+                text,
+                colourise("%s %-8s " % (mark, outcome), key, colour)
+                + colourise("%s   %s" % (year, note), "bold", colour),
+            )
+        )
+
+    total_issues = sum(issues for _, _, issues in results)
+    print()
+    frame(
+        "ALL YEARS  (%s)" % ("applied" if applying else "dry run"),
+        lines,
+        "bold",
+        colour,
+    )
+
+    unfinished = [year for year, code, _ in results if code]
+    if total_issues:
+        banner(
+            "%s  %d ISSUE(S) ACROSS %d YEAR(S)  %s"
+            % (
+                glyph("cross"),
+                total_issues,
+                len([year for year, _, issues in results if issues]),
+                glyph("cross"),
+            ),
+            "Listed under each year above. None of them was fixed for you.",
+            FAILED,
+            colour,
+        )
+    elif worst >= 2:
+        banner(
+            "%s  RUN STOPPED  %s" % (glyph("cross"), glyph("cross")),
+            "A step could not run in: %s." % ", ".join(unfinished),
+            FAILED,
+            colour,
+        )
+    elif worst == 1 and not applying:
+        banner(
+            "%s  DRY RUN -- CHANGES PENDING  %s" % (glyph("warn"), glyph("warn")),
+            "Nothing was changed. Re-run with --apply. Pending: %s."
+            % ", ".join(unfinished),
+            "warn",
+            colour,
+        )
+    elif worst == 1:
+        banner(
+            "%s  CHANGES PENDING  %s" % (glyph("warn"), glyph("warn")),
+            "Re-run to carry on. Still pending: %s." % ", ".join(unfinished),
+            "warn",
+            colour,
+        )
+    else:
+        banner(
+            "%s  ALL CLEAR -- %d YEAR(S)  %s"
+            % (glyph("tick"), len(results), glyph("tick")),
+            "Every step finished in every year and nothing is left to address.",
+            "ok",
+            colour,
+        )
+
+
+def confirm(question, assume_yes, colour, report):
+    """Ask, and mean it: only the confirmation word is a yes.
+
+    ``--yes`` is for an unattended run and is the only way past this with no
+    terminal attached -- a script that piped its way through a confirmation
+    would make the confirmation decorative.
+
+    Module-level rather than a method because a ``--year ALL`` run has to ask
+    its network question once, before the first year's ``Run`` exists: asking
+    per year would train the answer out of somebody by the third prompt.
+    """
+    if assume_yes:
+        return True
+    if not (sys.stdin and sys.stdin.isatty()):
+        report(
+            FAILED,
+            "No terminal to confirm at. Re-run from a "
+            "console, or pass --yes for an unattended run.",
+        )
+        return False
+    print(speak("\n" + question, "bold", colour))
+    try:
+        answer = input("Type %s to continue: " % CONFIRM_WORD)
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    return answer.strip() == CONFIRM_WORD
+
+
 class Run:
     """Everything the steps share: the target, the switches, the reporting."""
 
@@ -2819,28 +2988,8 @@ class Run:
             self.issues.append(entry)
 
     def confirm(self, question):
-        """Ask, and mean it: only the confirmation word is a yes.
-
-        ``--yes`` is for an unattended run and is the only way past this with
-        no terminal attached -- a script that piped its way through a
-        confirmation would make the confirmation decorative.
-        """
-        if self.assume_yes:
-            return True
-        if not (sys.stdin and sys.stdin.isatty()):
-            self.report(
-                FAILED,
-                "No terminal to confirm at. Re-run from a "
-                "console, or pass --yes for an unattended run.",
-            )
-            return False
-        print(speak("\n" + question, "bold", self.colour))
-        try:
-            answer = input("Type %s to continue: " % CONFIRM_WORD)
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return False
-        return answer.strip() == CONFIRM_WORD
+        """Ask, and mean it: only the confirmation word is a yes."""
+        return confirm(question, self.assume_yes, self.colour, self.report)
 
 
 def selected_steps(text):
@@ -2862,6 +3011,22 @@ def selected_steps(text):
     return [number for number in numbers if number in wanted]
 
 
+def year_argument(text):
+    """``--year`` -> a year number, or ``ALL_YEARS`` for every year (PS-6).
+
+    Case-insensitive on the word alone: a year is digits, so nothing else can
+    be mistaken for it, and "all" typed in a hurry is not worth a refusal.
+    """
+    if text.strip().upper() == ALL_YEARS:
+        return ALL_YEARS
+    try:
+        return int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            "%r is neither a year nor %s" % (text, ALL_YEARS)
+        )
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="restructure_archive",
@@ -2878,11 +3043,13 @@ def build_parser():
     )
     parser.add_argument(
         "--year",
-        type=int,
+        type=year_argument,
         default=canonicalise.DEFAULT_YEAR,
+        metavar="YYYY|" + ALL_YEARS,
         help="year tree to work on, under the configured root "
-        "or under an explicitly named root "
-        "(default: %(default)s)",
+        "or under an explicitly named root; %s runs every year "
+        "the root holds, oldest first, one run each "
+        "(default: %%(default)s)" % ALL_YEARS,
     )
     parser.add_argument(
         "--apply",
@@ -2994,13 +3161,81 @@ def main(argv=None):
         )
         return 2
 
-    trees = scan_roots(target, report)
     if args.max_folders is None:
         args.max_folders = (
             canonicalise._config().get("screenshot_grouping", {}).get("max_folders", 0)
             or 0
         )
 
+    if args.year != ALL_YEARS:
+        return run_one_target(args, target, steps, colour, report)[0]
+
+    years, error = years_to_run(target, report)
+    if error:
+        print(speak(error, FAILED, colour))
+        banner(
+            "%s  NOTHING RAN  %s" % (glyph("cross"), glyph("cross")),
+            "The target was refused. Nothing was changed.",
+            FAILED,
+            colour,
+        )
+        return 2
+
+    # Asked once, at the root, rather than once per year: a prompt somebody
+    # meets seven times in a row is a prompt they stop reading.
+    if args.apply and canonicalise.drive_is_network(target):
+        if not confirm(
+            "This will rename files on a NETWORK location, across %d year "
+            "tree(s):\n    %s" % (len(years), target),
+            args.yes,
+            colour,
+            report,
+        ):
+            print(speak("Not confirmed; nothing was changed.", "warn", colour))
+            banner(
+                "%s  NOTHING RAN  %s" % (glyph("warn"), glyph("warn")),
+                "Not confirmed. Nothing was changed.",
+                "warn",
+                colour,
+            )
+            return 2
+        args.network_confirmed = True
+
+    results = []
+    for number, year_tree in enumerate(years, start=1):
+        print()
+        frame(
+            None,
+            [
+                line(
+                    "bold",
+                    "YEAR %s  (%d of %d)" % (year_tree.name, number, len(years)),
+                )
+            ],
+            "bold",
+            colour,
+            heavy=True,
+        )
+        # A year that stops does not stop the ones after it. They are separate
+        # trees with separate journals, and a grouper that failed to launch in
+        # 2019 says nothing about whether 2024 has anything to do.
+        code, issues = run_one_target(args, year_tree, steps, colour, report)
+        results.append((year_tree.name, code, issues))
+
+    worst = max((code for _, code, _ in results), default=0)
+    report_years_summary(results, worst, args.apply, colour)
+    return worst
+
+
+def run_one_target(args, target, steps, colour, report):
+    """``(exit_code, issue_count)``: one target, its steps, its own summary.
+
+    Split out of ``main`` for ``--year ALL``, which is this function in a loop
+    (PS-6). The issue count travels back with the code because a whole-archive
+    run adds both up across its years, and only the run itself knows what one
+    year found.
+    """
+    trees = scan_roots(target, report)
     run = Run(args, target, trees, colour)
 
     if args.list_to_split:
@@ -3029,7 +3264,7 @@ def main(argv=None):
             frame(
                 None, issue_body(group_issues(run.issues)), FAILED, colour, closed=False
             )
-        return 1 if counted else 0
+        return (1 if counted else 0), len(passed_over)
 
     report(
         "bold", "%s %s" % ("Restructuring" if args.apply else "Dry run over", target)
@@ -3037,8 +3272,13 @@ def main(argv=None):
     report("dim", "Steps: %s" % ", ".join(str(number) for number in steps))
 
     if args.apply:
-        if canonicalise.drive_is_network(target) and not run.confirm(
-            "This will rename files on a NETWORK location:\n    %s" % target
+        # A --year ALL run has already asked, once, for the whole root.
+        if (
+            canonicalise.drive_is_network(target)
+            and not getattr(args, "network_confirmed", False)
+            and not run.confirm(
+                "This will rename files on a NETWORK location:\n    %s" % target
+            )
         ):
             print(speak("Not confirmed; nothing was changed.", "warn", colour))
             banner(
@@ -3047,15 +3287,21 @@ def main(argv=None):
                 "warn",
                 colour,
             )
-            return 2
+            return 2, 0
         stamp = canonicalise.stamps.format_stamp(datetime.datetime.now())
         # Kept in __LOGS rather than beside the media (PS-3): the same folder
         # the canonicaliser writes its own per-tree journal into.
         if args.journal:
             journal_path = Path(args.journal)
         else:
+            # Under the target's own __LOGS (J1), so a --year ALL run cannot
+            # interleave two years into one file however fast the trees
+            # finish -- the stamp resolves only to the second. The year is in
+            # the name as well, which costs nothing and keeps a journal
+            # self-describing once it is copied out or pointed at by
+            # --journal.
             journal_path = canonicalise.log_directory(target) / (
-                "_restructure_journal_%s.jsonl" % stamp
+                "_restructure_journal_%s_%s.jsonl" % (target.name, stamp)
             )
             os.makedirs(extended_path(journal_path.parent), exist_ok=True)
         run.journal = Journal(journal_path)
@@ -3120,7 +3366,7 @@ def main(argv=None):
             issues=issues,
         )
     report_summary(run, outcomes, worst, issues, colour)
-    return worst
+    return worst, issues
 
 
 if __name__ == "__main__":

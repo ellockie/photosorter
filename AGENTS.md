@@ -113,6 +113,8 @@ _photosorter.bat
 # not implemented). Dry run by default; .ps1 is the same, for PowerShell.
 _restructure_archive.bat
 _restructure_archive.bat "d:\__PHOTOS_BACKUP" --year 2024 --apply
+# --year ALL: every year the root holds, oldest first, one run each (PS-6)
+_restructure_archive.bat "d:\__PHOTOS_BACKUP" --year ALL --apply
 
 # Run tests
 poetry run pytest

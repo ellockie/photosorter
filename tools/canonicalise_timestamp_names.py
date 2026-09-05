@@ -152,13 +152,13 @@ MAX_COMFORTABLE_PATH = 240
 # Interim name for a rename that only changes letter case.
 CASE_CHANGE_SUFFIX = ".__casefix__"
 
-# A year folder's only permitted children are month folders (ARCHIVE_STANDARD
-# P2/P4), so this tool's own bookkeeping must never be written inside one.
 YEAR_FOLDER_RE = re.compile(r"^\d{4}$")
 
-# Where a run journal is written -- a folder next to the year folders
-# themselves (or next to whatever ``target`` is when it isn't a year folder),
-# never inside a year folder's own contents.
+# Where a run journal is written: a "__LOGS" folder directly under whatever
+# ``target`` was, so a year tree's journals sit with the year they describe
+# (ARCHIVE_STANDARD J1). It is the one exception to P2/P4 -- a year folder's
+# only other permitted children are month folders -- which holds only because
+# every walk skips it by name (J2): see ``is_log_folder``.
 LOG_FOLDER_NAME = "__LOGS"
 
 CHANGED, CONFLICT, FAILED, REFUSED, UNPARSEABLE = (
@@ -591,18 +591,27 @@ def inside(root_key, candidate):
     return key == root_key or key.startswith(root_key.rstrip("\\/") + os.sep)
 
 
-def log_directory(target):
-    """Where this tool's own journals belong -- never inside a year folder.
+def is_log_folder(name):
+    """True for the journal folder, which no walk may descend into (J2).
 
-    ``target`` is usually a year folder, whose only permitted children are
-    month folders, so the journal goes one level up: beside the year folders
-    themselves, the same working-area level as ``____INGEST_PIPELINE``
-    (ARCHIVE_STANDARD PS-3, §0). When ``target`` is not a year folder -- a
-    bare test fixture, an arbitrary ``--target`` -- ``__LOGS`` sits directly
-    under it instead.
+    The one definition (T8). ``__LOGS`` is tool bookkeeping: no rule in §1-§7
+    governs it, so every traversal skips it by name rather than each caller
+    restating the exemption. That skip is what lets a year folder hold one at
+    all, since P2/P4 otherwise admit only month folders.
     """
-    base = target.parent if YEAR_FOLDER_RE.fullmatch(target.name) else target
-    return base / LOG_FOLDER_NAME
+    return name == LOG_FOLDER_NAME
+
+
+def log_directory(target):
+    """Where this tool's own journals belong: ``<target>\\__LOGS``.
+
+    A run's journals sit with what the run was pointed at, so a year tree's
+    journals live under that year (ARCHIVE_STANDARD J1) and are found by
+    looking where the work happened rather than one level out. Every walk skips
+    the folder by name, so a journal that outlives its run is never renamed,
+    parked, counted or reported on the next pass.
+    """
+    return target / LOG_FOLDER_NAME
 
 
 def walk_bottom_up(root, root_key, refused, skip_keys=()):
@@ -625,6 +634,12 @@ def walk_bottom_up(root, root_key, refused, skip_keys=()):
     directories, files = [], []
     for entry in entries:
         if path_key(entry.path) in skip_keys:
+            continue
+        # Tool bookkeeping, never governed and never reported (J2). Skipped by
+        # name rather than by path so that journals from earlier runs are as
+        # invisible as this run's own -- a dry run writes no journal, so it has
+        # no path to skip, and would otherwise walk straight into them.
+        if is_log_folder(entry.name):
             continue
         if is_reparse_point(entry):
             refused.append((entry.path, "reparse point (junction/symlink) not followed"))
@@ -965,8 +980,15 @@ def main(argv=None):
         if args.journal:
             journal_path = Path(args.journal)
         else:
+            # The target's name as well as the moment: __LOGS sits one level
+            # above the year folders (PS-3), so every year of an archive shares
+            # it, and the stamp is only to the second. Back-to-back year trees
+            # -- what "--year ALL" on the restructure tool is -- would otherwise
+            # append into one file, and --undo would then replay one year's
+            # renames while reverting another's.
             journal_path = log_directory(target) / (
-                "_rename_journal_%s.jsonl" % stamps.format_stamp(datetime.datetime.now()))
+                "_rename_journal_%s_%s.jsonl"
+                % (target.name, stamps.format_stamp(datetime.datetime.now())))
         # The journal usually sits inside the target, where the walk would find
         # it, try to rename it, and fail because it is still open. Whatever the
         # caller chose, it -- and the __LOGS folder holding it -- is never a

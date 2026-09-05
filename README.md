@@ -590,7 +590,9 @@ order that makes sense, over one target, under one set of safety rules:
 ```powershell
 _restructure_archive.bat                                        # dry run over <root_folder>\<year>
 _restructure_archive.bat --apply
+_restructure_archive.bat --year ALL                             # every year the root holds
 _restructure_archive.bat "d:\__PHOTOS_BACKUP" --year 2024 --apply
+_restructure_archive.bat "d:\__PHOTOS_BACKUP" --year ALL --apply
 _restructure_archive.bat "\\NAS\PhotoBackup" --year 2024 --apply
 _restructure_archive.bat --list-to-split                        # just the folders step 2 would open
 _restructure_archive.bat --steps 3 --apply                      # only the grouping pass
@@ -837,6 +839,28 @@ A target that is neither a year folder, nor inside one, nor holds any is
 **refused**, so a mistyped path or a bare drive letter stops before the first
 rename rather than after it. `--force-target` overrides that, deliberately
 awkwardly.
+
+`--year ALL` reads the root for the years it actually holds and runs each of
+them as a run of its own — its own journal, its own summary — oldest first,
+closing with one frame covering the lot. Nothing needs listing or keeping up to
+date: a gap year costs nothing and a year added since the last run is picked up
+without being named. It differs from naming the root, which is a *single* run
+over every year tree at once: a year is what every step is scoped to and what
+the canonicaliser journals against, so a year per run is what leaves a per-year
+record to undo. A network root is confirmed once, up front, rather than once
+per year, and a year that stops does not stop the years after it.
+
+Each year's journals go to that year's own `__LOGS` — `<ROOT>\2024\__LOGS\` (`J1`)
+— named `_restructure_journal_2024_<stamp>.jsonl` and `_rename_journal_2024_<stamp>.jsonl`.
+Pooling them one level up would interleave two years in the same second, since
+the stamp resolves no finer, and `--undo` would then replay one year's renames
+while reverting another's.
+
+`__LOGS` is therefore the one child a year folder may have besides its month
+folders and `__DUPLICATES` (`P6`). That works only because **every walk skips it
+by name** (`J2`) — by name and not by path, since a dry run writes no journal and
+so has no path to skip. Without that, a journal outliving its run would be
+renamed, parked, counted or reported on every later pass.
 
 #### On a network target
 

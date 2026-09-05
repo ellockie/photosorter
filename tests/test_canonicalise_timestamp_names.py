@@ -6,6 +6,7 @@ bare ``os.rename``, so it is not covered by the ``src.core`` sandbox guard in
 conftest: a test that omitted the target would rename the live archive.
 """
 
+import datetime
 import importlib.util
 import json
 from pathlib import Path
@@ -969,18 +970,74 @@ def test_the_journal_records_one_line_per_rename(tmp_path):
     assert all("from" in record and "to" in record for record in records)
 
 
-def test_the_journal_is_not_itself_a_rename_candidate(tmp_path):
-    # The default journal lives in __LOGS beside the year folder (PS-3), never
-    # inside it -- a year folder's only permitted children are month folders.
+def test_the_journal_lives_under_the_year_it_describes(tmp_path):
+    # __LOGS sits directly under whatever the run was pointed at (J1), so a
+    # year tree's journals are found where the work happened.
     year = tmp_path / "2026"
     _tree(year)
 
     assert tool.main([str(year), "--apply", "--no-colour"]) == 0
 
-    assert list(year.glob("_rename_journal_*.jsonl")) == []
-    journals = list((tmp_path / "__LOGS").glob("_rename_journal_*.jsonl"))
+    assert list((tmp_path / "__LOGS").glob("*.jsonl")) == []
+    journals = list((year / "__LOGS").glob("_rename_journal_*.jsonl"))
     assert len(journals) == 1
     assert tool.canonical_name(journals[0].name) == journals[0].name
+
+
+def test_a_journal_from_an_earlier_run_is_never_walked_again(tmp_path):
+    """__LOGS is the one child a year folder may have besides its months.
+
+    That holds only because every walk skips it by name (J2). A dry run writes
+    no journal, so it has no path to skip: were the skip by path alone, the
+    second run here would walk straight into the first run's journal.
+    """
+    year = tmp_path / "2026"
+    _tree(year)
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+    first = list((year / "__LOGS").glob("*.jsonl"))
+    assert len(first) == 1
+    before = first[0].read_bytes()
+
+    # A name a walk would rewrite if it ever reached it.
+    stale = year / "__LOGS" / "2026-08-25_(Fri)_10.23.12.jsonl"
+    stale.write_text("x", encoding="utf-8")
+
+    assert tool.main([str(year), "--no-colour"]) == 0        # dry run
+    assert tool.main([str(year), "--apply", "--no-colour"]) == 0
+
+    assert stale.is_file()                                   # untouched
+    assert first[0].read_bytes() == before                   # not appended to
+    assert not (year / "__LOGS" / "2026-08-25_(Fri)__10.23.12.jsonl").exists()
+
+
+def test_each_year_journals_under_its_own_tree(tmp_path, monkeypatch):
+    """Two years canonicalised inside the same second stay separate.
+
+    Back-to-back year trees -- what ``restructure_archive.py --year ALL`` does
+    -- once shared one __LOGS and a stamp only to the second, so two runs
+    appended into one file and ``--undo`` would replay one year's renames while
+    reverting another's. A journal per year tree settles it structurally.
+    """
+    for year in ("2019", "2026"):
+        _tree(tmp_path / year)
+    frozen = datetime.datetime(2026, 9, 5, 16, 39, 48)
+    monkeypatch.setattr(tool.datetime, "datetime",
+                        type("Frozen", (datetime.datetime,),
+                             {"now": classmethod(lambda cls, tz=None: frozen)}))
+
+    for year in ("2019", "2026"):
+        assert tool.main([str(tmp_path / year), "--apply", "--no-colour"]) == 0
+
+    for year in ("2019", "2026"):
+        journals = list((tmp_path / year / "__LOGS").glob("_rename_journal_*.jsonl"))
+        assert [path.name for path in journals] == [
+            "_rename_journal_%s_2026-09-05_(Sat)__16.39.48.jsonl" % year]
+        assert tool.canonical_name(journals[0].name) == journals[0].name
+        records = [json.loads(line) for line
+                   in journals[0].read_text(encoding="utf-8").splitlines()
+                   if line.strip()]
+        assert records
+        assert all(str(tmp_path / year) in record["from"] for record in records)
 
 
 def test_a_name_collision_leaves_both_files_untouched(tmp_path):

@@ -8,11 +8,14 @@ rem compliance with ARCHIVE_STANDARD.md (those last two not implemented yet -
 rem the standard is still a v0.1 draft).
 rem
 rem Nothing is changed without --apply. With no arguments this is a dry run
-rem over the configured archive root's current year.
+rem over the configured archive root's current year. "--year ALL" runs every
+rem year the root holds, oldest first, one run each.
 rem
 rem   _restructure_archive.bat
 rem   _restructure_archive.bat --apply
+rem   _restructure_archive.bat --year ALL
 rem   _restructure_archive.bat "d:\__PHOTOS_BACKUP" --year 2024 --apply
+rem   _restructure_archive.bat "d:\__PHOTOS_BACKUP" --year ALL --apply
 rem   _restructure_archive.bat "\\NAS\PhotoBackup" --year 2024 --apply
 rem   _restructure_archive.bat --list-to-split
 rem

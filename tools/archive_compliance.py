@@ -80,6 +80,12 @@ class Inspection:
                 entries = sorted(scan, key=lambda item: item.name.casefold())
             for entry in entries:
                 path = Path(folder) / entry.name
+                # Tool bookkeeping: no rule in §1-§7 governs __LOGS, and a
+                # conforming tool must not report what is in it (J2). It is
+                # also the one child a year folder may have besides its month
+                # folders (J1), so this skip is what keeps P3 honest.
+                if self.tool.canonicalise.is_log_folder(entry.name):
+                    continue
                 if self.tool.canonicalise.is_reparse_point(entry):
                     self.issue("T4", path, "reparse point refused")
                 elif entry.is_dir(follow_symlinks=False):

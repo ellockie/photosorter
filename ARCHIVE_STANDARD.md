@@ -29,7 +29,8 @@ machine-readable form of everything above it — parse that, not the prose.
 
 ```text
 <ROOT>/<YYYY>/<NN>. <Month>/<dated folder>[/<dated folder>…][/<__SUBFOLDER>]
-<ROOT>/<YYYY>/__DUPLICATES                    <- the one year-level subfolder (S7)
+<ROOT>/<YYYY>/__DUPLICATES                    <- year-level subfolder (S7)
+<ROOT>/<YYYY>/__LOGS                          <- year-level subfolder (§0.3), never walked
 ```
 
 | ID | Rule |
@@ -39,7 +40,7 @@ machine-readable form of everything above it — parse that, not the prose.
 | P3 | Month folder is `NN. Month` — zero-padded number, dot, space, **fixed English** month name (`01. January` … `12. December`). Never locale-derived. |
 | P4 | Below a month folder, every directory MUST be a dated folder (§2) — leaf or group (§3) — an allowed subfolder (§4), or a parking area (§4.1). There is no fourth kind. |
 | P5 | The year and month a folder sits under MUST match the date in its own name, after the N7 day shift. |
-| P6 | Directly under a year folder sit its **month folders** and, optionally, **one `__DUPLICATES`** (S7). There is no third kind. A tool MUST NOT read `__DUPLICATES` as a month folder, and MUST NOT walk into it looking for dated folders: what is in it lost a name collision and is waiting for a person, not for the next pass. |
+| P6 | Directly under a year folder sit its **month folders**, optionally **one `__DUPLICATES`** (S7), and optionally **one `__LOGS`** (§0.3). There is no fourth kind. A tool MUST NOT read either as a month folder, and MUST NOT walk into either looking for dated folders: what is in `__DUPLICATES` lost a name collision and is waiting for a person, not for the next pass, and `__LOGS` is tool bookkeeping no rule governs (J2). |
 
 ### §0 Out of scope
 
@@ -51,7 +52,7 @@ other root entry or report its contents. Present at the root today:
 | `____INGEST_PIPELINE` | Pipeline working folder (`INBOX`, `READY`, `.TMP`) | Transient |
 | `____TO_SORT` | Legacy working folder | Transient |
 | `__PROCESSED` | Edits and derivatives made outside the pipeline | **Migration source** — see §0.1 |
-| `__LOGS` | Rename/restructure run journals (`_rename_journal_*.jsonl`, `_restructure_journal_*.jsonl`) | Tool bookkeeping — see §0.3 |
+| `__LOGS` | Rename/restructure run journals (`_rename_journal_*.jsonl`, `_restructure_journal_*.jsonl`) for a run targeting the root itself. A run on a year tree journals under **that year** instead (J1) | Tool bookkeeping — see §0.3 |
 | `_Innych` | Media from other people, e.g. a second photographer at the same event | **Opt-in ingest source** — see §0.2 |
 
 ### §0.1 `__PROCESSED` — derivatives to be reunited
@@ -96,23 +97,29 @@ processed behind your back.
 
 `tools/restructure_archive.py` and `tools/canonicalise_timestamp_names.py` each
 append-only journal what an applied run did, so the run can be replayed
-backwards (`--undo`) or audited afterwards. A journal is dated and reopened on
-every applied run, so it cannot sit inside a `<YYYY>` tree without becoming a
-standing violation: a year folder's only permitted children are month folders
-(P2/P4), and a journal that outlives one run would keep appearing on the next
-walk. It is written instead to `__LOGS`, directly under the same root its
-target's year folder sits under — the same working-area level as
-`____INGEST_PIPELINE`.
+backwards (`--undo`) or audited afterwards. A journal belongs **with the tree it
+describes**: it is written to `__LOGS` directly under whatever `target` the run
+was given, so a year tree's journals sit under that year and are found by
+looking where the work happened rather than one level out.
+
+That makes `__LOGS` the one child a year folder may have besides its month
+folders and `__DUPLICATES` (P6). It is admissible only because **every walk
+skips it by name** (J2) — skipped by name and not by path, because a dry run
+writes no journal and so has no path to skip, and would otherwise walk straight
+into the journals earlier runs left. Without that skip a journal that outlives
+its run would be renamed, parked, counted or reported on every subsequent pass.
 
 | ID | Rule |
 | --- | --- |
-| J1 | A journal is **never** written inside a `<YYYY>` tree. Its default location is `__LOGS` beside the year folders, resolved from whatever `target` a run was given — one level up when `target` is itself a year folder, directly under it otherwise. |
-| J2 | `__LOGS` is **tool bookkeeping only**: no rule in §1–§7 governs its contents, and a conforming tool MUST NOT report what is in it as a violation. |
+| J1 | A journal's default location is `__LOGS` **directly under the run's `target`** — `<YYYY>\__LOGS` for a year tree. Journals are never pooled across year trees: two years sharing one `__LOGS` would interleave in the same second (the stamp resolves no finer), and `--undo` would then replay one year's renames while reverting another's. |
+| J2 | `__LOGS` is **tool bookkeeping only**: no rule in §1–§7 governs its contents, a conforming tool MUST NOT report it or what is in it as a violation, and every traversal MUST skip it **by name**. |
 | J3 | An explicit `--journal <path>` overrides the default outright; that path is used exactly as given, `__LOGS` or not. |
 
 **Implemented** — `log_directory` in `tools/canonicalise_timestamp_names.py` is
-the one definition (T8); `tools/restructure_archive.py` calls it for its own
-journal rather than restating the rule.
+the one definition (T8) of where a journal goes, and `is_log_folder` beside it
+the one definition of what skips it; `tools/restructure_archive.py` calls both
+rather than restating the rule, `walk_bottom_up` skips the folder for every
+traversal built on it, and `tools/archive_compliance.py` exempts it from P6.
 
 ---
 
@@ -824,8 +831,9 @@ status: settled
 path:
   levels: [root, year, month, dated_folder, "dated_folder*", subfolder]
   year: '^\d{4}$'
-  year_level_entries: [month_folder, "__DUPLICATES"]   # P6/S7 - there is no third kind
+  year_level_entries: [month_folder, "__DUPLICATES", "__LOGS"]  # P6/S7/0.3 - no fourth kind
   year_level_duplicates_are_walked: false              # P6 - not a month folder, not descended into
+  year_level_logs_are_walked: false                    # J2 - skipped by name, never reported
   month: '^(0[1-9]|1[0-2])\. (January|February|March|April|May|June|July|August|September|October|November|December)$'
   month_names:
     "01": "01. January"
@@ -844,6 +852,7 @@ path:
   migration_sources: {"__PROCESSED": derivatives}       # section 0.1
   opt_in_ingest_sources: {"_Innych": foreign_origin}    # section 0.2, never automatic
   tool_bookkeeping: {"__LOGS": run_journals}            # section 0.3, never reported as a violation
+                                                        # J1: also at <YYYY>/__LOGS, per year tree
 
 stamp:
   weekdays: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
@@ -961,7 +970,7 @@ parking_areas:                        # section 4.1
 subfolders:
   closed_set: true
   also_allowed: dated_child_folder
-  year_level_allowed: ["__DUPLICATES"]   # S7/P6 - collision losers, one per year tree
+  year_level_allowed: ["__DUPLICATES", "__LOGS"]   # S7/P6 - collision losers; run journals (0.3)
   year_level_migrates_to_event_level: false   # S7 - the two answer different questions
   may_nest: false
   may_nest_exception: ["__EXIF", "__PREVIEWS", "__OCR"]   # S2 / X11: sidecar folders, one level

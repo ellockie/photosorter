@@ -11,14 +11,19 @@ same exit codes - every switch is passed straight through to
 tools\restructure_archive.py, so its --help is the reference.
 
 Nothing is changed without --apply. With no arguments this is a dry run over
-the configured archive root's current year.
+the configured archive root's current year. "--year ALL" runs every year the
+root holds, oldest first, one run each.
 
 .EXAMPLE
 .\_restructure_archive.ps1
 .EXAMPLE
 .\_restructure_archive.ps1 --apply
 .EXAMPLE
+.\_restructure_archive.ps1 --year ALL
+.EXAMPLE
 .\_restructure_archive.ps1 "d:\__PHOTOS_BACKUP" --year 2024 --apply
+.EXAMPLE
+.\_restructure_archive.ps1 "d:\__PHOTOS_BACKUP" --year ALL --apply
 .EXAMPLE
 .\_restructure_archive.ps1 "\\NAS\PhotoBackup" --year 2024 --apply
 .EXAMPLE

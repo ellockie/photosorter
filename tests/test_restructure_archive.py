@@ -197,6 +197,194 @@ def test_default_year_does_not_redirect_a_named_target(tmp_path, config):
 
 
 # --------------------------------------------------------------------------
+# --year ALL (PS-6)
+# --------------------------------------------------------------------------
+
+def make_years(tmp_path, *years):
+    """A root holding one month folder per named year, and one ingest pipeline."""
+    root = make_archive(tmp_path, year=years[0])
+    for year in years[1:]:
+        make_archive(tmp_path, year=year, ingest=False)
+    return root
+
+
+def resolve(*argv):
+    """The target ``argv`` lands on, with the ``--year`` bookkeeping main does."""
+    parser_args = tool.build_parser().parse_args(list(argv))
+    parser_args.year_given = any(
+        item == "--year" or item.startswith("--year=") for item in argv
+    )
+    return tool.resolve_run_target(parser_args, lambda key, message: None)
+
+
+def test_year_all_is_a_sentinel_not_a_number():
+    assert tool.build_parser().parse_args(["--year", "ALL"]).year == tool.ALL_YEARS
+    # Typed in a hurry: a year is digits, so nothing else can be mistaken for it.
+    assert tool.build_parser().parse_args(["--year", "all"]).year == tool.ALL_YEARS
+    assert tool.build_parser().parse_args(["--year", "2024"]).year == 2024
+
+
+def test_a_year_that_is_neither_a_number_nor_all_is_refused(capsys):
+    with pytest.raises(SystemExit):
+        tool.build_parser().parse_args(["--year", "2O24"])
+    assert "neither a year nor ALL" in capsys.readouterr().err
+
+
+def test_year_all_does_not_descend_into_a_named_root(tmp_path, config):
+    root = make_years(tmp_path, "2019", "2026")
+    target, error = resolve(str(root), "--year", "ALL")
+    assert error is None
+    # Not root/"ALL", and not one of the years either: the root itself, which
+    # years_to_run then opens up.
+    assert target == root
+
+
+def test_year_all_with_no_target_is_the_configured_root_itself(tmp_path, config):
+    root = make_years(tmp_path, "2019", "2026")
+    config["paths"]["root_folder"] = str(root)
+    target, error = resolve("--year", "ALL")
+    assert error is None
+    assert target == root
+
+
+def test_years_to_run_lists_the_years_the_root_holds_oldest_first(tmp_path, config):
+    root = make_years(tmp_path, "2026", "2019", "2021")
+    years, error = tool.years_to_run(root, lambda key, message: None)
+    assert error is None
+    assert [path.name for path in years] == ["2019", "2021", "2026"]
+    # The ingest pipeline holds files still in flight (ARCHIVE_STANDARD P1).
+    assert all("INGEST" not in str(path) for path in years)
+
+
+def test_years_to_run_on_a_year_folder_is_that_one_year(tmp_path, config):
+    root = make_years(tmp_path, "2019", "2026")
+    years, error = tool.years_to_run(root / "2026", lambda key, message: None)
+    assert error is None
+    assert years == [root / "2026"]
+
+
+def test_year_all_needs_a_root_that_holds_years(tmp_path, config):
+    root = make_years(tmp_path, "2026")
+    years, error = tool.years_to_run(root / "2026" / "07. July",
+                                     lambda key, message: None)
+    assert years is None
+    assert "holds none" in error
+
+
+def test_year_all_on_a_folder_holding_no_years_refuses_the_run(tmp_path, config,
+                                                               capsys):
+    root = make_years(tmp_path, "2026")
+    assert run(str(root / "2026" / "07. July"), "--year", "ALL", "--steps", "1") == 2
+    printed = capsys.readouterr().out
+    assert "--year ALL needs an archive root" in printed
+    assert "NOTHING RAN" in printed
+
+
+def test_year_all_runs_every_year_and_closes_with_one_verdict(tmp_path, config,
+                                                              capsys):
+    root = make_years(tmp_path, "2019", "2026")
+    assert run(str(root), "--year", "ALL", "--steps", "1") == 0
+    printed = capsys.readouterr().out
+    assert "2 year tree(s) to run" in printed
+    assert "YEAR 2019  (1 of 2)" in printed
+    assert "YEAR 2026  (2 of 2)" in printed
+    assert "ALL YEARS" in printed
+    assert "ALL CLEAR -- 2 YEAR(S)" in printed
+
+
+def test_year_all_journals_each_year_under_its_own_tree(tmp_path, config,
+                                                        fake_grouper):
+    """A year's journal lives under that year (J1), not pooled at the root.
+
+    The stamp is only to the second and small trees finish inside one, so a
+    shared __LOGS would interleave two years into a single file.
+    """
+    root = make_years(tmp_path, "2019", "2026")
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=1)", year="2026")
+    assert run(str(root), "--year", "ALL", "--apply", "--yes") == 0
+    assert list((root / "__LOGS").glob("*.jsonl")) == []
+    for year in ("2019", "2026"):
+        journals = list((root / year / "__LOGS").glob("_restructure_journal_*.jsonl"))
+        assert len(journals) == 1, year
+        records = [json.loads(line) for line
+                   in journals[0].read_text(encoding="utf-8").splitlines()]
+        assert records[0]["event"] == "run_started"
+        assert records[0]["target"] == str(root / year)
+        assert records[-1]["event"] == "run_finished"
+        # Nothing from the other year leaked into this file.
+        assert {record.get("target") for record in records} <= {str(root / year), None}
+
+
+def test_a_years_logs_folder_is_never_reported_as_a_year_child(tmp_path, config,
+                                                               capsys):
+    """P3 admits only month folders under a year -- __LOGS is the exception.
+
+    Without the exemption every run after the first would flag the folder its
+    own journal sits in, forever.
+    """
+    root = make_years(tmp_path, "2026")
+    stale = root / "2026" / "__LOGS"
+    stale.mkdir()
+    (stale / "_restructure_journal_2026_2026-09-05_(Sat)__16.48.03.jsonl").write_text(
+        "{}\n", encoding="utf-8")
+    assert run(str(root / "2026"), "--steps", "7") == 0
+    printed = capsys.readouterr().out
+    assert "P3" not in printed
+    assert "__LOGS" not in printed
+
+
+def test_a_year_that_stops_does_not_stop_the_years_after_it(tmp_path, config,
+                                                            capsys, monkeypatch):
+    """Separate trees, separate journals: 2019 failing says nothing about 2024."""
+    root = make_years(tmp_path, "2019", "2026")
+    entered = []
+
+    def stop_on_2019(run_state):
+        entered.append(run_state.target.name)
+        return 2 if run_state.target.name == "2019" else 0
+
+    monkeypatch.setattr(tool, "STEPS",
+                        [(1, "Canonicalise names", stop_on_2019, None)])
+    assert run(str(root), "--year", "ALL", "--steps", "1") == 2
+    assert entered == ["2019", "2026"]
+    printed = capsys.readouterr().out
+    # A step that could not run is an issue like any other, and the whole-run
+    # verdict counts them across the years exactly as one year's does.
+    assert "1 ISSUE(S) ACROSS 1 YEAR(S)" in printed
+    assert "2019" in printed and "2026" in printed
+
+
+def test_year_all_asks_about_a_network_root_once_not_once_per_year(
+        tmp_path, config, monkeypatch, fake_grouper):
+    """Three years, one prompt: a question asked per year stops being read."""
+    root = make_years(tmp_path, "2019", "2021", "2026")
+    monkeypatch.setattr(tool.canonicalise, "drive_is_network", lambda path: True)
+    asked = []
+
+    def record(question, assume_yes, colour, report):
+        asked.append(question)
+        return True
+
+    monkeypatch.setattr(tool, "confirm", record)
+    assert run(str(root), "--year", "ALL", "--apply", "--steps", "1") == 0
+    assert len(asked) == 1
+    assert "3 year tree(s)" in asked[0]
+    assert str(root) in asked[0]
+
+
+def test_a_single_year_still_asks_for_itself(tmp_path, config, monkeypatch):
+    """The whole-archive shortcut must not answer a plain year's question."""
+    root = make_years(tmp_path, "2026")
+    monkeypatch.setattr(tool.canonicalise, "drive_is_network", lambda path: True)
+    asked = []
+    monkeypatch.setattr(
+        tool, "confirm",
+        lambda question, assume_yes, colour, report: asked.append(question) or False)
+    assert run(str(root / "2026"), "--apply", "--steps", "1") == 2
+    assert len(asked) == 1
+
+
+# --------------------------------------------------------------------------
 # Finding the folders to group
 # --------------------------------------------------------------------------
 
