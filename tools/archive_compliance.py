@@ -60,6 +60,7 @@ class Inspection:
         self.legacy = {name.casefold() for name in self.taxonomy.legacy_container_names(self.config)}
         self.months = importlib.import_module("src.constants.months").MONTH_FOLDERS
         self.kinds = tool.matching.companion_kinds(self.config)
+        self.parking = self.taxonomy.taxonomy_folder(self.config, "duplicates")
         self.images, self.videos = self.grouping.extension_sets(self.config)
         self.issues = []
         self.events = []
@@ -113,7 +114,11 @@ class Inspection:
             for path in files:
                 self.issue("P6", path, "loose file at year level")
             for folder in dirs:
-                if folder.name.casefold() == self.taxonomy.taxonomy_folder(self.config, "duplicates").casefold():
+                # A year-level __DUPLICATES is where S7 used to put collision
+                # losers. Read, never written (the N5 rule again): it is not
+                # reported as a malformed year child, and nothing drains it --
+                # where its contents belong is a decision for a person (L5).
+                if folder.name.casefold() == self.parking.casefold():
                     continue
                 if folder.name not in self.months.values():
                     self.issue("H7" if self.tool.parking.is_parking_area(folder.name) else "P3", folder,
@@ -255,6 +260,69 @@ class Inspection:
         raw = {ext.casefold() for ext in self.config.get("extensions", {}).get("raw_images", [])}
         if top and path.suffix.casefold() in raw:
             self.issue("F7", path, "RAW original belongs in its taxonomy folder")
+        if mismarked_sibling(self, path) is not None:
+            self.issue("F9", path,
+                       "collision suffix on a second exposure, not a copy "
+                       "(sub-second differs from the file it was named against)")
+        elif mismarked_low_res(self, path) is not None:
+            self.issue("F10", path,
+                       "_LOWRES on a file that is not a smaller rendering "
+                       "(same pixel dimensions as the file it was named against)")
+        elif self.lone_fraction(path):
+            self.issue("F9c", path,
+                       "sub-second on a shot with no sibling in that second")
+        elif top and is_low_res(self, path):
+            self.issue("F7/F10", path,
+                       "a downscale is a derivative: it belongs in "
+                       + self.taxonomy.taxonomy_folder(self.config, "resized"))
+
+    def lone_fraction(self, path):
+        """F9c: a sub-second on a file that has nobody to be told apart from.
+
+        The fraction is written to separate two shots in one second. Where the
+        second holds only this one, it says nothing the plain stamp did not,
+        and it comes off -- which is also how a name written by the brief
+        version that put a fraction on everything is brought back into line.
+        """
+        if not self.media(path) or self.stamps.leading_subsecond(path.name) is None:
+            return False
+        wanted = self.tool.siblings.bare_name(path.name)
+        _dirs, files = self.entries(path.parent)
+        family = [one for one in files
+                  if self.media(one) and self.tool.siblings.bare_name(one.name) == wanted]
+        return len(family) < 2
+
+    def dimensions(self, media_path):
+        """The picture size recorded for a filed media file (F10)."""
+        exif_folder = self.taxonomy.sidecar_subdir(media_path.parent, self.config)
+        for extension in self.grouping.configured_extensions(
+                self.config, "sidecars", self.grouping.DEFAULT_SIDECAR_EXTENSIONS):
+            sidecar = exif_folder / (media_path.name + extension)
+            if sidecar.is_file():
+                found = self.tool.dimensions.dimensions_of_sidecar(
+                    self.tool.extended_path(sidecar))
+                if found is not None:
+                    return found
+        return None
+
+    def subsecond(self, media_path):
+        """The sub-second recorded for a filed media file, from its sidecar (X10).
+
+        X1 names a sidecar after its subject's **full** name, and X10 puts it in
+        the ``__EXIF`` directly inside the folder holding the subject, so the
+        path is derived rather than searched for.
+        """
+        exif_folder = self.taxonomy.sidecar_subdir(media_path.parent, self.config)
+        for extension in self.grouping.configured_extensions(
+                self.config, "sidecars", self.grouping.DEFAULT_SIDECAR_EXTENSIONS):
+            sidecar = exif_folder / (media_path.name + extension)
+            if not sidecar.is_file():
+                continue
+            found = self.tool.siblings.subsecond_of_sidecar(
+                self.tool.extended_path(sidecar))
+            if found:
+                return found
+        return None
 
 
 def report(inspection):
@@ -268,6 +336,258 @@ def report(inspection):
 
 def check(tool, run):
     return report(Inspection(tool, run).scan())
+
+
+def mismarked_sibling(inspection, path):
+    """F9/PS-10: a collision suffix on a file that is a second exposure, not a copy.
+
+    An earlier version of the pipeline settled *every* same-name collision with
+    F4's ``_DUPE_<md5>_<n>``, including the one case that is not a collision at
+    all: two shots taken inside one second, which generate one name because the
+    name states the second and not the fraction. The result is a pair of files
+    where one claims to be a byte-identical copy of the other and demonstrably
+    is not.
+
+    Returns ``(partner, this file's fraction, the partner's fraction)`` when
+    the pair is provably two exposures, and None otherwise -- including for a
+    genuine duplicate, for a ``_LOWRES`` (never matched: that is a claim about
+    rendering), and for any pair whose cameras recorded no sub-second, where
+    nothing here can tell a burst from one shot saved twice. Nothing is renamed
+    on a guess.
+    """
+    loser = inspection.taxonomy.split_collision_suffix(path.name)
+    if loser is None:
+        return None
+    partner = path.parent / loser.name
+    if not partner.is_file():
+        return None                    # the name it lost is not in this folder
+    subsecond, partner_subsecond = inspection.subsecond(path), inspection.subsecond(partner)
+    if not inspection.tool.siblings.are_siblings(partner_subsecond, subsecond):
+        return None
+    if inspection.tool.matching.default_checksum(inspection.tool.extended_path(path)) == \
+            inspection.tool.matching.default_checksum(inspection.tool.extended_path(partner)):
+        return None                    # identical bytes: the suffix was right
+    return partner, subsecond, partner_subsecond
+
+
+def is_low_res(inspection, path):
+    """Does this name carry F4's ``_LOWRES``?"""
+    parsed = inspection.taxonomy.split_collision_suffix(path.name)
+    return parsed is not None and parsed.suffix == inspection.taxonomy.LOW_RES_SUFFIX
+
+
+def mismarked_low_res(inspection, path):
+    """F10: a ``_LOWRES`` that is not a smaller rendering of what it lost to.
+
+    ``_LOWRES`` was written from the byte ratio alone before F10, so a file
+    that merely compressed better than the one it collided with was filed as a
+    lower resolution of it. Returns the partner when the claim is false --
+    equal dimensions, or larger ones -- and None when it is true or cannot be
+    checked. An unreadable pair is left alone: F10 refuses a guess in the same
+    direction the naming rule does.
+    """
+    if not is_low_res(inspection, path):
+        return None
+    loser = inspection.taxonomy.split_collision_suffix(path.name)
+    partner = path.parent / loser.name
+    if not partner.is_file():
+        return None
+    dimensions, partner_dimensions = inspection.dimensions(path), inspection.dimensions(partner)
+    if dimensions is None or partner_dimensions is None:
+        return None
+    if inspection.tool.dimensions.is_downscaled(partner_dimensions, dimensions):
+        return None                    # the claim is true; leave it standing
+    return partner
+
+
+def low_res_repair_plan(inspection, path):
+    """Rename a false ``_LOWRES`` to what it actually is (F10).
+
+    ``_DIFFERS``: the two files claim one name and hold different bytes, which
+    is all that can be said about them once resolution is ruled out. Which to
+    keep stays a person's decision (F4) -- this only stops the name asserting
+    something the pixels disprove. The checksum and index are carried across
+    unchanged so the pair can still be matched up by eye.
+    """
+    if mismarked_low_res(inspection, path) is None:
+        return []
+    loser = inspection.taxonomy.split_collision_suffix(path.name)
+    stem, suffix = Path(loser.name).stem, Path(loser.name).suffix
+    wanted = inspection.taxonomy.differing_name(stem, loser.md5, loser.index, suffix)
+    if wanted == path.name:
+        return []
+    moves = [(path, path.parent / wanted)]
+    exif_folder = inspection.taxonomy.sidecar_subdir(path.parent, inspection.config)
+    for extension in inspection.grouping.configured_extensions(
+            inspection.config, "sidecars", inspection.grouping.DEFAULT_SIDECAR_EXTENSIONS):
+        sidecar = exif_folder / (path.name + extension)
+        if sidecar.is_file():
+            moves.append((sidecar, exif_folder / (wanted + extension)))
+    return moves
+
+
+def resized_repair_plan(inspection, path):
+    """Move a genuine downscale off the top level into ``__RESIZED`` (F7/F10)."""
+    if not is_low_res(inspection, path) or mismarked_low_res(inspection, path) is not None:
+        return []
+    resized = inspection.taxonomy.taxonomy_subdir(path.parent, inspection.config, "resized")
+    moves = [(path, resized / path.name)]
+    exif_folder = inspection.taxonomy.sidecar_subdir(path.parent, inspection.config)
+    resized_exif = inspection.taxonomy.sidecar_subdir(resized, inspection.config)
+    for extension in inspection.grouping.configured_extensions(
+            inspection.config, "sidecars", inspection.grouping.DEFAULT_SIDECAR_EXTENSIONS):
+        sidecar = exif_folder / (path.name + extension)
+        if sidecar.is_file():
+            # X10: a sidecar sits in the __EXIF of the folder holding its
+            # subject, so it moves into __RESIZED\__EXIF with it.
+            moves.append((sidecar, resized_exif / (path.name + extension)))
+    return moves
+
+
+def lone_fraction_repair_plan(inspection, path):
+    """Strip a sub-second that separates nothing (F9c), sidecars following."""
+    if not inspection.lone_fraction(path):
+        return []
+    wanted = inspection.tool.siblings.bare_name(path.name)
+    if wanted == path.name or (path.parent / wanted).exists():
+        return []
+    moves = [(path, path.parent / wanted)]
+    exif_folder = inspection.taxonomy.sidecar_subdir(path.parent, inspection.config)
+    for extension in inspection.grouping.configured_extensions(
+            inspection.config, "sidecars", inspection.grouping.DEFAULT_SIDECAR_EXTENSIONS):
+        sidecar = exif_folder / (path.name + extension)
+        if sidecar.is_file():
+            moves.append((sidecar, exif_folder / (wanted + extension)))
+    return moves
+
+
+def sibling_repair_plan(inspection, path):
+    """The renames that turn one mismarked pair into two named exposures (F9).
+
+    Both files move: the one carrying the false suffix, and the one it was
+    named against, which takes its own fraction so the pair sorts in the order
+    it was shot. Each sidecar follows its subject (X5), named per X1.
+    """
+    found = mismarked_sibling(inspection, path)
+    if found is None:
+        return []
+    partner, subsecond, partner_subsecond = found
+    loser = inspection.taxonomy.split_collision_suffix(path.name)
+    moves = []
+    for media, fraction in ((partner, partner_subsecond), (path, subsecond)):
+        wanted = inspection.tool.siblings.sibling_name(loser.name, fraction)
+        if wanted == media.name:
+            continue
+        moves.append((media, media.parent / wanted))
+        exif_folder = inspection.taxonomy.sidecar_subdir(media.parent, inspection.config)
+        for extension in inspection.grouping.configured_extensions(
+                inspection.config, "sidecars", inspection.grouping.DEFAULT_SIDECAR_EXTENSIONS):
+            sidecar = exif_folder / (media.name + extension)
+            if sidecar.is_file():
+                moves.append((sidecar, exif_folder / (wanted + extension)))
+    return moves
+
+
+# How many pairs the confirmation itself lists before it stops and points at
+# the report above. The same reason ``STEP_VERDICT_ITEMS`` exists: a question
+# nobody can see the end of is a question nobody reads to the end of.
+SIBLING_PROMPT_ITEMS = 8
+
+
+def repair_siblings(inspection, failures):
+    """Rename every mismarked pair the scan found (F9). Dry run reports only.
+
+    **One confirmation for the whole run**, not one per pair. A run covers a
+    single year tree -- ``--year ALL`` is ``run_one_target`` in a loop, a fresh
+    ``Run`` each time -- so one question per run is one question per year. That
+    is the same judgement the network prompt already makes one level up: a
+    prompt met seventy times in a row is a prompt somebody stops reading, and a
+    confirmation that has been trained out of a person protects nothing.
+
+    What is being approved is still shown in full. Every pair is reported
+    above, move by move, before anything is asked; the question carries the
+    counts, the year, and the first few pairs, and says where the rest is.
+    """
+    run = inspection.run
+    # All three repairs share one question. To a person they are one finding —
+    # "these collision names say something the files disprove" — and splitting
+    # them would put the prompt count back up that a single question exists to
+    # bring down.
+    planners = {
+        "F9": (sibling_repair_plan, "two exposures in one second, not duplicates"),
+        "F10": (low_res_repair_plan, "_LOWRES on a file of the same dimensions"),
+        "F7/F10": (resized_repair_plan, "a downscale belongs in __RESIZED"),
+        "F9c": (lone_fraction_repair_plan, "a sub-second that separates nothing"),
+    }
+    plans = []
+    for rule, path, _reason in list(inspection.issues):
+        planner = planners.get(rule)
+        if planner is None:
+            continue
+        try:
+            moves = planner[0](inspection, path)
+        except (OSError, ValueError) as error:
+            failures.append((path, str(error)))
+            run.report("warn", str(error))
+            continue
+        if moves:
+            plans.append((path, moves, rule, planner[1]))
+    if not plans:
+        return
+
+    for _path, moves, rule, headline in plans:
+        run.report("warn", "%s %s:\n%s" % (rule, headline, sibling_move_details(moves)))
+    if not run.apply:
+        return
+    if not run.confirm(sibling_confirmation(inspection, plans)):
+        run.report("warn", "Not confirmed; %d collision name(s) left exactly as they are."
+                   % len(plans))
+        return
+
+    for path, moves, rule, _headline in plans:
+        # Rolled back a pair at a time. A pair that fails must not undo the
+        # ones already renamed and journalled before it -- those are correct,
+        # and re-reversing them would be a second unrequested rename.
+        completed = []
+        try:
+            for source, target in moves:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                checked_move(inspection, source, target, rule)
+                completed.append((source, target))
+        except OSError as error:
+            for source, target in reversed(completed):
+                try:
+                    checked_move(inspection, target, source, rule + " rollback")
+                except OSError as rollback_error:
+                    failures.append((target, "%s rollback failed: %s" % (rule, rollback_error)))
+            failures.append((path, str(error)))
+            run.report("warn", str(error))
+
+
+def sibling_move_details(moves):
+    return "\n".join("    %s\n      -> %s" % (source, target)
+                     for source, target in moves)
+
+
+def sibling_confirmation(inspection, plans):
+    """The single question the whole run's collision-name repairs are approved by."""
+    files = sum(len(moves) for _, moves, _, _ in plans)
+    trees = "\n    ".join(str(tree) for tree in inspection.run.trees)
+    counts = {}
+    for _path, _moves, rule, headline in plans:
+        counts[(rule, headline)] = counts.get((rule, headline), 0) + 1
+    summary = "\n".join("    %-7s %d x %s" % (rule, count, headline)
+                        for (rule, headline), count in sorted(counts.items()))
+    listed = "\n".join(
+        "    %s\n      -> %s" % (moves[0][0].name, moves[0][1].name)
+        for _path, moves, _rule, _headline in plans[:SIBLING_PROMPT_ITEMS])
+    if len(plans) > SIBLING_PROMPT_ITEMS:
+        listed += "\n    ... and %d more, each listed in full above." % (
+            len(plans) - SIBLING_PROMPT_ITEMS)
+    return (
+        "%d collision name(s) say something the files themselves disprove:\n%s\n"
+        "Repair them -- %d file(s) including sidecars -- under:\n    %s\n%s"
+        % (len(plans), summary, files, trees, listed))
 
 
 def leaf_target(inspection, folder, files):
@@ -399,6 +719,11 @@ def fix(tool, run):
     inspection = Inspection(tool, run).scan()
     # Deepest first: moving a parent cannot invalidate a pending child path.
     failures = []
+    # First: undo the names an earlier version wrote for pairs that were never
+    # collisions (F9/PS-10). Doing it before the migrations means the rest of
+    # this pass sees two properly named representatives rather than a file and
+    # a thing calling itself a copy of it.
+    repair_siblings(inspection, failures)
     resolve_videos(inspection, failures)
     for folder, children, tree in sorted(inspection.events, key=lambda item: len(item[0].parts), reverse=True):
         if not children:

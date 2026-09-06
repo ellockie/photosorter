@@ -72,13 +72,15 @@ def build_config(tmp_path):
     }
 
 
+# Last field is the picture's pixel size. Only test5 is genuinely downscaled;
+# _LOWRES is a claim about resolution and nothing else may earn it (F10).
 EXIF_FIXTURES = {
-    "test1.jpg": ("Sony RX100", "2026:04:12 10:00:00", "4.0", "1/250", "100", "28.0 mm"),
-    "test2.cr2": ("Canon EOS 6D", "2026:05:01 14:30:00", "2.8", "1/500", "200", "50.0 mm"),
-    "test3.jpg": ("Sony RX100", "2026:04:12 10:00:00", "4.0", "1/250", "100", "28.0 mm"),
-    "test4.jpg": ("Sony RX100", "2026:04:12 10:00:00", "4.0", "1/250", "100", "28.0 mm"),
-    "test5.jpg": ("Sony RX100", "2026:04:12 10:00:00", "4.0", "1/250", "100", "28.0 mm"),
-    "test6.jpg": ("Canon EOS 6D", "2026:05:02 03:30:00", "2.8", "1/60", "400", "35.0 mm"),
+    "test1.jpg": ("Sony RX100", "2026:04:12 10:00:00", "4.0", "1/250", "100", "28.0 mm", (5472, 3648)),
+    "test2.cr2": ("Canon EOS 6D", "2026:05:01 14:30:00", "2.8", "1/500", "200", "50.0 mm", (5472, 3648)),
+    "test3.jpg": ("Sony RX100", "2026:04:12 10:00:00", "4.0", "1/250", "100", "28.0 mm", (5472, 3648)),
+    "test4.jpg": ("Sony RX100", "2026:04:12 10:00:00", "4.0", "1/250", "100", "28.0 mm", (5472, 3648)),
+    "test5.jpg": ("Sony RX100", "2026:04:12 10:00:00", "4.0", "1/250", "100", "28.0 mm", (1024, 683)),
+    "test6.jpg": ("Canon EOS 6D", "2026:05:02 03:30:00", "2.8", "1/60", "400", "35.0 mm", (5472, 3648)),
 }
 
 
@@ -88,15 +90,27 @@ def fake_exiftool(inbox: Path):
             fixture = EXIF_FIXTURES.get(path.name)
             if fixture is None:
                 continue
-            camera, taken_at, aperture, exposure, iso, focal = fixture
+            camera, taken_at, aperture, exposure, iso, focal, size = fixture
+            width, height = size
             (inbox / f"{path.name}._exif").write_text(
                 "\n".join([
+                    "---- File ----",
+                    f"Image Width                     : {width}",
+                    f"Image Height                    : {height}",
+                    "---- IFD0 ----",
                     f"Camera Model Name               : {camera}",
                     f"Date/Time Original              : {taken_at}",
                     f"Aperture                        : {aperture}",
                     f"Exposure Time                   : {exposure}",
                     f"ISO                             : {iso}",
                     f"Focal Length                    : {focal}",
+                    # The embedded thumbnail. Its dimensions must never be
+                    # mistaken for the picture's own (F10).
+                    "---- IFD1 ----",
+                    "Image Width                     : 160",
+                    "Image Height                    : 120",
+                    "---- Composite ----",
+                    f"Image Size                      : {width}x{height}",
                 ]),
                 encoding="iso-8859-1",
             )
@@ -158,16 +172,22 @@ def test_e2e_fixture_matrix_full_default_dag(tmp_path, monkeypatch, no_legacy_up
     assert not (may_folder / "__EXIF" / f"{raw_name}._exif").exists()
 
     # test3 was an exact duplicate of test1: merged away with a safety exception.
+    # test4 only shares test1's name -- its bytes differ, so it is a _DIFFERS,
+    # not a _DUPE. Nothing byte-identical survives to carry a _DUPE at all.
     all_jpgs = list(root.rglob("*.jpg"))
-    assert len([p for p in all_jpgs if "_DUPE_" in p.name]) == 1
-    dupe = next(p for p in all_jpgs if "_DUPE_" in p.name)
-    assert test4_md5 in dupe.name
-    assert dupe.parent == japan_folder
+    assert not [p for p in all_jpgs if "_DUPE_" in p.name]
+    differs = [p for p in all_jpgs if "_DIFFERS_" in p.name]
+    assert len(differs) == 1
+    assert test4_md5 in differs[0].name
+    assert differs[0].parent == japan_folder
 
+    # test5 is a real downscale -- 1024x683 against 5472x3648 -- so it earns
+    # _LOWRES, and being a derivative it goes in __RESIZED rather than beside
+    # the shot it is a smaller copy of (F7/F10).
     lowres = [p for p in all_jpgs if "_LOWRES_" in p.name]
     assert len(lowres) == 1
     assert test5_md5 in lowres[0].name
-    assert lowres[0].parent == japan_folder
+    assert lowres[0].parent == japan_folder / "__RESIZED"
 
     # Day boundary: 03:30 is before 04.44.44, so the file keeps its own date
     # in the filename but groups into the previous day's folder.
@@ -214,8 +234,9 @@ def test_folder_sorting_demotes_existing_occupant_on_name_collision(tmp_path):
     # Two different assets land on the same event folder + file name (e.g. two
     # distinct shots that both got named "shot.jpg" upstream). The asset moved
     # in first must not be left silently occupying the plain name once a
-    # second, different file wants it too: both get flagged as _DUPE_<md5>,
-    # and the first asset's sidecar follows its rename.
+    # second, different file wants it too. Their bytes differ and no camera
+    # here recorded a sub-second, so this is F4's _DIFFERS_<md5> and not a
+    # sibling pair (F9a) -- and the first asset's sidecar follows its rename.
     config = build_config(tmp_path)
     inbox = Path(config["paths"]["inbox_folder"])
     inbox.mkdir(parents=True)
@@ -250,7 +271,7 @@ def test_folder_sorting_demotes_existing_occupant_on_name_collision(tmp_path):
     assert (event_folder / "shot.jpg").exists()
     assert second_asset.primary_path == event_folder / "shot.jpg"
 
-    demoted = event_folder / f"shot_DUPE_{first_md5}_1.jpg"
+    demoted = event_folder / f"shot_DIFFERS_{first_md5}_1.jpg"
     assert demoted.exists()
     assert demoted.read_text(encoding="utf-8") == "first-content"
     assert first_asset.primary_path == demoted

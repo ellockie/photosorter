@@ -72,6 +72,7 @@ from src.pipeline_stages.taxonomy import \
     duplicate_name, \
     legacy_container_names, \
     legacy_container_targets, \
+    taxonomy_folder, \
     taxonomy_subdir, \
     sidecar_dir_names, \
     sidecar_subdir, \
@@ -663,10 +664,13 @@ def index_trees(roots, config: dict, reporter: "_Reporter",
     enough, with or without the weekday and the time. A day folder that never
     gained a time is still a day folder.
 
-    ``skip_keys`` are left out of the walk entirely -- the parking folders,
-    whose contents have already been dealt with. Without this the run after a
-    parking run would find those files, fail to match the ``_DUPE_``-suffixed
-    names against any subject, and report every one of them as orphaned.
+    **A parking area is never a source tree.** The ``__DUPLICATES`` folder is
+    skipped wherever it is met -- inside a dated folder, where S7 now puts it,
+    and at the year level, where an archive written earlier still has one.
+    Without this the run after a parking run would find those files, fail to
+    match the ``_DUPE_``-suffixed names against any subject, and report every
+    one of them as orphaned. ``skip_keys`` names any further folder a caller
+    wants left out by path.
 
     Reparse points are refused rather than followed (T4): this walk covers
     whole year trees, so a junction planted anywhere under one would otherwise
@@ -677,6 +681,7 @@ def index_trees(roots, config: dict, reporter: "_Reporter",
     image_exts, video_exts = extension_sets(config)
     media_exts = image_exts | video_exts
     tax_names = {name.casefold() for name in taxonomy_dir_names(config)}
+    parking_name = taxonomy_folder(config, "duplicates").casefold()
     sidecar_names = {name.casefold() for name in sidecar_dir_names(config)}
     legacy_names = {name.casefold() for name in legacy_container_names(config)}
     legacy_targets = legacy_container_targets(config)
@@ -713,6 +718,11 @@ def index_trees(roots, config: dict, reporter: "_Reporter",
                 if entry.name.casefold() in legacy_names:
                     index.legacy_containers.append(
                         (path, legacy_targets_folded.get(entry.name.casefold())))
+                if entry.name.casefold() == parking_name:
+                    # S7: what is in here already lost a name collision and
+                    # was dealt with. Walking in would re-offer those files as
+                    # subjects and then report them as orphans.
+                    continue
                 if entry.name == EMPTY_SUBFOLDERS_FOLDER:
                     # H1/H5: a parking area is an archive of hollow folders,
                     # not a source tree, wherever it sits. Parked days must

@@ -13,6 +13,7 @@ from enum import Enum
 from pathlib import Path
 
 from src.utils.checksums import file_md5  # noqa: F401  (re-export)
+from src.utils.dimensions import is_downscaled
 from src.utils.stage_banner import \
     announce_to_console, \
     format_end, \
@@ -49,6 +50,11 @@ class CollisionDecision(str, Enum):
     RENAME_CANDIDATE = "rename_candidate"
     PROMPT = "prompt"
     DISCARD_DUPLICATE = "discard_duplicate"
+    # Not a collision after all: two exposures inside one second (F9). Never
+    # reached by NameCollisionResolver on its own -- pipeline_stages.siblings
+    # settles the provable case before the resolver is asked, and a person
+    # answering the collision prompt settles the case EXIF cannot prove.
+    SIBLINGS = "siblings"
 
 
 class PipelineMode(str, Enum):
@@ -168,6 +174,7 @@ def default_config() -> dict:
             "significantly_smaller_ratio": DEFAULT_COLLISION_THRESHOLD,
             "duplicate_suffix": "_DUPE",
             "low_res_suffix": "_LOWRES",
+            "differing_suffix": "_DIFFERS",
         },
         # A capture at or before this time belongs to the previous day's folder
         # (ARCHIVE_STANDARD.md N7) -- a night that runs past midnight is one
@@ -1018,12 +1025,30 @@ class SafetyValidationStage(PipelineStage):
 
 
 class NameCollisionResolver:
+    """Which of two files claiming one name keeps it, and what the other is called.
+
+    The three F4 suffixes are not interchangeable and this class is where the
+    difference is decided. ``_DUPE`` is a claim of **byte-identity** — the loser
+    adds nothing, and the checksum in its name is the proof. A file whose bytes
+    differ is never a duplicate however alike the two look, so it takes
+    ``_DIFFERS`` (a question for a person) or ``_LOWRES`` (a smaller rendering
+    of the same shot).
+
+    Naming a byte-different loser ``_DUPE`` was PS-10: two exposures a second
+    apart were filed as copies of each other, and the hash on one of them said
+    nothing about the other. Whether such a pair is two exposures at all is not
+    decided here — ``pipeline_stages.siblings`` answers that (F9), before a
+    collision that turns out to be no collision ever reaches this class.
+    """
+
     def __init__(self, threshold: float = DEFAULT_COLLISION_THRESHOLD,
                  duplicate_suffix: str = "_DUPE",
-                 low_res_suffix: str = "_LOWRES"):
+                 low_res_suffix: str = "_LOWRES",
+                 differing_suffix: str = "_DIFFERS"):
         self.threshold = threshold
         self.duplicate_suffix = duplicate_suffix
         self.low_res_suffix = low_res_suffix
+        self.differing_suffix = differing_suffix
 
     @classmethod
     def from_context(cls, context: PipelineContext) -> "NameCollisionResolver":
@@ -1032,10 +1057,13 @@ class NameCollisionResolver:
             threshold=collision.get("significantly_smaller_ratio", DEFAULT_COLLISION_THRESHOLD),
             duplicate_suffix=collision.get("duplicate_suffix", "_DUPE"),
             low_res_suffix=collision.get("low_res_suffix", "_LOWRES"),
+            differing_suffix=collision.get("differing_suffix", "_DIFFERS"),
         )
 
     def resolve(self, existing: str | Path, candidate: str | Path,
-                context: PipelineContext | None = None, stage_id: str | None = None) -> CollisionResult:
+                context: PipelineContext | None = None, stage_id: str | None = None,
+                existing_dimensions: tuple[int, int] | None = None,
+                candidate_dimensions: tuple[int, int] | None = None) -> CollisionResult:
         existing = Path(existing)
         candidate = Path(candidate)
         existing_md5 = file_md5(existing) if existing.exists() else None
@@ -1054,28 +1082,54 @@ class NameCollisionResolver:
         existing_stat = existing.stat()
         candidate_stat = candidate.stat()
 
+        # "_LOWRES" is a claim about **resolution**, and only the pixel count
+        # can support it. The byte ratio is kept as a first filter -- a
+        # downscale is always much lighter -- but it decides nothing on its
+        # own: two exposures of one scene can differ by more than half on
+        # compressibility alone at identical dimensions, which is exactly how a
+        # 4000x3000 photograph came to be filed as a low-resolution copy of a
+        # different 4000x3000 photograph (PS-10). Equal or unknown dimensions
+        # are never a downscale, so such a pair falls through to the rules
+        # below and ends up a question rather than a false answer.
         smaller, larger = (
             (existing, candidate)
             if existing_stat.st_size < candidate_stat.st_size
             else (candidate, existing)
         )
+        smaller_dimensions, larger_dimensions = (
+            (existing_dimensions, candidate_dimensions)
+            if smaller == existing
+            else (candidate_dimensions, existing_dimensions)
+        )
         smaller_size = min(existing_stat.st_size, candidate_stat.st_size)
         larger_size = max(existing_stat.st_size, candidate_stat.st_size)
-        if larger_size and smaller_size / larger_size < self.threshold:
+        if (larger_size and smaller_size / larger_size < self.threshold
+                and is_downscaled(larger_dimensions, smaller_dimensions)):
+            # The **smaller** file is the one that carries _LOWRES, whichever
+            # side of the collision it arrived on. Returning RENAME_CANDIDATE
+            # unconditionally put the suffix on the incoming file even when the
+            # incoming file was the full-resolution one, so the archive ended
+            # up with a 7.4 MB original labelled a low-resolution copy of a
+            # 2.0 MB file.
             return CollisionResult(
-                decision=CollisionDecision.RENAME_CANDIDATE,
+                decision=(CollisionDecision.RENAME_CANDIDATE if smaller == candidate
+                          else CollisionDecision.KEEP_CANDIDATE),
                 original=larger,
                 duplicate=smaller,
                 target_path=self._duplicate_path(smaller, self.low_res_suffix),
                 reason="significantly-smaller",
             )
 
+        # Past the identical-MD5 branch above, the two files provably differ.
+        # Whichever loses the name is therefore a ``_DIFFERS``, never a
+        # ``_DUPE``: it holds bytes the winner does not, and only a person can
+        # say which was wanted (F4).
         if existing_stat.st_mtime <= candidate_stat.st_mtime and existing_stat.st_size >= candidate_stat.st_size:
             return CollisionResult(
                 decision=CollisionDecision.RENAME_CANDIDATE,
                 original=existing,
                 duplicate=candidate,
-                target_path=self._duplicate_path(candidate, self.duplicate_suffix),
+                target_path=self._duplicate_path(candidate, self.differing_suffix),
                 reason="existing-older-larger",
             )
 
@@ -1084,7 +1138,7 @@ class NameCollisionResolver:
                 decision=CollisionDecision.KEEP_CANDIDATE,
                 original=candidate,
                 duplicate=existing,
-                target_path=self._duplicate_path(existing, self.duplicate_suffix),
+                target_path=self._duplicate_path(existing, self.differing_suffix),
                 reason="candidate-older-larger",
             )
 

@@ -144,6 +144,10 @@ function openPrompt(prompt) {
       ["rename_candidate", "Rename candidate"],
       ["keep_existing", "Keep existing"],
       ["keep_candidate", "Keep candidate"],
+      // Neither is a loser: two exposures inside one second (F9). Offered
+      // because no camera here recorded a sub-second, which is the only thing
+      // that could have settled it without asking.
+      ["siblings", "Different shots"],
       ["cancel", "Cancel run"],
     ]);
   } else if (prompt.prompt_type === "raw_conversion") {

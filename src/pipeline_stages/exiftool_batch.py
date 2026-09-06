@@ -4,11 +4,13 @@ from pathlib import Path
 from src.core import \
     PipelineContext, \
     PipelineStage, \
+    project_root, \
     safe_delete
 from src.pipeline_stages.exiftool_sidecars import \
     MAX_COMMAND_CHARS, \
     WRITE_FORMAT, \
-    chunk_targets
+    chunk_targets, \
+    exiftool_command
 
 
 class ExiftoolBatchStage(PipelineStage):
@@ -21,7 +23,7 @@ class ExiftoolBatchStage(PipelineStage):
 
     def execute(self, context: PipelineContext) -> PipelineContext:
         unsorted = Path(context.config["paths"]["unsorted_folder"])
-        exiftool = context.config.get("external_tools", {}).get("exiftool", "exiftool")
+        exiftool = exiftool_command(context.config, project_root())
         if not unsorted.exists():
             context.log("ExifTool batch skipped: unsorted folder does not exist")
             return context

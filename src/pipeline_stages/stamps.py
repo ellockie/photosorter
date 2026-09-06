@@ -95,6 +95,73 @@ def day_prefix(name: str) -> str | None:
     return match.group(1) if match else None
 
 
+# The sub-second a camera recorded, appended to the time half of a *file* stamp
+# (F9). Folders never carry one: N3 dates a folder from its earliest file, and
+# a fraction of a second is not a fact about an event.
+#
+#   2026-08-21_(Fri)__20.43.52.633__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg
+#
+# Written only to separate two shots that landed in the same second (F9), never
+# by default. Two reasons it is not on every name: the second-precision form is
+# the convention the screenshot grouper shares, and a stamp is the archive's
+# join key (F1) -- a value written everywhere is a value every existing name
+# would have to be rewritten to carry.
+#
+# The join key survives it. ``STAMP_RE`` stops at the seconds and the fraction
+# is left as trailing text, so ``stamp_keys`` and ``leading_stamp_key`` answer
+# the same ``YYYYMMDDHHMMSS`` for a file with a sub-second as for one without:
+# a sidecar or RAW that carries only the second still finds its subject.
+SUBSECOND_SEPARATOR = "."
+SUBSECOND_PATTERN = r"\d{1,6}"
+
+# The leading stamp of a *file*, with the optional fraction consumed rather
+# than left behind -- which is what makes ``apply_subsecond`` replace one
+# instead of appending a second.
+LEADING_FILE_STAMP_RE = re.compile(
+    rf"^{STAMP_PATTERN}(?:{re.escape(SUBSECOND_SEPARATOR)}({SUBSECOND_PATTERN}))?"
+)
+
+
+def normalise_subsecond(value: str | int | None) -> str | None:
+    """The digits of a ``SubSecTimeOriginal``, or None when it says nothing.
+
+    ExifTool hands back the fraction as the camera wrote it -- "633", "43",
+    sometimes padded or trailed by whitespace. The digits are kept exactly as
+    recorded rather than scaled to a fixed width: the value's only job is to
+    differ from the neighbouring shot's, and rescaling it would be inventing
+    precision the camera did not claim (V4). A non-numeric or empty value is
+    no value at all.
+    """
+    if value is None:
+        return None
+    digits = str(value).strip()
+    return digits if digits.isdigit() else None
+
+
+def leading_subsecond(name: str) -> str | None:
+    """The fraction a file name's leading stamp carries, or None."""
+    match = LEADING_FILE_STAMP_RE.match(name)
+    return match.group(1) if match else None
+
+
+def apply_subsecond(name: str, subsecond: str | int | None) -> str:
+    """``name`` with ``subsecond`` on its leading stamp, replacing any already there.
+
+    A name whose leading stamp does not parse is returned untouched: nothing
+    here may invent the timestamp F1 calls the archive's join key.
+    """
+    digits = normalise_subsecond(subsecond)
+    match = LEADING_FILE_STAMP_RE.match(name)
+    if match is None:
+        return name
+    stamp = name[:match.end()]
+    if match.group(1):
+        stamp = stamp[:-(len(match.group(1)) + len(SUBSECOND_SEPARATOR))]
+    if digits:
+        stamp += SUBSECOND_SEPARATOR + digits
+    return stamp + name[match.end():]
+
+
 # The end of a group's span (C6-C9). Two shapes, and which one is written is
 # decided by one question -- does the span cross a day?
 #

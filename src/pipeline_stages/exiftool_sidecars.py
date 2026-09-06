@@ -14,6 +14,48 @@ MAX_COMMAND_CHARS = 24000
 SIDECAR_SUFFIX = "._exif"
 WRITE_FORMAT = "%d%f.%e" + SIDECAR_SUFFIX
 
+# The ExifTool this project runs, decided in one place (T8) because five
+# callers were each spelling the fallback ``"exiftool"`` and so each depending
+# on whatever the OS search order happened to hand them.
+#
+# **Which binary answers to the bare name is not a detail.** Windows searches
+# the working directory before PATH, so a run started from the repo root got
+# the bundled copy and a run started anywhere else got whatever is on PATH --
+# on this machine a 2015 build that cannot open a path longer than 260
+# characters. That build does not fail loudly: it reports "File not found" for
+# a file that is plainly there, so the sidecar is simply never written, and a
+# shot with no sidecar has no ``SubSecTimeOriginal`` for F9 to read. Siblings
+# would quietly stop being detected in exactly the deep folders -- long group
+# and event names -- where bursts are most likely to sit.
+#
+# So the bundled binary is preferred over the bare name, and an explicit path
+# in config still wins over both: a person naming a specific ExifTool means it.
+BUNDLED_EXIFTOOL = "exiftool.exe"
+DEFAULT_EXIFTOOL = "exiftool"
+
+
+def bundled_exiftool(project_root: str | Path) -> Path:
+    """Where this repo keeps its own ExifTool.
+
+    It is the small launcher, not the standalone build, so it reads its Perl
+    from the ``exiftool_files`` folder beside it -- the pair travels together
+    or neither works.
+    """
+    return Path(project_root) / BUNDLED_EXIFTOOL
+
+
+def exiftool_command(config: dict, project_root: str | Path) -> str:
+    """The ExifTool to invoke: an explicit one from config, else the bundled one.
+
+    Falls back to the bare name only when the repo has no bundled copy, which
+    keeps the helpers usable outside a checkout.
+    """
+    configured = (config.get("external_tools") or {}).get("exiftool")
+    if configured and configured != DEFAULT_EXIFTOOL:
+        return configured           # a person named one; that is the answer
+    bundled = bundled_exiftool(project_root)
+    return str(bundled) if bundled.is_file() else DEFAULT_EXIFTOOL
+
 
 def chunk_targets(targets: list[Path],
                   budget: int = MAX_COMMAND_CHARS) -> list[list[str]]:

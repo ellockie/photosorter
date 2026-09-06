@@ -177,11 +177,37 @@ def test_collision_prompt_answer_renames_the_file_instead_of_skipping_it(tmp_pat
 
     assert answered, "the stage never blocked on the collision prompt"
     # keep_candidate: the newcomer takes the contested name, the sitting file
-    # is demoted with the _DUPE grammar.
+    # is demoted. The two hold different bytes, so it is a _DIFFERS and never a
+    # _DUPE, which would claim they are the same file (F4, PS-10).
     assert context.counters["renamed_assets"] == 1
     assert context.assets[0].primary_path.parent == inbox
-    assert "_DUPE_" not in context.assets[0].primary_path.name
-    assert any("_DUPE_" in path.name for path in inbox.iterdir())
+    assert "_DIFFERS_" not in context.assets[0].primary_path.name
+    assert any("_DIFFERS_" in path.name for path in inbox.iterdir())
+    assert not any("_DUPE_" in path.name for path in inbox.iterdir())
+
+
+def test_collision_prompt_answer_can_call_the_pair_two_different_shots(tmp_path):
+    # No camera here recorded a sub-second, so F9a cannot prove a burst and the
+    # pair reaches a person. "siblings" is the answer that says it is one: both
+    # files stay, and the arrival is numbered from the name rather than being
+    # marked a loser of any kind.
+    context = _collision_context(tmp_path)
+    inbox = Path(context.config["paths"]["unsorted_folder"])
+    answered = []
+    thread = answer_after(context, answered, {"action": "siblings"}, 0)
+
+    RenameAndSortStage().execute(context)
+    thread.join()
+
+    assert answered, "the stage never blocked on the collision prompt"
+    assert context.counters["renamed_assets"] == 1
+    names = sorted(path.name for path in inbox.iterdir())
+    assert names == [
+        "2026-05-14_(Thu)__10.30.00__f2.8__T1_250__L50.0__I100__6D.jpg",
+        "2026-05-14_(Thu)__10.30.00__f2.8__T1_250__L50.0__I100__6D_2.jpg",
+    ]
+    assert context.assets[0].primary_path.name == names[1]
+    assert not any("_DUPE_" in name or "_DIFFERS_" in name for name in names)
 
 
 def test_collision_prompt_answer_can_leave_the_file_alone(tmp_path):

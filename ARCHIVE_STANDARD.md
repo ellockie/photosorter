@@ -29,7 +29,7 @@ machine-readable form of everything above it — parse that, not the prose.
 
 ```text
 <ROOT>/<YYYY>/<NN>. <Month>/<dated folder>[/<dated folder>…][/<__SUBFOLDER>]
-<ROOT>/<YYYY>/__DUPLICATES                    <- year-level subfolder (S7)
+<ROOT>/<YYYY>/__DUPLICATES                    <- legacy year-level pool (S7b), read only
 <ROOT>/<YYYY>/__LOGS                          <- year-level subfolder (§0.3), never walked
 ```
 
@@ -40,7 +40,7 @@ machine-readable form of everything above it — parse that, not the prose.
 | P3 | Month folder is `NN. Month` — zero-padded number, dot, space, **fixed English** month name (`01. January` … `12. December`). Never locale-derived. |
 | P4 | Below a month folder, every directory MUST be a dated folder (§2) — leaf or group (§3) — an allowed subfolder (§4), or a parking area (§4.1). There is no fourth kind. |
 | P5 | The year and month a folder sits under MUST match the date in its own name, after the N7 day shift. |
-| P6 | Directly under a year folder sit its **month folders**, optionally **one `__DUPLICATES`** (S7), and optionally **one `__LOGS`** (§0.3). There is no fourth kind. A tool MUST NOT read either as a month folder, and MUST NOT walk into either looking for dated folders: what is in `__DUPLICATES` lost a name collision and is waiting for a person, not for the next pass, and `__LOGS` is tool bookkeeping no rule governs (J2). |
+| P6 | Directly under a year folder sit its **month folders**, optionally **one `__DUPLICATES`** (S7b — the legacy pool, still read), and optionally **one `__LOGS`** (§0.3). There is no fourth kind. A tool MUST NOT read either as a month folder, and MUST NOT walk into either looking for dated folders: what is in `__DUPLICATES` lost a name collision and is waiting for a person, not for the next pass, and `__LOGS` is tool bookkeeping no rule governs (J2). |
 
 ### §0 Out of scope
 
@@ -314,7 +314,7 @@ Inside a dated folder, exactly these are permitted. All optional.
 | `__TO_SHARE` | Queued for sharing — not yet sent | hand |
 | `__3D` | Stereo / 3D captures (MPO etc.) | hand |
 | `___OTHER` | Fits nowhere else — **three** leading underscores | hand |
-| `__DUPLICATES` | Burst discards, unused brackets, accidental / low-res duplicates. Also the one subfolder permitted at the **year** level, where collision losers go — S7 | tool |
+| `__DUPLICATES` | Burst discards, unused brackets, accidental duplicates, and the collision losers a tool parks — S7. A year-level one is still **read** (S7b) but no longer written | tool |
 | `__EDITED` | Non-destructive edits and masters — `.xmp`, `.psd`, high-bit `.tif` | tool |
 | `__EXIF` | `._exif` sidecars, JSON camera logs | tool |
 | `__EXPORTED` | Full-resolution exports for print/archive | tool |
@@ -340,7 +340,9 @@ Inside a dated folder, exactly these are permitted. All optional.
 | S4 | A tool MUST read these names from §8, not restate them as literals. |
 | S5 | **No video folder in the ordinary case.** A datable video is a representative at the top level (V1). `__VIDEOS` and `__EXTRACTED_VIDEOS` were an earlier arrangement: they are **read** — recognised case-insensitively as taxonomy folders so an existing Windows archive is not reported as malformed and its companions can still be reunited — and **never written**, the same read-old/write-new rule N5 applies to timestamps. The restructure migration drains `__VIDEOS` per V12; `__EXTRACTED_VIDEOS` remains only recognised. |
 | S6 | `__PROCESSED` inside a dated folder is the **resting place a person chose** for derivatives the root `__PROCESSED` held (§0.1). It is recognised and preserved and, being *hand* (S3), never written to: D3 still routes what a tool can key automatically into `__EDITED`. Its files travel with their subject like any other subfolder's when an event is split. |
-| S7 | **`__DUPLICATES` sits at the year level too** — `<YYYY>\__DUPLICATES`, beside the month folders (P6) — and that is where a tool parks a file that lost a name collision (F4, L3, and the placement rules of §6). One folder per year rather than one per event, because a collision loser is something a person has to look at and decide about, and a year's worth of them scattered across four hundred event folders is a review nobody performs. The in-event `__DUPLICATES` keeps the job the table describes — burst discards and unused brackets, put there deliberately, belonging to that event. Nothing migrates between the two: they answer different questions, and a tool MUST NOT drain one into the other. |
+| S7 | **A collision loser is parked in the `__DUPLICATES` of the dated folder its subject sits in** (F4, L3, and the placement rules of §6) — the timestamped event folder, never a group and never the year. A loser parked beside the file whose name it lost stays with its own event: it travels when that event is moved, renamed or regrouped; it is reviewed alongside the shots it belongs to; and it survives the year tree being reorganised around it. It shares the folder with what the table describes — burst discards and unused brackets a person put there — because both are the same thing to a reviewer: a file from this event that is not the representative. |
+| S7a | **A group never holds one.** C3 allows a group no files but geodata, so a tool resolving where to park climbs past a group to the dated folder below it. |
+| S7b | **`<YYYY>\__DUPLICATES` is read, never written.** Earlier versions pooled a whole year's losers there, and an existing archive still has one; it is recognised as a legal year child (P6) and MUST NOT be reported as malformed. Nothing drains it automatically — where each of those files belongs is a decision for a person (L5). The pooling was reversed because it optimised the wrong thing: counting a year's losers got easier, and putting any one of them back got impossible, since two folder levels from its event nothing but the file's own name says where it came from. |
 
 ### Implemented
 
@@ -350,12 +352,14 @@ step with it; `LEGACY_TAXONOMY` in the same module carries the two retired names
 for S5. Videos are routed to the top level by `folder_sorting.py`.
 
 S7 is implemented: `duplicates_folder` in `tools/restructure_archive.py` answers
-"where does a collision loser go" with the `__DUPLICATES` of the **subject's own
-year tree**, so a run spanning several years parks each year's losers under that
-year rather than pooling them. Both callers that can meet a collision take it as
-a parameter — companion placement (§6) and the legacy-container migration (L3) —
-so there is one answer, not two. The folder is excluded from the next run's
-index, or its contents would be re-reported as orphans forever.
+"where does a collision loser go" with the `__DUPLICATES` of the **dated folder
+the subject sits in**, climbing past a group to the dated leaf (S7a) and falling
+back to the year folder only where there is no dated folder at all — which is
+also where an archive written before this rule already has one (S7b). Both
+callers that can meet a collision take it as a parameter — companion placement
+(§6) and the legacy-container migration (L3) — so there is one answer, not two.
+A `__DUPLICATES` is excluded from the next run's index wherever it sits, or its
+contents would be re-reported as orphans forever.
 
 ### 4.1 Parking areas — `H`
 
@@ -443,12 +447,15 @@ above rather than a note here. They keep the numbers they were asked under, so
 the gaps are real: 4 and 5 below were 4 and 5 in the draft, and 2 and 3 were
 settled in earlier versions and struck then.
 
-- **Q1 — where does a collision loser go?** At the **year** level — S7, P6. What
-  companion placement already writes, admitted into the standard rather than
-  migrated away from. A collision loser is a question for a person, and a
-  year's worth of them in one folder is a review someone can actually sit down
-  and do; the same files one-per-event are a review nobody performs. The
-  in-event `__DUPLICATES` keeps its own, different job.
+- **Q1 — where does a collision loser go?** In the `__DUPLICATES` of its own
+  **dated folder** — S7. *This reverses the v1.0 answer*, which pooled a year's
+  losers at the year level on the reasoning that a single folder is a review
+  somebody can sit down and do. That held only until the first one had to be
+  put back: two levels above its event, nothing but the file's own name says
+  where it came from, and the pooled folder survives no reorganisation of the
+  year around it. Parked beside the file whose name it lost, a loser travels
+  with its event and is reviewed with the shots it belongs to. The year-level
+  folder is kept readable and is never written again (S7b).
 - **Q4 — where does a whole trip's `.gpx` go?** In the group's own
   `__GEOLOCATIONS` — C3a. It is the single exception to "a group holds no
   files", and it is drawn narrowly: geodata only, excluded from the span and
@@ -478,10 +485,12 @@ prompted migrations. Unknown or ambiguous attribution is still reported.
 ## 5. Files — `F`
 
 ```text
-YYYY-MM-DD_(Ddd)__HH.MM.SS[__RAW]__f<ap>__T<exp>__L<focal>__I<iso>__<CAM>[_RAW][_EXT][_EDT].<ext>
+YYYY-MM-DD_(Ddd)__HH.MM.SS[.<sss>][__RAW]__f<ap>__T<exp>__L<focal>__I<iso>__<CAM>[_<n>][_RAW][_EXT][_EDT].<ext>
 
 2026-08-14_(Fri)__15.32.01__f1.7__T1_180__L23.0.eq__I12__SG23U.jpg
 2026-08-14_(Fri)__15.32.01__RAW__f8.0__T1_250__L50__I100__6D.CR2
+2026-08-21_(Fri)__20.43.52.433__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg   two shots in
+2026-08-21_(Fri)__20.43.52.633__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg   one second (F9)
 ```
 
 | ID | Rule |
@@ -491,10 +500,88 @@ YYYY-MM-DD_(Ddd)__HH.MM.SS[__RAW]__f<ap>__T<exp>__L<focal>__I<iso>__<CAM>[_RAW][
 | F3 | Semantic suffixes announce how the shot was taken and what else exists, in this fixed order: `_HAS_RAW` **or** `_FROM_RAW`, then `_HAS_EDIT`. Extension follows all of them. `_HAS_*` names a sibling elsewhere; `_FROM_*` names this file's own provenance. |
 | F3a | The two RAW suffixes are **mutually exclusive**: `_FROM_RAW` already says a RAW exists, so it never carries `_HAS_RAW` as well. |
 | F3b | Earlier names `_RAW` (has raw), `_EXT` (extracted) and `_EDT` (has edit) MUST still be **read** and MUST NOT be newly written — the N5 rule again. `_RAW` was the ambiguous one: on a camera JPEG it read as *this is a RAW*, the sense `RAW__` carries inside a filename, when it meant *a RAW exists*. |
-| F4 | Collision suffixes: `_DUPE_<md5>_<n>`, `_DIFFERS_<md5>_<n>`, `_LOWRES`. `_DUPE` is a byte-identical loser; `_DIFFERS` is one that claimed the same name with **different** bytes, which is a defect a person has to settle. Both are written by companion placement (§6), and by the legacy-container migration when it meets the same collision (L3). The loser is parked in the **year-level** `__DUPLICATES` (S7), never beside the file whose name it lost. |
+| F4 | Collision suffixes: `_DUPE_<md5>_<n>`, `_DIFFERS_<md5>_<n>`, `_LOWRES_<md5>_<n>`. `_DUPE` is a byte-identical loser; `_DIFFERS` is one that claimed the same name with **different** bytes, which is a defect a person has to settle; `_LOWRES` is a smaller *rendering* of the shot that kept the name (F10). All three are written by companion placement (§6), by the rename stage, and by the legacy-container migration when it meets the same collision (L3). The loser is parked in the `__DUPLICATES` of its own **dated folder** (S7). |
+| F4a | **`_DUPE` is a claim about the other file, and it is only true when the two match.** A loser whose bytes differ is a `_DIFFERS` or a `_LOWRES`, never a `_DUPE` — the checksum written into one name is evidence about a pair, and naming a byte-different file a duplicate makes the archive assert something it can disprove. Two files that share a name are not even a collision when they are two exposures: that is F9, and it is settled before any of these suffixes is considered. |
+| F4b | **`_LOWRES` is a claim about resolution, and only the pixel count can support it** — F10. A file that is merely lighter is not a lower resolution of anything. |
 | F5 | **One representative per shot at the top level, at most.** Every other version of the shot goes in a subfolder. |
 | F6 | A camera-produced image is the preferred representative. For a RAW-only shot one selected extraction may stand in; the others go to `__EXTRACTED`. |
 | F7 | RAW originals, sidecars, edits, exports, resizes and duplicates MUST NOT sit at the top level. *Why:* the top level is what a grouper GUI shows and what `i`/`v` count. A file in a subfolder is a file the reviewer never sees — which is what `s` exists to announce. |
+
+### 5.1a Two shots in one second — `F9`
+
+A name built from the second, the camera and the four exposure settings gives a
+burst, a bracket, or two taps of the shutter inside one second **one name** for
+two photographs. That is not a collision — both files are representatives (F5),
+both belong at the top level, and neither is a defect — so it is not settled
+with a collision suffix. It is settled by making the stamp say what the camera
+already recorded: which fraction of the second each shutter opened in.
+
+The fraction is written **only where a second holds more than one shot**. It is
+not a finer timestamp the archive keeps as a matter of course; it is the thing
+that tells siblings apart, and on a lone shot there is nothing to tell apart. A
+second that holds one file therefore carries the plain form, and one that comes
+to hold one again has the fraction taken back off.
+
+```text
+2026-08-21_(Fri)__20.43.52.433__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg
+2026-08-21_(Fri)__20.43.52.633__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg
+```
+
+| ID | Rule |
+| --- | --- |
+| F9 | **Siblings are separated by the sub-second the camera recorded**, written onto the time half of the stamp as `HH.MM.SS.<sss>` — exactly the digits `SubSecTimeOriginal` holds. It beats a counter on two counts: it is **true** (V4 — the number came off the camera, and no other number could be), and it **sorts into capture order**, which a counter assigned by discovery order does not. |
+| F9a | **Only two differing fractions prove two exposures.** Both files record a `SubSecTimeOriginal` and the two differ — that is the whole test, and it outranks the `_LOWRES` size heuristic it is applied ahead of. Where **neither** records one, a burst and one photo saved twice are indistinguishable, and the pair is reported for a person rather than guessed at either way (V4, F8d, L5). Where **one** records one and the other does not, there is nothing to compare. Where both record the **same** fraction, it is one instant saved twice — F4's question. |
+| F9b | **A person may answer what F9a cannot prove.** Told that a reported pair is two different shots, the tool separates them with an ordinal `_<n>` written after the camera symbol and any author marker (F8), before the representative suffixes (F3). Numbering starts at **2**, so the ordinary case — one shot in a second — is never renumbered into `_1`, and the file already holding the name keeps it. |
+| F9c | **A fraction is written where, and only where, a second holds more than one shot.** It exists to tell siblings apart, so on a lone shot it separates nothing and MUST NOT be written; on a shot that has one, every member of that second states the fraction its own camera recorded. A name that carries one where the second turns out to hold a single shot is **corrected** — the fraction comes off — exactly as N3 corrects a folder time that no longer matches its contents. |
+| F9c-i | **Which second is crowded is a fact about a folder, not about a file**, so it is decided by whatever can see the whole second's worth of files at once — the rename stage over its batch and the folder it writes into, the fixing tool over an event folder. A name builder handed one file cannot decide it and MUST NOT try. |
+| F9c-ii | It follows that a tool looking for the file already holding a shot's name MUST look for **both forms**, fractioned and plain: a second's membership changes as files arrive, so the same shot can be filed under either. Missing that files a re-ingested copy of an archived photo a second time, under a name nothing in the folder answers to. |
+| F9c-iii | **Only a fraction EXIF actually records may be written** (`SubSecTimeOriginal`, F9). None is derived from arrival order, file times, or the neighbouring sibling's — V4's rule that a capture time is never invented applies to the fraction exactly as it applies to the second. A camera that recorded none leaves the name plain, and the pair is settled by F4 or by a person (F9b). |
+| F9d | **The join key survives the fraction.** A stamp reader stops at the seconds, so a file carrying `.633` answers to the same `YYYYMMDDHHMMSS` as one without — which is what lets a sidecar or a RAW that records only the second still find its subject (F1, X1). |
+| F9e | **Folders never carry a fraction.** N3 dates a folder from its earliest file, and a fraction of a second is not a fact about an event. §2's prefix grammar is unchanged. |
+
+### 5.1b Lower resolution, not merely lighter — `F10`
+
+`_LOWRES` says one file is a **downscaled rendering** of the file that kept the
+name. That is a claim about pixels, and it was reached from bytes: anything
+under half the weight of what it collided with was called low-resolution. Two
+exposures of one scene differ by far more than half on JPEG compressibility
+alone — a plain sky against a crowded railway carriage — so the archive filed
+a photograph as a low-resolution copy of a *different* photograph, both
+4000x3000.
+
+| ID | Rule |
+| --- | --- |
+| F10 | **`_LOWRES` requires strictly smaller pixel dimensions.** Neither axis larger, at least one smaller. The byte ratio stays as a first filter — a downscale is always much lighter — but it decides nothing on its own. |
+| F10a | **Equal dimensions are never a downscale**, whatever the file sizes say. The same picture re-saved at a lower quality is not a lower resolution of anything, and two exposures at one resolution are not versions of each other at all. |
+| F10b | **Unknown is not smaller.** A file whose dimensions cannot be read is not demoted on a guess; it stays F4's question for a person. One axis larger and the other smaller is a **crop or a rotation**, not a downscale, and which it is is not decidable by a tool. |
+| F10c | **The smaller file carries the suffix**, whichever side of the collision it arrived on. Naming the *incoming* file regardless is how a 7.4 MB original came to be labelled a low-resolution copy of a 2.0 MB one. |
+| F10d | **A downscale is a derivative, not a representative**: it lives in `__RESIZED` (§4), never at the top level, and its sidecar goes to that folder's own `__EXIF` (X10). This is F7 applied to the one case that used to escape it. |
+| F10e | Dimensions are read from the subject's sidecar, and the **group heading decides which pair is the picture's**: a JPEG carries its embedded thumbnail's dimensions in `IFD1`, and reading those would call a full-resolution file a downscale of itself. The thumbnail IFDs are refused; `Composite`, `File` and the EXIF groups are consulted in that order. |
+
+**Implemented** — `src/utils/dimensions.py` is the one definition, in `utils`
+rather than a stage because the collision resolver in `core` needs the same
+answer and cannot import a stage. Step 8 of `tools/restructure_archive.py`
+repairs a `_LOWRES` that the pixels disprove — renaming it `_DIFFERS`, which is
+all that can be said once resolution is ruled out — and moves a genuine one
+into `__RESIZED`.
+
+**Implemented** — `siblings.family_counts` gathers a second's files under their
+shared plain name and is what answers "is this second crowded?" (F9c-i);
+`RenameAndSortStage` asks it once per run, over its whole batch and the folder
+it writes into, before anything moves. `stamps.apply_subsecond` is the one place
+the form is written or removed, and `siblings.occupant_names` the one place both
+forms are looked for (F9c-ii). Step 8 of `tools/restructure_archive.py` strips a
+fraction that separates nothing. `src/pipeline_stages/siblings.py` is the one
+definition of F9a/F9b. Both the rename stage and
+folder sorting settle a sibling pair before the collision resolver is consulted,
+and step 8 of `tools/restructure_archive.py` repairs pairs an earlier version
+mismarked (PS-10), under `--apply` and after a prompt. That prompt is asked
+**once per run**, which is once per year tree — `--year ALL` is one `Run` each
+— rather than once per pair. It is the same judgement the network confirmation
+one level up already makes: a question met seventy times in a row is one
+somebody stops reading, and a confirmation trained out of a person protects
+nothing. Every pair is still reported in full, move by move, before it is
+asked.
 
 ### 5.2 Author markers — `F8`
 
@@ -785,8 +872,8 @@ moving a group whose start has crossed into another month folder (C12). One
 prompt per group in both cases; a refusal is reported, not retried. It also
 recognises the two placements v1.0 settled and **creates neither**: a group's
 `__GEOLOCATIONS` (C3a), because which tracks span a whole group is a reading of
-the tracks, and the year-level `__DUPLICATES` (S7), which belongs to the
-placement pass that parks collision losers in it.
+the tracks, and a `__DUPLICATES` (S7), which belongs to the placement pass that
+parks collision losers in it.
 
 **Implementation and use.** `tools/archive_compliance.py` implements the
 inspection and migration plans; `tools/restructure_archive.py` supplies the
@@ -1010,7 +1097,7 @@ files:
     to_rename: "__TO_RENAME__"       # V8; a prefix, anchor it to ^
     author: "@"                       # F8; sigil opening the author token
     estimated_stamp_reserved: "__EST__"   # V5: reserved, nothing writes it today
-  grammar: "<stamp>[__RAW]__f<ap>__T<exp>__L<focal>__I<iso>__<CAM>[__@<AUTHOR>][_HAS_RAW|_FROM_RAW][_HAS_EDIT].<ext>"
+  grammar: "<stamp>[.<sss>][__RAW]__f<ap>__T<exp>__L<focal>__I<iso>__<CAM>[__@<AUTHOR>][_<n>][_HAS_RAW|_FROM_RAW][_HAS_EDIT].<ext>"
   raw_marker: "RAW__"
   raw_extension_case: upper
   lossy_extension_case: lower
@@ -1025,10 +1112,27 @@ files:
   representative_suffixes_exclusive: ["_HAS_RAW", "_FROM_RAW"]      # F3a
   legacy_representative_suffixes: ["_RAW", "_EXT", "_EDT"]          # F3b: read, never written
   collision_suffixes:
-    duplicate: "_DUPE_<md5>_<n>"
+    duplicate: "_DUPE_<md5>_<n>"      # F4a: byte-identical ONLY
     differing: "_DIFFERS_<md5>_<n>"
     low_resolution: "_LOWRES"
-    parked_in: "<YYYY>/__DUPLICATES"  # S7 - one per year tree, not per event
+    parked_in: "<dated folder>/__DUPLICATES"   # S7 - the subject's own event
+    parked_in_legacy: "<YYYY>/__DUPLICATES"    # S7b - read, never written
+    low_resolution_requires: strictly_smaller_pixel_dimensions   # F10
+    low_resolution_placement: "__RESIZED"      # F10d - never the top level
+  siblings:                           # F9 - two exposures inside one second
+    evidence: exif_subsectimeoriginal_present_on_both_and_differing   # F9a
+    subsecond_token: ".<sss>"         # on the time half of the stamp
+    subsecond_source: "SubSecTimeOriginal"     # never SubSecTime/Digitized
+    ordinal_token: "_<n>"             # F9b - only when a person says so
+    ordinal_position: after_author_marker_before_representative_suffixes
+    ordinal_starts_at: 2              # the first sibling keeps the bare name
+    written_when: second_holds_more_than_one_shot    # F9c
+    removed_when: second_holds_one_shot              # F9c
+    decided_by: folder_not_file                      # F9c-i
+    collision_lookup_tries_both_forms: true          # F9c-ii
+    source: exif_only                                # F9c-iii - never derived
+    folders_carry_one: false          # F9e
+    join_key_unchanged: true          # F9d - readers stop at the seconds
   top_level: representatives_only
   max_representatives_per_shot: 1
   absent_field_placeholders:          # V2: written, never omitted

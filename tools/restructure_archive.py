@@ -437,6 +437,14 @@ parking = importlib.import_module("src.pipeline_stages.parking")
 exif_sidecars = importlib.import_module("src.pipeline_stages.exiftool_sidecars")
 # The read-old/write-new migration for the legacy video container (S5/V1/V8).
 legacy_videos = importlib.import_module("src.pipeline_stages.legacy_videos")
+# Two shots inside one second, and what tells them from one shot saved twice
+# (F9). The same module the pipeline names them with, so a name this tool
+# repairs and a name the pipeline writes cannot drift apart (T8).
+siblings = importlib.import_module("src.pipeline_stages.siblings")
+# Pixel dimensions, and what makes one file a smaller rendering of
+# another rather than merely a lighter one (F10). Shared with the
+# collision resolver, which is why it is a src/utils leaf.
+dimensions = importlib.import_module("src.utils.dimensions")
 
 # The grouping marker's grammar, already loaded by the canonicaliser from
 # src/pipeline_stages/grouping_names.py.
@@ -1502,7 +1510,7 @@ def generate_missing_raw_sidecars(run, placement, config, move):
 
     generated = exif_sidecars.generate_adjacent_sidecars(
         raw_missing,
-        config.get("external_tools", {}).get("exiftool", "exiftool"),
+        exif_sidecars.exiftool_command(config, REPO_ROOT),
         log=log,
     )
     completed = set()
@@ -1775,19 +1783,36 @@ def tree_of(folder, run):
 
 
 def duplicates_folder(folder, run, config):
-    r"""Where a companion that lost a name collision is parked.
+    r"""Where a companion that lost a name collision is parked (S7).
 
-    One per year tree -- ``<year>\__DUPLICATES`` -- so a whole year's collision
-    losers land in a single place to review, rather than being scattered one
-    per event folder. Chosen from the *subject's* tree, so a run over several
-    years parks each year's losers under that year instead of pooling them.
+    **Inside the dated folder the subject sits in** -- the timestamped event
+    folder, never a group and never the year. A loser parked beside the file
+    whose name it lost stays with its own event: it travels when that event is
+    moved, renamed or regrouped, it is reviewed with the shots it belongs to,
+    and it is still there after the year tree it came from is reorganised. The
+    earlier arrangement pooled a whole year's losers at ``<year>\__DUPLICATES``,
+    which made them easy to count and impossible to put back -- once a file is
+    two folder levels from its event, only its name says where it came from.
 
-    This is a deliberate extension of section 4, which puts ``__DUPLICATES``
-    inside a dated folder; see the tool's module docstring.
+    A **group** never holds one (C3: a group holds no files but geodata), so
+    the walk climbs past a group to the dated leaf below it and, failing that,
+    keeps the year-level folder as a last resort -- which is also where an
+    archive written before this rule already has one.
 
     The name itself is read from the taxonomy, never spelled here (S4).
     """
-    return Path(tree_of(folder, run)) / taxonomy.taxonomy_folder(config, "duplicates")
+    folder = Path(folder)
+    tree = Path(tree_of(folder, run))
+    parking = taxonomy.taxonomy_folder(config, "duplicates")
+    for candidate in (folder, *folder.parents):
+        if not inside(path_key(tree), candidate) and path_key(candidate) != path_key(tree):
+            break
+        if not canonicalise.stamps.day_prefix(candidate.name):
+            continue
+        if canonicalise.grouping.carries_group_marker(candidate.name):
+            continue          # a group parks nothing; keep climbing
+        return candidate / parking
+    return tree / parking
 
 
 def step_reconcile(run, label):
@@ -1852,7 +1877,7 @@ def step_reconcile(run, label):
     # 2 -- drain legacy videos before companion placement indexes subjects.
     video_folders = legacy_videos.legacy_video_folders(folders, config)
     if video_folders:
-        exiftool = config.get("external_tools", {}).get("exiftool", "exiftool")
+        exiftool = exif_sidecars.exiftool_command(config, REPO_ROOT)
 
         def inspect_video(video):
             return exif_sidecars.read_metadata_text(video, exiftool)

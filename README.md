@@ -75,6 +75,68 @@ YYYY-MM-DD_(Thu)_HH.MM.SS__f2.8__T1_250__L50__I100__CAMERA.jpg
 
 RAW files keep uppercase RAW extensions and include the `RAW__` marker. Lossy files use lowercase extensions.
 
+### Two shots in one second
+
+The name states the **second**, so a burst produces two files that agree on
+every token. They are not duplicates, and the pipeline no longer calls them
+one: it separates them with the sub-second the camera recorded, taken from EXIF
+`SubSecTimeOriginal` (F9) — no suffix and no checksum appended.
+
+```text
+2026-08-21_(Fri)__20.43.52.433__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg
+2026-08-21_(Fri)__20.43.52.633__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg
+```
+
+The pair sorts in the order it was shot, and readers of the leading stamp stop
+at the seconds — so a sidecar or RAW carrying only `20.43.52` still finds its
+subject (F1, F9d).
+
+**A fraction is written only where a second holds more than one shot** (F9c). A
+lone shot keeps the plain form, and a name carrying a fraction that separates
+nothing has it stripped — the restructure tool reports and repairs that like
+any other finding. Which second is crowded is a fact about the folder, not the
+file, so it is decided by the stage that can see the whole second's worth of
+files at once: that is also what lets a *third* shot in one second join two
+that already carry fractions, where a plain name collision would see nothing.
+
+Only a fraction EXIF actually records is ever written (F9c-iii). None is
+derived from arrival order or file times — V4's "a capture time is never
+invented" applies to the fraction exactly as to the second. A camera that
+recorded none leaves the name plain.
+
+Where **neither** camera recorded a sub-second, a burst and one photo saved
+twice are indistinguishable, so the pair is put to you as a name collision
+rather than guessed at. Answering **"Different shots"** numbers the arrival
+`…__SG23U_2.jpg`, starting at 2 — the file already holding the name keeps it
+(F9a, F9b).
+
+`tools/restructure_archive.py` step 8 repairs pairs an earlier version marked
+`_DUPE`, renaming both files and their sidecars. It reports under a dry run and
+only writes under `--apply`, after **one confirmation per year** — not one per
+pair. Every pair is listed in full above the prompt; the question itself
+carries the counts, the year, and the first eight pairs. `--year ALL` runs each
+year separately, so it asks once per year.
+
+### Lower resolution, not merely lighter
+
+`_LOWRES` says one file is a **downscaled** version of the one that kept the
+name. That needs pixels, not bytes: two exposures of one scene can differ by
+more than half in file size on JPEG compressibility alone — a plain sky against
+a crowded railway carriage — so a size ratio alone filed one 4000x3000
+photograph as a low-resolution copy of a different 4000x3000 photograph.
+
+A `_LOWRES` is now written only when the dimensions are **strictly smaller**
+(F10): neither axis larger, at least one smaller. Equal dimensions are never a
+downscale; unknown dimensions are not smaller either, so nothing is demoted on
+a guess. The **smaller** file carries the suffix whichever side of the
+collision it arrived on, and a genuine downscale is a derivative — it goes into
+`__RESIZED` with its sidecar, never at the top level beside the shot it is a
+copy of (F7/F10d).
+
+Dimensions come from the subject's sidecar, read group-aware: a JPEG carries
+its embedded thumbnail's size in `IFD1`, and reading that would call a
+full-resolution file a downscale of itself.
+
 Event folders use:
 
 ```text
@@ -769,6 +831,18 @@ The two files are compared by **MD5** rather than one being picked:
 | ------------- | --------------------------------------------------------------------------------------------------------- |
 | **identical** | the incoming copy is redundant — parked as `<name>_DUPE_<md5>_<n>` (F4)                                   |
 | **different** | one is wrong and which is not knowable here — parked as `<name>_DIFFERS_<md5>_<n>` and counted separately |
+
+`_DUPE` is a claim of byte-identity and is written **only** when the two files
+match (F4a). A byte-different loser is a `_DIFFERS` or a `_LOWRES`; two files
+that turn out to be two exposures are neither, and are settled by
+[F9](#two-shots-in-one-second) before any suffix is considered.
+
+Both land in the `__DUPLICATES` of the **dated folder the subject sits in** —
+never a group, and no longer the year (S7). A loser parked beside the file
+whose name it lost travels with its event when that event is moved, renamed or
+regrouped, and is reviewed alongside the shots it belongs to. A year-level
+`__DUPLICATES` left by an earlier version is still read and is never reported
+as malformed; nothing drains it automatically (S7b).
 
 Both land in `<year>\__DUPLICATES`, one per year tree, chosen from the _subject's_
 tree so a multi-year run does not pool them. **Nothing is overwritten and nothing

@@ -204,15 +204,50 @@ def test_collision_resolver_older_larger_wins(tmp_path):
 
 
 def test_collision_resolver_significantly_smaller_auto_renames(tmp_path):
+    """_LOWRES needs both: much lighter AND actually fewer pixels (F10)."""
     existing = tmp_path / "A.jpg"
     candidate = tmp_path / "B.jpg"
     existing.write_text("x" * 100, encoding="utf-8")
     candidate.write_text("x" * 10, encoding="utf-8")
 
-    result = NameCollisionResolver(threshold=0.5).resolve(existing, candidate)
+    result = NameCollisionResolver(threshold=0.5).resolve(
+        existing, candidate,
+        existing_dimensions=(4000, 3000), candidate_dimensions=(1600, 1200))
 
     assert result.decision == CollisionDecision.RENAME_CANDIDATE
     assert result.reason == "significantly-smaller"
+
+
+def test_collision_resolver_never_calls_the_same_resolution_low_res(tmp_path):
+    """PS-10's second half: a compressible exposure is not a downscale.
+
+    Two 4000x3000 photographs of the same scene can differ by more than half
+    in bytes -- a plain sky against a crowded carriage -- and the archive used
+    to file the lighter one as a low-resolution copy of the other.
+    """
+    existing = tmp_path / "A.jpg"
+    candidate = tmp_path / "B.jpg"
+    existing.write_text("x" * 100, encoding="utf-8")
+    candidate.write_text("y" * 10, encoding="utf-8")
+
+    result = NameCollisionResolver(threshold=0.5).resolve(
+        existing, candidate,
+        existing_dimensions=(4000, 3000), candidate_dimensions=(4000, 3000))
+
+    assert result.reason != "significantly-smaller"
+    assert result.target_path is None or "_LOWRES" not in result.target_path.name
+
+
+def test_collision_resolver_will_not_guess_low_res_without_dimensions(tmp_path):
+    """Unknown is not smaller: nothing is demoted on a byte ratio alone."""
+    existing = tmp_path / "A.jpg"
+    candidate = tmp_path / "B.jpg"
+    existing.write_text("x" * 100, encoding="utf-8")
+    candidate.write_text("y" * 10, encoding="utf-8")
+
+    result = NameCollisionResolver(threshold=0.5).resolve(existing, candidate)
+
+    assert result.reason != "significantly-smaller"
 
 
 def test_collision_resolver_ambiguous_creates_prompt(tmp_path):
@@ -358,10 +393,11 @@ def test_metadata_extraction_parses_legacy_exif_and_rename_matches_old_task(tmp_
 
 
 def test_rename_collision_keeps_demoted_loser_asset_tracked(tmp_path):
-    # KEEP_CANDIDATE demotes the existing target to _DUPE_<md5>_0. When that
-    # file belongs to a tracked asset, the asset (and its sidecars) must follow
-    # the rename, or folder sorting later skips it and the _DUPE file is
-    # stranded in the inbox.
+    # KEEP_CANDIDATE demotes the existing target to _DIFFERS_<md5>_0 -- the two
+    # files hold different bytes, so F4 forbids calling either a _DUPE (PS-10).
+    # When the demoted file belongs to a tracked asset, the asset (and its
+    # sidecars) must follow the rename, or folder sorting later skips it and
+    # the file is stranded in the inbox.
     context = make_context(tmp_path)
     inbox = Path(context.config["paths"]["unsorted_folder"])
     inbox.mkdir(parents=True)
@@ -405,7 +441,7 @@ def test_rename_collision_keeps_demoted_loser_asset_tracked(tmp_path):
     assert winner_asset.sidecars["exif"] == inbox / (target_name + "._exif")
     assert winner_asset.sidecars["exif"].read_text(encoding="utf-8") == "winner exif"
 
-    demoted_path = inbox / f"{target_path.stem}_DUPE_{loser_md5}_0.jpg"
+    demoted_path = inbox / f"{target_path.stem}_DIFFERS_{loser_md5}_0.jpg"
     assert loser_asset.primary_path == demoted_path
     assert demoted_path.read_text(encoding="utf-8") == "loser content..."
     assert loser_asset.sidecars["exif"] == inbox / (demoted_path.name + "._exif")

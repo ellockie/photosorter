@@ -5,9 +5,15 @@ from src.constants.constants import \
     KNOWN_CAMERAS_SYMBOLS
 from src.constants.months import MONTH_FOLDERS
 from src.pipeline_stages.taxonomy import duplicate_name  # noqa: F401  (re-exported: F4 lives in taxonomy)
+from src.pipeline_stages.siblings import \
+    DIMENSIONS_METADATA_KEY, \
+    SUBSECOND_EXIF_FIELD, \
+    SUBSECOND_METADATA_KEY
+from src.utils.dimensions import parse_exif_dimensions
 from src.pipeline_stages.stamps import \
     format_day_prefix, \
-    format_stamp
+    format_stamp, \
+    normalise_subsecond
 
 
 
@@ -88,6 +94,10 @@ def legacy_filename(metadata: dict, extension: str, config: dict) -> str:
     marker = raw_marker(config) if is_raw else ""
     location = metadata.get("location_suffix")
     location_part = f"{location}__" if location else ""
+    # No sub-second here. The fraction is not part of a shot's name -- it is
+    # what tells two shots in one second apart, so it is written only where
+    # there are two (F9c), by the stage that can see the whole second's worth
+    # of files. A lone shot keeps the plain second form.
     stem = (
         metadata["image_datetime"]
         + "__"
@@ -179,6 +189,12 @@ def parse_legacy_exif_text(text: str, config: dict) -> dict:
     """Parse the human-readable ExifTool output used by legacy sidecars."""
     metadata = {}
     unformatted_datetime = None
+    # Read whole rather than line by line: the dimension tags appear under
+    # several group headings, and which heading a pair sits under is what
+    # separates the picture's size from its embedded thumbnail's (F10).
+    dimensions = parse_exif_dimensions(text)
+    if dimensions is not None:
+        metadata[DIMENSIONS_METADATA_KEY] = dimensions
 
     for line in text.splitlines():
         if ": " not in line:
@@ -200,6 +216,13 @@ def parse_legacy_exif_text(text: str, config: dict) -> dict:
             unformatted_datetime = value
         elif key.startswith("Date/Time Original"):
             unformatted_datetime = value
+        elif key.startswith(SUBSECOND_EXIF_FIELD):
+            # The fraction of the second the shutter opened in. It is not part
+            # of the name a shot is given -- F9 writes it only to separate two
+            # exposures that landed in the same second -- but it is carried on
+            # every asset, so the collision that needs it does not have to go
+            # back to the sidecar to ask.
+            metadata[SUBSECOND_METADATA_KEY] = normalise_subsecond(value)
         elif key.startswith("Aperture"):
             metadata["aperture"] = "f" + value
         elif key.startswith("Exposure Time"):

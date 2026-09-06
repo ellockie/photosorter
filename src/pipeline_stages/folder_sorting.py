@@ -16,8 +16,19 @@ from src.pipeline_stages.geolocation import \
 from src.pipeline_stages.provenance import \
     renamed_sidecar_path, \
     resolve_sidecar_target, \
-    rewrite_sidecar_path_fields
+    rewrite_sidecar_path_fields, \
+    sidecar_candidates
+from src.pipeline_stages.siblings import \
+    SUBSECOND_METADATA_KEY, \
+    are_siblings, \
+    occupant_names, \
+    sibling_name, \
+    subsecond_of_sidecar
 from src.pipeline_stages.taxonomy import \
+    DIFFERING_SUFFIX, \
+    DUPLICATE_SUFFIX, \
+    LOW_RES_SUFFIX, \
+    split_collision_suffix, \
     apply_representative_suffixes, \
     sidecar_subdir, \
     taxonomy_subdir
@@ -37,14 +48,58 @@ def _shot_key(asset) -> tuple | None:
     return (image_datetime, asset.metadata.get("camera_symbol"))
 
 
-def _unique_target(folder: Path, file_name: str, source: Path) -> Path:
+def _unique_target(folder: Path, file_name: str, source: Path,
+                   winner: Path | None = None) -> Path:
+    """A free name for ``source`` in ``folder``, marked for why it is not the wanted one.
+
+    ``_DUPE`` only where the bytes match the file that keeps the name;
+    otherwise ``_DIFFERS``, which is what F4 calls a loser that is not a copy.
+    The distinction is the point: a checksum on a file called a duplicate is a
+    claim about the *other* file, and it is only true when the two match.
+
+    ``winner`` names that other file where it is not simply whatever holds
+    ``file_name`` right now — which is the case when the loser being renamed is
+    itself the file sitting there, and comparing it against the name it already
+    holds would be comparing it with itself.
+    """
     target = folder / file_name
     index = 1
     while target.exists():
         md5 = file_md5(source)
-        target = folder / f"{Path(file_name).stem}_DUPE_{md5}_{index}{Path(file_name).suffix}"
+        rival_md5 = file_md5(winner if winner is not None else target)
+        suffix = DUPLICATE_SUFFIX if rival_md5 == md5 else DIFFERING_SUFFIX
+        target = folder / f"{Path(file_name).stem}{suffix}_{md5}_{index}{Path(file_name).suffix}"
         index += 1
     return target
+
+
+def is_low_res(file_name: str) -> bool:
+    """Does this name carry F4's ``_LOWRES``? (F10)
+
+    Read through the taxonomy's own parser rather than by substring: the
+    suffix is part of a grammar, and "_LOWRES" appearing anywhere in a
+    description a person typed is not the same as a file that lost a collision.
+    """
+    parsed = split_collision_suffix(file_name)
+    return parsed is not None and parsed.suffix == LOW_RES_SUFFIX
+
+
+def _sidecar_subsecond(media_path: Path, config: dict) -> str | None:
+    """The fraction recorded for a file already on disk, from its sidecar."""
+    for sidecar in sidecar_candidates(media_path, config):
+        if sidecar.exists():
+            found = subsecond_of_sidecar(sidecar)
+            if found:
+                return found
+    # A file already filed keeps its sidecar in the __EXIF beside it (X10),
+    # not next to itself, so that is the second place to look.
+    for sidecar in sidecar_candidates(
+            sidecar_subdir(media_path.parent, config) / media_path.name, config):
+        if sidecar.exists():
+            found = subsecond_of_sidecar(sidecar)
+            if found:
+                return found
+    return None
 
 
 def _place_extracted_sidecar(asset, sidecar: Path | None, subject: Path, config: dict) -> None:
@@ -69,34 +124,108 @@ def _place_extracted_sidecar(asset, sidecar: Path | None, subject: Path, config:
     rewrite_sidecar_path_fields(target, subject.name, str(subject.parent))
 
 
-def _demote_existing_occupant(context: PipelineContext, folder: Path, file_name: str, current_path: Path) -> None:
-    # A different file already sits at the destination name (a stale leftover
-    # or a genuine same-name collision). Flag it as a duplicate using its own
-    # hash instead of silently leaving it there unmarked, and drag its
-    # sidecars along so they don't end up orphaned under a stale name.
-    existing = folder / file_name
-    if not existing.exists() or existing == current_path:
-        return
-    demoted = _unique_target(folder, file_name, existing)
+def _settle_existing_occupant(context: PipelineContext, folder: Path, file_name: str,
+                              current_path: Path, asset=None) -> str:
+    """Clear ``file_name`` in ``folder`` for ``current_path``, and say what it is called.
+
+    Two files can want one name here for two unrelated reasons, and they are
+    not settled the same way:
+
+      * **two exposures inside one second** (F9) — no collision at all. Neither
+        file is a loser: both are representatives, and each takes the fraction
+        its own camera recorded, so the pair sorts in the order it was shot.
+        The file already filed is renamed too, for the reason set out in
+        ``rename_and_sort._settle_as_siblings``.
+      * **anything else** — a stale leftover, or a genuine same-name collision.
+        The occupant is flagged with its own hash rather than left standing
+        unmarked, and its sidecars are dragged along so none is orphaned under
+        a stale name (X5).
+    """
+    # The generated name carries the camera's sub-second (F9c); a shot filed
+    # before it did is under the fraction-less form of the same name, and that
+    # is the same collision. Looking only for the exact name would file a copy
+    # of an already-archived photo a second time.
+    existing = None
+    for candidate in occupant_names(file_name):
+        if (folder / candidate).exists():
+            existing = folder / candidate
+            break
+    if existing is None or existing == current_path:
+        return file_name
+
+    sibling = _sibling_names(context, existing, current_path, asset)
+    if sibling is not None:
+        occupant_name, arrival_name = sibling
+        if occupant_name == existing.name:
+            return arrival_name         # only the arrival needs a new name
+        demoted = folder / occupant_name
+    else:
+        # Built from the occupant's **own** name, which is not always the
+        # arrival's: an older file is under the fraction-less form of it
+        # (F9c), and naming the demotion off `file_name` would rename the
+        # occupant onto the very name the arrival is about to take.
+        #
+        # The comparison is against `current_path` -- not against the name the
+        # occupant already holds, which is the occupant itself.
+        demoted = _unique_target(folder, existing.name, existing, winner=current_path)
+        arrival_name = file_name
     old_name = existing.name
     safe_move(existing, demoted)
-    for asset in context.assets:
-        if asset.primary_path != existing:
+    for tracked in context.assets:
+        if tracked.primary_path != existing:
             continue
-        asset.primary_path = demoted
-        for name, sidecar_path in list(asset.sidecars.items()):
+        tracked.primary_path = demoted
+        for name, sidecar_path in list(tracked.sidecars.items()):
             if not sidecar_path.exists():
                 continue
             desired = renamed_sidecar_path(sidecar_path, old_name, demoted.name)
             sidecar_target = resolve_sidecar_target(sidecar_path, desired)
             if sidecar_target is None:
                 safe_delete(sidecar_path)
-                del asset.sidecars[name]
+                del tracked.sidecars[name]
                 continue
             if sidecar_target != sidecar_path:
                 safe_move(sidecar_path, sidecar_target)
-                asset.sidecars[name] = sidecar_target
-        break
+                tracked.sidecars[name] = sidecar_target
+        return arrival_name
+    # The occupant belongs to no asset in this run — it was already in the
+    # archive. Its sidecar is in the __EXIF beside it (X10) and still has to
+    # follow the rename, or it is orphaned under a name nothing answers to.
+    _move_untracked_sidecars(existing, demoted, context.config)
+    return arrival_name
+
+
+def _move_untracked_sidecars(old_path: Path, new_path: Path, config: dict) -> None:
+    exif_folder = sidecar_subdir(old_path.parent, config)
+    for holder in (old_path, exif_folder / old_path.name):
+        for sidecar in sidecar_candidates(holder, config):
+            if not sidecar.exists():
+                continue
+            desired = renamed_sidecar_path(sidecar, old_path.name, new_path.name)
+            target = resolve_sidecar_target(sidecar, desired)
+            if target is not None and target != sidecar:
+                safe_move(sidecar, target)
+
+
+def _sibling_names(context: PipelineContext, existing: Path, arriving: Path,
+                   asset) -> tuple[str, str] | None:
+    """``(occupant name, arrival name)`` if these are two exposures, else None (F9).
+
+    None is every case F9a cannot vouch for, and the caller then settles the
+    pair as F4 says. Nothing is renamed on a guess.
+    """
+    if file_md5(existing) == file_md5(arriving):
+        return None                    # a real duplicate; F4 owns it
+    config = context.config
+    arriving_subsecond = (asset.metadata.get(SUBSECOND_METADATA_KEY)
+                          if asset is not None else None)
+    if not arriving_subsecond:
+        arriving_subsecond = _sidecar_subsecond(arriving, config)
+    existing_subsecond = _sidecar_subsecond(existing, config)
+    if not are_siblings(existing_subsecond, arriving_subsecond):
+        return None
+    return (sibling_name(existing.name, existing_subsecond),
+            sibling_name(existing.name, arriving_subsecond))
 
 
 class FolderSortingStage(PipelineStage):
@@ -172,6 +301,14 @@ class FolderSortingStage(PipelineStage):
                 # own subfolders, and a video has none of those.
                 primary_folder = event_folder
                 primary_name = asset.primary_path.name
+            elif is_low_res(asset.primary_path.name):
+                # A proven downscale is a derivative, not a representative, so
+                # it goes in __RESIZED rather than beside the shot it is a
+                # smaller copy of (F7/F10). It takes no representative suffix
+                # for the same reason a RAW does not: those describe a
+                # representative's relationship to its own subfolders.
+                primary_folder = taxonomy_subdir(event_folder, config, "resized")
+                primary_name = asset.primary_path.name
             else:
                 primary_folder = event_folder
                 primary_name = apply_representative_suffixes(
@@ -181,7 +318,8 @@ class FolderSortingStage(PipelineStage):
 
             primary_folder.mkdir(parents=True, exist_ok=True)
             old_primary_name = asset.primary_path.name
-            _demote_existing_occupant(context, primary_folder, primary_name, asset.primary_path)
+            primary_name = _settle_existing_occupant(
+                context, primary_folder, primary_name, asset.primary_path, asset)
             primary_target = _unique_target(primary_folder, primary_name, asset.primary_path)
             safe_move(asset.primary_path, primary_target)
             asset.primary_path = primary_target

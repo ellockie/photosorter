@@ -452,6 +452,10 @@ function promptActions(prompt) {
       ["Keep existing", { action: "keep_existing" }],
       ["Keep new file", { action: "keep_candidate" }],
       ["Rename new file", { action: "rename_candidate" }],
+      // Neither is a loser: two exposures inside one second (F9). Offered
+      // because no camera here recorded a sub-second, which is the only thing
+      // that could have settled it without asking.
+      ["Different shots", { action: "siblings" }],
       ["Skip this file", { action: "skip" }],
       ["Cancel run", { action: "cancel" }],
     ];

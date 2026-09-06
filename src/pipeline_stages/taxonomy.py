@@ -20,6 +20,7 @@ working and companion reconciliation can still drain the old folders.
 
 import re
 from pathlib import Path
+from typing import NamedTuple
 
 DEFAULT_TAXONOMY = {
     "to_share": "__TO_SHARE",
@@ -187,6 +188,11 @@ def sidecar_subdir(subject_folder: str | Path, config: dict, key: str = "exif") 
 # sidecars of one subject to meet.
 DUPLICATE_SUFFIX = "_DUPE"
 DIFFERING_SUFFIX = "_DIFFERS"
+# The third of F4's suffixes: a smaller *rendering* of the shot that keeps the
+# name. Named here with the other two -- one definition of the grammar -- and
+# only ever written when the pixel dimensions prove it (F10). A file carrying
+# it belongs in __RESIZED, never at the top level (F7).
+LOW_RES_SUFFIX = "_LOWRES"
 
 
 def duplicate_name(stem: str, md5: str, index: int, extension: str) -> str:
@@ -197,6 +203,46 @@ def duplicate_name(stem: str, md5: str, index: int, extension: str) -> str:
 def differing_name(stem: str, md5: str, index: int, extension: str) -> str:
     """``photo_DIFFERS_abcd_2.jpg`` -- same name, different bytes."""
     return f"{stem}{DIFFERING_SUFFIX}_{md5}_{index}{extension}"
+
+
+# The reader for what the two writers above produce. It lives beside them
+# because a grammar written in one place and parsed in another is the drift T8
+# exists to prevent -- and because a repair pass has to be able to undo a name
+# an earlier version of this pipeline wrote (PS-10, F9).
+COLLISION_SUFFIX_RE = re.compile(
+    rf"(?P<suffix>{DUPLICATE_SUFFIX}|{DIFFERING_SUFFIX}|{LOW_RES_SUFFIX})"
+    r"_(?P<md5>[0-9a-fA-F]{32})_(?P<index>\d+)$"
+)
+
+
+class CollisionLoser(NamedTuple):
+    """A parsed F4 collision name, and the uncontested name it was made from."""
+
+    name: str                 # the file name without the suffix -- the one it lost
+    suffix: str               # "_DUPE" or "_DIFFERS"
+    md5: str
+    index: int
+
+
+def split_collision_suffix(file_name: str) -> CollisionLoser | None:
+    """``photo_DUPE_abcd…_1.jpg`` -> the name it lost, and what it was called.
+
+    None for any name that carries no collision suffix. All three of F4's
+    suffixes are matched, ``_LOWRES`` included: it was written from a byte
+    ratio alone before F10, so a file carrying it may be a second exposure that
+    merely compressed better -- which is what the repair pass has to be able to
+    look at (PS-10).
+    """
+    path = Path(file_name)
+    match = COLLISION_SUFFIX_RE.search(path.stem)
+    if match is None:
+        return None
+    return CollisionLoser(
+        path.stem[:match.start()] + path.suffix,
+        match.group("suffix"),
+        match.group("md5"),
+        int(match.group("index")),
+    )
 
 
 SUFFIX_HAS_RAW = "_HAS_RAW"

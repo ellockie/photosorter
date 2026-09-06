@@ -67,6 +67,7 @@ photosorter — Python 3.13 photo processing pipeline: rename, sort, and organis
 | Archive maintenance tools | `tools/` | Stdlib-only; run on a bare interpreter, load name grammars by file path |
 | Restructuring an archive | `tools/restructure_archive.py` | The seven-step front door; `_restructure_archive.bat` / `.ps1` at the root |
 | Where the grouper GUI lives | `src/pipeline_stages/grouper_launch.py` | Leaf module: install detection + command line, one definition |
+| Two shots in one second | `src/pipeline_stages/siblings.py` | Leaf module: the one definition of F9a/F9b — sub-second evidence, ordinal fallback. Consulted before the collision resolver by both rename and folder sorting, and by restructure step 8 |
 | Companion + sidecar matching | `src/pipeline_stages/companion_matching.py` | Leaf module: the engine. `reconcile_folder` (per event folder, capture time), `place_companions` (whole target, gather-then-distribute, name match; X10/X13 + MD5 on collision), `migrate_legacy_containers` (`##   EXIFs   ##`->`__EXIF`), `survey_trees` (read-only: non-compliant folders, legacy containers). Pipeline stage AND restructure tool both run it |
 | Tests | `tests/test_organise_date_folders.py` | Pytest, 6 cases |
 
