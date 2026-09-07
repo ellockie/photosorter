@@ -112,9 +112,11 @@ What reconciliation does
 ------------------------
 Six passes, in this order and no other:
 
-  * ``hoist_parking_areas`` -- every nested ``__EMPTY_SUBFOLDERS`` is merged
-    into the single parking area directly below its month folder. It runs
-    first so parked days cannot re-enter any of the active-archive passes.
+  * ``hoist_parking_areas`` -- every nested parking area is merged into the
+    one of its own name directly below its month folder: an
+    ``__EMPTY_SUBFOLDERS`` into that month's ``__EMPTY_SUBFOLDERS``, an
+    ``__ORPHANS`` into its ``__ORPHANS`` (H4/H9). It runs first so parked
+    days cannot re-enter any of the active-archive passes.
   * ``migrate_legacy_videos`` -- every video in a case-variant ``__VIDEOS``
     moves up beside the images when its filename or intrinsic metadata dates
     it. A genuinely undatable video is tagged and routed to
@@ -1561,7 +1563,7 @@ def generate_missing_raw_sidecars(run, placement, config, move):
 
 
 def find_parking_areas(run):
-    """Every ``__EMPTY_SUBFOLDERS`` in the target, safely and deepest first."""
+    """Every parking area in the target (H4), safely and deepest first."""
     found, refused = [], []
     for tree in run.trees:
         root_key = path_key(tree)
@@ -2462,17 +2464,18 @@ def group_violations(folder, config):
     # Read from the taxonomy, never spelled here (S4).
     geolocations = taxonomy.taxonomy_folder(config, "geolocations")
 
-    parking_areas = 0
+    parking_areas = {}
     tracks = 0
     for name in folders_inside:
         if stamps.day_prefix(name):
             continue
-        if name == grouping.EMPTY_SUBFOLDERS_FOLDER:
+        if parking.is_parking_area(name):
             # H2: a group is a level dated folders sit on, so it is a level a
             # parking area may sit on -- it holds the children this group has
-            # emptied. C3 allows exactly one.
-            parking_areas += 1
-            if parking_areas > 1:
+            # emptied, and the companions whose subjects have gone (H9). C3
+            # allows one of each kind, counted by name for that reason.
+            parking_areas[name] = parking_areas.get(name, 0) + 1
+            if parking_areas[name] > 1:
                 reasons.append("holds more than one %r (C3, H2)" % name)
             continue
         if name.casefold() == geolocations.casefold():
@@ -2486,7 +2489,7 @@ def group_violations(folder, config):
             continue
         reasons.append(
             "holds %r, which is not a dated folder, %s or %s (C3, C3a)"
-            % (name, grouping.EMPTY_SUBFOLDERS_FOLDER, geolocations)
+            % (name, " or ".join(parking.PARKING_AREAS), geolocations)
         )
     return reasons
 

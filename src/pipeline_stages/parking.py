@@ -1,11 +1,15 @@
 """Where an emptied folder is parked — decided here and nowhere else.
 
-``ARCHIVE_STANDARD.md`` section 4.1. A **parking area** is ``__EMPTY_SUBFOLDERS``,
-and it sits **where dated folders sit** (H2): directly under a month folder, or
-inside a group beside that group's dated children. A day folder emptied of every
-file goes into the one on its own level, and so does a legacy taxonomy container
-the migration emptied — once it has been checked to hold no file anywhere, never
-because it was assumed to.
+``ARCHIVE_STANDARD.md`` section 4.1. A **parking area** sits **where dated
+folders sit** (H2): directly under a month folder, or inside a group beside
+that group's dated children. There are two of them (H4) and they differ only in
+what they take. A day folder emptied of every file goes into the
+``__EMPTY_SUBFOLDERS`` on its own level, and so does a legacy taxonomy
+container the migration emptied — once it has been checked to hold no file
+anywhere, never because it was assumed to. A companion whose subject is nowhere
+in the archive goes into the ``__ORPHANS`` on its own level (X4): it is the
+last record that the subject existed, so it is kept and moved out of the way
+rather than left claiming a file that is not there.
 
 It is a sibling of what it takes, and that is the whole of the rule. A day
 emptied out of a month folder is parked in that month folder; a sub-event
@@ -30,8 +34,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.constants.months import is_month_folder, month_folder_of
-from src.pipeline_stages.grouping_names import EMPTY_SUBFOLDERS_FOLDER
+from src.pipeline_stages.grouping_names import EMPTY_SUBFOLDERS_FOLDER, ORPHANS_FOLDER
 from src.pipeline_stages.stamps import day_prefix
+
+
+# The closed set of parking-area names (H4). Two, and they differ only in what
+# they hold: "__EMPTY_SUBFOLDERS" takes dated folders drained of every file,
+# "__ORPHANS" takes companions whose subject is nowhere in the archive (X4).
+# Both sit at the levels H2 allows and neither is descended into again.
+PARKING_AREAS = (EMPTY_SUBFOLDERS_FOLDER, ORPHANS_FOLDER)
 
 
 def holds_dated_child(folder: Path) -> bool:
@@ -97,20 +108,26 @@ def parking_level_for(folder: Path) -> Path | None:
         current = parent
 
 
-def parking_area_for(folder: Path) -> Path | None:
-    """The ``__EMPTY_SUBFOLDERS`` that ``folder`` belongs in when it is emptied.
+def parking_area_for(folder: Path, name: str = EMPTY_SUBFOLDERS_FOLDER) -> Path | None:
+    """The parking area ``folder`` belongs in, by the one location rule (H2).
+
+    ``name`` picks which of the two (H4). The default is the emptied-day case
+    this module was written for; ``ORPHANS_FOLDER`` is the other, and the walk
+    that finds the level is deliberately the same one -- "the nearest month
+    folder or group at or above it" is the whole of where a parking area sits,
+    and an orphaned sidecar is parked by that rule and no other.
 
     ``None`` when there is no level above it allowed to hold one (H2). A caller
     must report and leave that folder alone: falling back to "beside it
     wherever it is" would create the malformed nested parking area H6 removes.
     """
     level = parking_level_for(folder)
-    return level / EMPTY_SUBFOLDERS_FOLDER if level is not None else None
+    return level / name if level is not None else None
 
 
 def is_parking_area(name: str) -> bool:
-    """True when ``name`` is the parking folder's name."""
-    return name == EMPTY_SUBFOLDERS_FOLDER
+    """True when ``name`` is one of the parking folders' names (H4)."""
+    return name in PARKING_AREAS
 
 
 def parking_area_is_misplaced(folder: Path) -> bool:
@@ -155,6 +172,30 @@ def free_versioned_name(folder: Path, name: str, reserved=None) -> Path:
     while candidate.exists() or str(candidate).lower() in reserved:
         index += 1
         candidate = folder / f"{name}_{index}"
+    reserved.add(str(candidate).lower())
+    return candidate
+
+
+def free_prefixed_name(folder: Path, name: str, reserved=None) -> Path:
+    """Return a collision-free ``folder/name``, then ``_2_name``, ``_3_name``.
+
+    The counter goes in **front**, where ``free_versioned_name`` puts it
+    behind. That is the difference between parking a folder and parking a
+    file: a companion is recognised by its *trailing* extension and by nothing
+    else (X2), so ``shot.jpg._exif_2`` would stop reading as a sidecar and
+    start reading as a file of an unknown kind. The end of the name is the one
+    part that must survive being parked, so the counter goes where there is
+    nothing to lose.
+
+    ``reserved`` carries dry-run destinations which do not exist on disk yet,
+    so two orphans of the same name cannot be planned onto one target.
+    """
+    reserved = set() if reserved is None else reserved
+    candidate = folder / name
+    index = 1
+    while candidate.exists() or str(candidate).lower() in reserved:
+        index += 1
+        candidate = folder / f"_{index}_{name}"
     reserved.add(str(candidate).lower())
     return candidate
 
@@ -215,7 +256,12 @@ def hoist_parking_areas(areas, log=lambda _message: None, move=None,
     report.misplaced = len(sources)
 
     for source in sources:
-        destination = parking_area_for(source)
+        # Into a parking area of its own kind: an "__ORPHANS" hoisted out of a
+        # leaf merges with the month's "__ORPHANS", never with its emptied
+        # days. The two hold different things (H4) and must not be pooled.
+        destination = parking_area_for(source, source.name)
+        free_name = (free_prefixed_name if source.name == ORPHANS_FOLDER
+                     else free_versioned_name)
         if destination is None:
             report.left += 1
             report.errors += 1
@@ -237,7 +283,7 @@ def hoist_parking_areas(areas, log=lambda _message: None, move=None,
                 report.errors += 1
                 log(f"! left {entry}: reparse point not followed (T4)")
                 continue
-            target = free_versioned_name(destination, entry.name, reserved)
+            target = free_name(destination, entry.name, reserved)
             try:
                 move(entry, target)
             except Exception as error:

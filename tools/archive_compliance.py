@@ -70,6 +70,16 @@ class Inspection:
         if item not in self.issues:
             self.issues.append(item)
 
+    def is_year_tree(self, folder):
+        """True when ``folder`` is one of the year trees this run was given.
+
+        Which is the one place a ``__LOGS`` may sit (J1): a run is scoped to a
+        year and journals under it, so a ``__LOGS`` anywhere deeper was left by
+        a run pointed somewhere it should not have been, or dragged there.
+        """
+        key = self.tool.path_key(folder)
+        return any(self.tool.path_key(tree) == key for tree in self.run.trees)
+
     def entries(self, folder):
         """No links are followed, including the starting directory itself (T4)."""
         if self.tool.path_is_reparse_point(folder):
@@ -85,7 +95,15 @@ class Inspection:
                 # conforming tool must not report what is in it (J2). It is
                 # also the one child a year folder may have besides its month
                 # folders (J1), so this skip is what keeps P3 honest.
+                #
+                # J2's exemption is for the journal *where a journal goes*.
+                # Deeper down, a "__LOGS" is a folder in the archive like any
+                # other and is reported (J4) -- never walked into, so what is
+                # inside it stays unread and unreported either way.
                 if self.tool.canonicalise.is_log_folder(entry.name):
+                    if not self.is_year_tree(folder):
+                        self.issue("J4", path,
+                                   "__LOGS belongs directly under a year folder")
                     continue
                 if self.tool.canonicalise.is_reparse_point(entry):
                     self.issue("T4", path, "reparse point refused")
@@ -628,6 +646,85 @@ def checked_move(inspection, source, target, rule):
     run.journal.write("standard_move", rule=rule, source=str(source), target=str(target), **{"from": str(source), "to": str(target)})
 
 
+def misplaced_folder_target(inspection, folder, tree):
+    """Where a dated folder whose name disagrees with its month belongs (P5).
+
+    ``None`` when the two already agree, or when the date in the name cannot be
+    read -- N6 forbids replacing it with one inferred from the contents, so a
+    folder nobody can date is reported and left, never moved on a guess.
+    """
+    parsed = inspection.stamps.split_dated_folder(folder.name)
+    if parsed is None or folder.parent.name not in inspection.months.values():
+        return None
+    try:
+        day = inspection.tool.date_of(parsed.date)
+    except (ValueError, AttributeError):
+        return None
+    destination = (tree.parent / str(day.year)
+                   / inspection.months[day.strftime("%m")] / folder.name)
+    if inspection.tool.path_key(destination) == inspection.tool.path_key(folder):
+        return None
+    return destination
+
+
+def repair_misplaced_folders(inspection, failures):
+    """Move every leaf dated folder into the month its own name states (P5).
+
+    The leaf half of what C12 does for a group, and it is asked the same way:
+    reported in full first, then **one confirmation for the whole run**, then
+    moved. A leaf is a smaller surprise than a fortnight-long group -- but it
+    is still somebody's day changing month, and the run has already learned
+    that a prompt met once per folder is a prompt that stops being read.
+
+    The date is read off the folder's own name and nowhere else (N6). A move
+    that crosses into a year this run was not given adds that year to the
+    run's trees, so the passes after this one see the folder where it landed.
+    """
+    run = inspection.run
+    events = {inspection.tool.path_key(folder): tree
+              for folder, _children, tree in inspection.events}
+    plans = []
+    for rule, folder, _reason in list(inspection.issues):
+        if rule != "P5":
+            continue
+        tree = events.get(inspection.tool.path_key(folder))
+        if tree is None:
+            continue
+        destination = misplaced_folder_target(inspection, folder, tree)
+        if destination is not None:
+            plans.append((folder, destination, tree))
+    if not plans:
+        return
+
+    for folder, destination, _tree in plans:
+        run.report("warn", "P5 %s\n    -> %s" % (folder, destination))
+    if not run.apply:
+        return
+    listed = "\n".join("    %s\n      -> %s" % (folder, destination)
+                       for folder, destination, _tree in plans[:SIBLING_PROMPT_ITEMS])
+    if len(plans) > SIBLING_PROMPT_ITEMS:
+        listed += "\n    ... and %d more, each listed in full above." % (
+            len(plans) - SIBLING_PROMPT_ITEMS)
+    if not run.confirm(
+            "%d dated folder(s) sit under a month their own name disagrees with.\n"
+            "Move each to the year/month it states?\n%s" % (len(plans), listed)):
+        run.report("warn", "Not confirmed; %d folder(s) left where they are."
+                   % len(plans))
+        return
+
+    for folder, destination, tree in plans:
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            checked_move(inspection, folder, destination, "P5")
+        except (OSError, ValueError) as error:
+            failures.append((folder, str(error)))
+            run.report("warn", str(error))
+            continue
+        destination_tree = destination.parent.parent
+        if destination_tree not in run.trees:
+            run.trees.append(destination_tree)
+
+
 def loose_media_plan(inspection, folder):
     """C4: plan dated children and every unambiguously associated companion.
 
@@ -725,6 +822,9 @@ def fix(tool, run):
     # a thing calling itself a copy of it.
     repair_siblings(inspection, failures)
     resolve_videos(inspection, failures)
+    # Before the group pass and before the companion engine: both read
+    # ``run.trees``, and a leaf that crosses into another year adds one.
+    repair_misplaced_folders(inspection, failures)
     for folder, children, tree in sorted(inspection.events, key=lambda item: len(item[0].parts), reverse=True):
         if not children:
             continue
@@ -795,7 +895,16 @@ def fix(tool, run):
 
 
 def repair_companions(inspection, failures):
-    """X5/X10: reuse the archive-wide engine after subjects moved in C4/V11."""
+    """X5/X10: reuse the archive-wide engine after subjects moved in C4/V11.
+
+    This is also where an orphan is parked (X4). The engine is looking at
+    every year tree of the run at once, so "the subject is nowhere" means the
+    whole archive and not one folder -- which is the only reading under which
+    moving the sidecar out of the way is safe. It goes to the ``__ORPHANS`` on
+    the nearest level a parking area may sit on (H2), by the rule that puts an
+    emptied day in its month's ``__EMPTY_SUBFOLDERS``, and nothing walks into
+    it again, so a second run parks nothing twice.
+    """
     tool, run = inspection.tool, inspection.run
     if any(rule == "T4" for rule, _, _ in inspection.issues):
         return
@@ -809,6 +918,8 @@ def repair_companions(inspection, failures):
         lambda folder: tool.duplicates_folder(folder, run, inspection.config),
         log=lambda message: run.report("dim", message), move=move,
         checksum=tool.archive_checksum(run), prune=False,
+        orphans_for=lambda path: tool.parking.parking_area_for(
+            path, tool.parking.ORPHANS_FOLDER),
     )
     if result.errors:
         failures.append((run.target, "X10: %d companion moves failed" % result.errors))

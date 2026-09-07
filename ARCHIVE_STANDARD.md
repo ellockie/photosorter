@@ -1,6 +1,6 @@
 # Photo & Video Archive Standard
 
-**v1.0 — settled. Partially enforced by the restructure tool.**
+**v1.1 — settled. Partially enforced by the restructure tool.**
 
 The target structure of the photo + video archive on disk. It exists to (a) drive
 the redesign of the **already-archived** material and (b) serve as the contract
@@ -39,7 +39,7 @@ machine-readable form of everything above it — parse that, not the prose.
 | P2 | Year folder name is exactly four digits. Nothing else at that level. |
 | P3 | Month folder is `NN. Month` — zero-padded number, dot, space, **fixed English** month name (`01. January` … `12. December`). Never locale-derived. |
 | P4 | Below a month folder, every directory MUST be a dated folder (§2) — leaf or group (§3) — an allowed subfolder (§4), or a parking area (§4.1). There is no fourth kind. |
-| P5 | The year and month a folder sits under MUST match the date in its own name, after the N7 day shift. |
+| P5 | The year and month a folder sits under MUST match the date in its own name, after the N7 day shift. A folder that does not is **moved to the year and month its own name states** — the leaf case of what C12 does for a group, and asked the same way: only under `--apply`, and only after the move has been reported in full and confirmed. One confirmation covers the run, not one per folder: a run is one year tree, and a question asked sixty times is a question that stops being read. The date is never invented (N6) — a name nobody can parse is reported and left where it is, and the year folder a move needs is created if it is not there. |
 | P6 | Directly under a year folder sit its **month folders**, optionally **one `__DUPLICATES`** (S7b — the legacy pool, still read), and optionally **one `__LOGS`** (§0.3). There is no fourth kind. A tool MUST NOT read either as a month folder, and MUST NOT walk into either looking for dated folders: what is in `__DUPLICATES` lost a name collision and is waiting for a person, not for the next pass, and `__LOGS` is tool bookkeeping no rule governs (J2). |
 
 ### §0 Out of scope
@@ -114,12 +114,14 @@ its run would be renamed, parked, counted or reported on every subsequent pass.
 | J1 | A journal's default location is `__LOGS` **directly under the run's `target`** — `<YYYY>\__LOGS` for a year tree. Journals are never pooled across year trees: two years sharing one `__LOGS` would interleave in the same second (the stamp resolves no finer), and `--undo` would then replay one year's renames while reverting another's. |
 | J2 | `__LOGS` is **tool bookkeeping only**: no rule in §1–§7 governs its contents, a conforming tool MUST NOT report it or what is in it as a violation, and every traversal MUST skip it **by name**. |
 | J3 | An explicit `--journal <path>` overrides the default outright; that path is used exactly as given, `__LOGS` or not. |
+| J4 | **A `__LOGS` sits directly under a year folder and nowhere else.** J2's exemption is for the folder journals go in, which is the run's `target` and a year tree (J1); one further down — under a month folder, inside a dated folder — is a folder in the archive like any other, and is reported. It is still never walked into: what is inside a `__LOGS` is unread and unreported wherever it sits, so J2's second half holds even for one J4 names. Nothing moves it: where a stray journal belongs, and whether it is still wanted at all, is a person's decision (L5). |
 
 **Implemented** — `log_directory` in `tools/canonicalise_timestamp_names.py` is
 the one definition (T8) of where a journal goes, and `is_log_folder` beside it
 the one definition of what skips it; `tools/restructure_archive.py` calls both
 rather than restating the rule, `walk_bottom_up` skips the folder for every
-traversal built on it, and `tools/archive_compliance.py` exempts it from P6.
+traversal built on it, and `tools/archive_compliance.py` exempts a year's own
+from P6 and reports any other under J4.
 
 ---
 
@@ -224,7 +226,7 @@ stamp or de-duplicate at this level.
 | --- | --- |
 | C1 | A dated folder holding ≥1 dated child folder MUST carry `____GROUP____` as the **first element of its tail**, so it is distinguishable from a leaf at a glance and by regex: `2026-08-20_(Thu)__09.14.02#2026-08-27_(Thu)__18.31.50 - ____GROUP____(d=7) - Norway`. |
 | C2 | A leaf dated folder MUST NOT carry the marker. Adding or removing the last dated child flips it; a conforming tool maintains it. |
-| C3 | **A group's contents are closed.** Exactly four kinds may sit in one: dated leaf folders, dated groups, at most one parking area (§4.1) holding the children it has emptied, and at most one `__GEOLOCATIONS` (C3a). No media, no loose files of any kind, and no other taxonomy subfolder (§4) — a group has no files for an `__EXIF` or a `__RAW` to be about. |
+| C3 | **A group's contents are closed.** Exactly four kinds may sit in one: dated leaf folders, dated groups, at most one parking area of each kind (§4.1) — the `__EMPTY_SUBFOLDERS` holding the children it has emptied, the `__ORPHANS` holding companions whose subjects have gone — and at most one `__GEOLOCATIONS` (C3a). No media, no loose files of any kind, and no other taxonomy subfolder (§4) — a group has no files for an `__EXIF` or a `__RAW` to be about. |
 | C3a | **`__GEOLOCATIONS` is the one taxonomy subfolder a group may hold.** A track covering a fortnight in Norway is about the *group*, the way a sidecar is about one shot: filing it under the day it happens to start says something false, and cutting it into seven daily fragments edits a recording to fit the folders. So it is admitted here, and narrowly — geodata only (§8 `extensions.geodata`), never media, never a further subfolder — which leaves C3's real claim standing: a person or a tool that opens a group still finds nothing in it to review, rate, stamp or de-duplicate. A `.gpx` whose span fits inside one dated child belongs in **that child's** `__GEOLOCATIONS`; this one is for the tracks no single child can hold. It is *hand* in the sense of S3: recognised and preserved, never auto-populated — deciding a track spans a whole group is a reading of the track. Its contents are **excluded from the group's span and from its counts**, exactly as a parking area's are (H5, C14): a group states the extent of the photography it holds, and a track is a record of the trip, not a shot taken during it. |
 | C4 | Loose media met in a group is **moved down, never deleted and never renamed**: the shots are gathered into a dated child folder of their own by the ordinary rules — day boundary per N7, time per N3, tail ` - __TO_LABEL__` because no person has named them yet — and their sidecars and companions travel with them (X10), which carries the taxonomy subfolders holding those companions down one level too. A tool MAY perform this: the child it creates invents no date (N7 fixes the day, N3 the time) and no name (`__TO_LABEL__` is precisely the refusal to name one), which is what separates it from the inventions N6, D4 and V4 refuse. It writes only under `--apply`, and only after naming the group, the shots and the child it proposes, and getting a yes — the way step 2 prompts. Without `--apply` it reports. This is a **migration action**; after it, nothing ever writes media into a group again. |
 | C5 | A group uses the **same prefix convention** as any dated folder (§2). Its start is the capture time of the earliest file in its **whole subtree** (N3). |
@@ -365,9 +367,9 @@ contents would be re-reported as orphans forever.
 
 A **parking area** is a named folder that sits **where dated folders sit** —
 directly under a month folder, or inside a group beside its dated children —
-and holds folders taken out of circulation rather than media of its own. It is
-a sibling of what it takes, which is the whole of its placement rule: a day
-emptied out of a month folder is parked in that month folder, a sub-event
+and holds what has been taken out of circulation rather than media of its own.
+It is a sibling of what it takes, which is the whole of its placement rule: a
+day emptied out of a month folder is parked in that month folder, a sub-event
 emptied out of a group is parked in that group, and neither leaves the level it
 was on.
 
@@ -379,18 +381,36 @@ the place things go to stop being offered for review.
 | ID | Rule |
 | --- | --- |
 | H1 | A parking area MUST carry no dated prefix, so a scan looking for dated folders neither matches it nor mistakes it for an event. A restructuring tool MUST NOT descend into one after it has normalized the parking areas: parked folders are records, not live events. |
-| H2 | A parking area MAY appear at any level where a **dated folder** may appear — as a direct child of a month folder, or of a group (§3) — at most one per level, created on first use. It MUST NOT appear anywhere else, and in particular never inside a **leaf** dated folder or inside a taxonomy subfolder: those hold one event's files, and a parked folder is not one of them. |
-| H3 | It holds **dated folders**, which keep their own names and go on obeying §2, plus legacy-container folders verified absolutely empty under L4. Moving a folder into one does not otherwise rename it. |
-| H4 | The set is closed, as §4's is. Today there is exactly one: `__EMPTY_SUBFOLDERS`, for day folders emptied of every file — parked rather than offered to a grouper. |
-| H5 | A parking area contains no loose files of its own and is never treated as a dated group. Its dated children are excluded from grouping, companion reconciliation and group-span calculation — so a group's span (C6) is computed as though its parking area were not there, and parking a folder never restates the span. |
-| H6 | A parking area found where H2 does not allow one — inside a leaf dated folder, inside a taxonomy subfolder — is **hoisted to the nearest level above it that does**: the first month folder or group on the way up. Its entries are merged into that level's parking area, a name already taken gaining `_2`, `_3` … rather than being overwritten. Once every entry has moved and the shell is verified to hold nothing at all, the shell is removed (T1). An unreadable or non-empty shell is left exactly where it is and reported. |
+| H2 | A parking area MAY appear at any level where a **dated folder** may appear — as a direct child of a month folder, or of a group (§3) — at most one of each kind per level (H4), created on first use. It MUST NOT appear anywhere else, and in particular never inside a **leaf** dated folder or inside a taxonomy subfolder: those hold one event's files, and a parked folder is not one of them. |
+| H3 | `__EMPTY_SUBFOLDERS` holds **dated folders**, which keep their own names and go on obeying §2, plus legacy-container folders verified absolutely empty under L4. Moving a folder into one does not otherwise rename it. |
+| H4 | The set is closed, as §4's is. Today there are exactly two: `__EMPTY_SUBFOLDERS`, for day folders emptied of every file — parked rather than offered to a grouper — and `__ORPHANS` (H9). |
+| H5 | `__EMPTY_SUBFOLDERS` contains no loose files of its own, and no parking area is ever treated as a dated group. A parking area's dated children are excluded from grouping, companion reconciliation and group-span calculation — so a group's span (C6) is computed as though its parking area were not there, and parking a folder never restates the span. |
+| H6 | A parking area found where H2 does not allow one — inside a leaf dated folder, inside a taxonomy subfolder — is **hoisted to the nearest level above it that does**: the first month folder or group on the way up. Its entries are merged into the parking area **of the same name** at that level — the two kinds are never pooled — a name already taken gaining `_2`, `_3` … (a file, H10's prefix) rather than being overwritten. Once every entry has moved and the shell is verified to hold nothing at all, the shell is removed (T1). An unreadable or non-empty shell is left exactly where it is and reported. |
 | H7 | A parking area **above** the level it should be on — directly under a year folder, say — is reported and never moved. Pushing one down would mean deciding which month each folder in it belongs to, which is a different question from hoisting and nobody has asked it. |
 | H8 | Parking the last dated child out of a group makes that group a leaf (C2), which makes its parking area misplaced under H2. The next run strips the marker and hoists the area; the two rules settle in that order, and a run that finds the intermediate state has not found a violation to be alarmed about. |
+| H9 | **`__ORPHANS` holds companions whose subject is nowhere in the archive** (X4), and nothing else: files only, no directories, no media. It is a parking area in every other respect — H1, H2, H6 and H7 apply to it word for word — and it is the one whose contents are loose files, which is what H5 exempts it from. Placement is H2's rule and no other: the `__ORPHANS` on the nearest level at or above the orphan that may hold a parking area. |
+| H10 | **A name already taken in `__ORPHANS` gains a numeric prefix** — `_2_shot.jpg._exif`, `_3_shot.jpg._exif` — never a suffix, and nothing is overwritten. A companion is recognised by its trailing extension and by nothing else (X2), so `shot.jpg._exif_2` would stop reading as a sidecar; the end of the name is the part that must survive being parked. Two events can each strand a sidecar of the same name and both belong in the record. |
+| H11 | An orphan is **moved, never deleted**, and a parking area is never walked into again (H1) — so a second run over the same archive parks nothing twice, and one already parked is not re-offered as a companion looking for a subject. Where an orphan has no level above it allowed to hold a parking area (H2), it is left exactly where it is and reported. |
 
 **Implemented** — `hoist_parking_areas` in `parking.py`, run before each
 reconciliation pass by `tools/restructure_archive.py`. The same module owns
 `parking_area_for`, the one answer to "where does this go", used by the grouper
-stage and by the legacy-container migration alike (T8).
+stage, the legacy-container migration and the orphan parking alike (T8) — one
+walk up to the nearest allowed level, with the area's name as its argument, so
+H2 is stated once for both members of H4's set. A hoisted area merges into one
+of its own kind: an `__ORPHANS` inside a leaf goes to the month's `__ORPHANS`,
+never into its `__EMPTY_SUBFOLDERS`.
+
+**`__ORPHANS` — v1.1, implemented in the fixing tool.** Until it existed, a
+sidecar whose subject had gone was left where it was and counted, which left
+the archive permanently non-compliant at that spot: the sidecar sat in an
+`__EXIF` naming a file directly above it that was not there (X1), and every
+run reported it again. Parking answers the question the report never could.
+`place_companions` in `companion_matching.py` moves it, but only when its
+caller passes the destination — the engine is then looking at every year tree
+at once, so "the subject is nowhere" means the archive and not one folder. A
+pass over a single folder is given no destination and still leaves the file
+alone, because there "nowhere" could mean one directory away.
 
 H4's own case — a day folder emptied of every file — is applied by
 `park_empty_dated_folders` in `tools/restructure_archive.py`, in the same step
@@ -475,6 +495,14 @@ settled in earlier versions and struck then.
   the report-only alternative gave up on, and no fortnight of someone's life
   changes month unannounced, which is what made moving it automatically the
   wrong answer.
+- **Q6a — and a leaf under the wrong month?** It moves too — P5, v1.1 — under
+  `--apply` and after one confirmation for the whole run. The report-only
+  answer was the wrong one for the same reason it was wrong for a group: a
+  finding that is correct, mechanical and repeated on every run is a finding
+  people learn to scroll past, and the folder stays in the wrong month for
+  years. A leaf is a smaller surprise than a fortnight, so the prompt is
+  smaller too — one for the run rather than one per folder — but it is still
+  asked, because a day changing month is still somebody's day moving.
 
 Settling is not implementing. Q1 is what the placement pass already does; Q4 is
 a folder a person files into; Q5 and Q6 are implemented by step 8's
@@ -684,7 +712,7 @@ wherever that file has ended up. X10–X13 spell out what follows from that.
 | X1a | Historical `._exif` names that omit the subject's extension (`shot._exif`) or differ only in extension case MUST still be **read**. They are matched case-insensitively by stem and rewritten to X1 using the subject's actual full name. If a JPEG and RAW share the stem, X10 location disambiguates them; more than one candidate at that location is reported, never guessed. |
 | X2 | Therefore `Path.suffix` of a sidecar is `._exif`, never the media extension. That is what keeps sidecars out of media counts — match on the trailing extension, not by stripping it. |
 | X3 | Therefore a sidecar carries its subject's capture time in its own name. A folder emptied of media can still be dated from what it left behind (N3). |
-| X4 | **One sidecar per media file is the norm.** Any other ratio means a sidecar was orphaned when its image moved, or an image arrived without one — this is what `e` reports. |
+| X4 | **One sidecar per media file is the norm.** Any other ratio means a sidecar was orphaned when its image moved, or an image arrived without one — this is what `e` reports. A companion whose subject is **nowhere in the archive** is never deleted: it is the last record that the subject existed (X3), and it is parked in the `__ORPHANS` on the nearest level a parking area may sit on (H9), where it stops claiming a file that is not there. The archive is what "nowhere" is measured against — a pass over one folder must leave it alone, because there "nowhere" may mean one directory away. |
 | X5 | A tool renaming or moving media MUST carry its sidecars with it, renaming them per X1. Orphaning a sidecar is a defect, not a side effect. |
 | X6 | **Thumbnails and previews are sidecars** — a camera `.thm`, a GoPro `.lrv` proxy, any generated preview. They follow X1 (`clip.mp4.thm`, `clip.mp4.lrv`), travel with their subject (X5), and live in **`__PREVIEWS`**. |
 | X6a | A preview a tool **generates** rather than lifts off a camera is a JPEG, and names itself with a **compound suffix** — `clip.mp4.THM.jpg` for a thumbnail, `clip.mp4.PREVIEW.jpg` for a full-size one. The compound is what makes it self-identifying: `Path.suffix` alone reads `.jpg` and would count the file as media, which X7 forbids, so previews are matched on the **longest** trailing extension and the compound forms are tested before the plain ones. |
@@ -787,6 +815,7 @@ Any tool writing to the archive, first-party or third-party:
 | Subfolder set | `src/pipeline_stages/taxonomy.py` — `DEFAULT_TAXONOMY` |
 | Timestamp grammar | `src/pipeline_stages/stamps.py` |
 | Folder-tail grammar, count bracket | `src/pipeline_stages/grouping_names.py` |
+| Parking-area names and where one goes | `src/pipeline_stages/parking.py` — `PARKING_AREAS`, `parking_area_for` |
 | Month names | `src/constants/months.py` — `MONTH_FOLDERS` (re-exported by the legacy modules) |
 | File checksum | `src/utils/checksums.py` — `file_md5` (a leaf: standard library only) |
 | Extensions, day boundary, collision suffixes, paths | `config.json` / `src/core.py` `default_config()` |
@@ -875,6 +904,15 @@ recognises the two placements v1.0 settled and **creates neither**: a group's
 the tracks, and a `__DUPLICATES` (S7), which belongs to the placement pass that
 parks collision losers in it.
 
+**Two more arrived with v1.1**, and they close the two findings the tool used
+to be able to state and never act on. A **dated leaf under the wrong month**
+moves to the year and month its own name states (P5) — the leaf half of C12,
+confirmed once for the whole run rather than once per folder. An **orphaned
+companion** — one whose subject is nowhere in any tree the run was given — is
+parked in the `__ORPHANS` of the nearest level a parking area may sit on
+(X4/H9), keeping the record while stopping it from claiming a file that is not
+there. Both write only under `--apply`. Neither deletes anything.
+
 **Implementation and use.** `tools/archive_compliance.py` implements the
 inspection and migration plans; `tools/restructure_archive.py` supplies the
 existing path guards, prompts, name grammars, movers and journal. Run a report:
@@ -888,16 +926,23 @@ destination and request confirmation. C4 groups loose stamped media by the
 configured N7 boundary and carries attributable taxonomy and companions with
 it. An unkeyed or ambiguous companion prevents that group's migration. C12
 moves the group to the year/month of its **stated** start: N6 still forbids
-inventing a replacement date from a stray capture. The existing canonicaliser
-and marker engine refresh leaf counts/times and group names after migration.
-A final scan determines which findings remain. `0` means clean, `1` means
-pending findings or failed repairs, and `2` means the check could not run.
+inventing a replacement date from a stray capture. P5 does the same for a
+leaf, before anything else moves — its own confirmation lists every folder and
+its destination, and a leaf that crosses into a year the run was not given
+adds that year to the run so the passes after it see the folder where it
+landed. The existing canonicaliser and marker engine refresh leaf counts/times
+and group names after migration. A final scan determines which findings
+remain. `0` means clean, `1` means pending findings or failed repairs, and `2`
+means the check could not run.
 
-The checker covers active structure (P3–P6, S1/S2, H2/H7), dated prefixes and
-leaf counts/times, group names and contents (C1–C3a/C11/C12), companion location
-and folder contents (X1/X10/X12), representative placement (F1/F7), and video
-waiting state (V8–V11). Step 8 also reruns the shared companion-placement engine after moving
-subjects (X5/X10), with deletion disabled. The existing reconciliation passes
+The checker covers active structure (P3–P6, J4, S1/S2, H2/H7), dated prefixes
+and leaf counts/times, group names and contents (C1–C3a/C11/C12), companion
+location and folder contents (X1/X10/X12), representative placement (F1/F7),
+and video waiting state (V8–V11). Step 8 also reruns the shared
+companion-placement engine after moving subjects (X5/X10), with deletion
+disabled, and that is the pass that parks an orphan (X4/H9): it holds every
+tree of the run at once, which is the only view under which "the subject is
+nowhere" is a fact rather than a guess. The existing reconciliation passes
 remain responsible for legacy migration and missing RAW sidecars. Unknown structure, invalid dates and matters requiring
 attribution remain reports; a successful repair does not guess their answers.
 Root working areas and parked records remain outside this check (P1/H1/P6).
@@ -912,7 +957,7 @@ against a single path component.
 
 ```yaml
 standard: photo-archive
-version: 1.0
+version: 1.1
 status: settled
 
 path:
@@ -921,6 +966,15 @@ path:
   year_level_entries: [month_folder, "__DUPLICATES", "__LOGS"]  # P6/S7/0.3 - no fourth kind
   year_level_duplicates_are_walked: false              # P6 - not a month folder, not descended into
   year_level_logs_are_walked: false                    # J2 - skipped by name, never reported
+  logs_below_year_level: report_never_walk             # J4 - a __LOGS is a year's or nobody's
+  misplaced_dated_folder:               # P5
+    action: move_to_the_year_month_its_name_states
+    date_from: folder_name_only         # N6 - never inferred from contents
+    performed_by_tool: true
+    requires_apply: true
+    prompts_per_run: true               # one confirmation, all folders listed first
+    creates_missing_year_and_month: true
+    otherwise: report                   # a refusal, or a name that cannot be parsed
   month: '^(0[1-9]|1[0-2])\. (January|February|March|April|May|June|July|August|September|October|November|December)$'
   month_names:
     "01": "01. January"
@@ -1018,7 +1072,7 @@ group:
     media: false
     loose_files: false
     taxonomy_subfolders: ["__GEOLOCATIONS"]  # C3a - the only one, geodata only
-    max_parking_areas: 1                     # C3
+    max_parking_areas: 1_per_kind            # C3/H4 - one __EMPTY_SUBFOLDERS, one __ORPHANS
     max_geolocations: 1                      # C3a
   geolocations:                       # C3a
     holds: geodata                    # extensions.geodata; never media, never a subfolder
@@ -1037,22 +1091,35 @@ group:
     otherwise: report
 
 parking_areas:                        # section 4.1
-  closed_set: ["__EMPTY_SUBFOLDERS"]
+  closed_set: ["__EMPTY_SUBFOLDERS", "__ORPHANS"]           # H4
   dated_prefix: false                 # H1
-  holds: [dated_folder, absolutely_empty_legacy_container]  # H3 / L4
+  holds: [dated_folder, absolutely_empty_legacy_container]  # H3 / L4 - __EMPTY_SUBFOLDERS
   may_appear: any_level_a_dated_folder_may                  # H2
   may_appear_under: [month_folder, group]                   # H2 - and nowhere else
-  max_per_level: 1                                          # H2
+  max_per_level: 1                                          # H2 - one of each kind
   traversal_boundary: true                                  # H1/H5
   excluded_from: [grouping, reconciliation, group_span]     # H5
   misplaced_migration:                                      # H6
     when: parent_is_neither_month_folder_nor_group
     action: merge_entries_into_nearest_allowed_level_above
+    into_area_of_the_same_name: true                        # H9 - never pooled
     recursive: true
     collision: append_discriminator
     remove_source_when_verified_empty: true                 # T1
   above_its_level: report_never_move                        # H7 - e.g. under a year
   discriminator: '_<n>'               # L4
+  orphans:                            # H9-H11
+    folder: "__ORPHANS"
+    holds: [companion]                # files only; no directories, no media
+    loose_files: true                 # the H5 exemption
+    placement: nearest_allowed_level_at_or_above_the_orphan  # H2
+    collision: prepend_discriminator  # H10 - the trailing extension must survive (X2)
+    discriminator: '_<n>_'            # H10 - in front of the name, not behind it
+    subject_searched_in: whole_archive    # X4 - never one folder
+    performed_by_tool: true           # section 7, steps 7/8
+    requires_apply: true
+    delete: never                     # H11 / T1
+    no_allowed_level_above: report_and_leave                # H11
 
 subfolders:
   closed_set: true
@@ -1206,6 +1273,10 @@ sidecars:
     counts_as: s                      # never i/v, never e
     may_be_representative: false
     separate_from_exif: true          # __EXIF is what a camera recorded
+  orphaned:                           # X4 - the subject is nowhere in the archive
+    action: park_in_orphans           # H9; see parking_areas.orphans
+    delete: never                     # X3 - the last record that it existed
+    searched_in: whole_archive        # a single-folder pass leaves it alone
   missing_raw:                        # X14
     generated_by: configured_exiftool
     metadata_source: raw_itself
@@ -1233,7 +1304,7 @@ tool_obligations:
   resolve_mapped_drive_to_unc: true
   long_path_prefix: '\\?\'
   human_named_folder_is_final: true
-  prompts_before: [group_loose_media_migration, group_month_folder_move]   # C4/C12
+  prompts_before: [group_loose_media_migration, group_month_folder_move, misplaced_dated_folder_move]  # C4/C12/P5
   exit_codes: {clean: 0, pending_or_failed: 1, error: 2}
 ```
 
@@ -1252,3 +1323,27 @@ decision that was still pending. A rule that turns out to be wrong is amended in
 the open, with the reasoning kept the way the *Settled* notes in §0.1 and §4
 keep theirs: a rule whose argument has been deleted is one that gets re-argued
 from scratch in a year.
+
+### v1.1 — three findings that could only ever be reported
+
+Each of these was a rule the checker could state and the fixer could not act
+on, so it was restated on every run until people stopped reading it. The
+amendment in each case is the migration, and each is implemented in the same
+change.
+
+- **P5 — a dated leaf under the wrong month is moved**, as C12 already moved a
+  group (Q6a). One confirmation for the run; the date comes from the folder's
+  own name and nowhere else (N6).
+- **X4/H9 — an orphaned companion is parked in `__ORPHANS`** instead of being
+  left in place. The old answer kept the record (X3) at the cost of leaving
+  the archive permanently non-compliant where it sat: a sidecar naming a file
+  directly above it that was not there. `__ORPHANS` is a parking area by H2's
+  location rule, joining `__EMPTY_SUBFOLDERS` in H4's now two-member set, and
+  the migration is "run steps 7,8 with `--apply`" — nothing is deleted, and a
+  parking area is never walked into twice.
+- **J4 — a `__LOGS` belongs directly under a year folder**, which is where J1
+  already put one. The exemption in J2 was written without a level attached,
+  so a `__LOGS` anywhere in a tree was invisible. It is now reported where J1
+  does not put it, and still never walked into, so no journal's contents are
+  read either way. There is no migration: where a stray journal belongs is a
+  person's decision (L5).

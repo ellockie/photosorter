@@ -17,10 +17,11 @@ Read it before writing any stage or tool that creates, moves, renames or scans
 archive folders. The sections below describe what the current code does; where the
 two disagree, the standard is the intent and the code is the gap.
 
-Currently **v1.0, settled, partially enforced by the restructure tool** — and
+Currently **v1.1, settled, partially enforced by the restructure tool** — and
 existing tools are not assumed compliant. Settled means the rules are decided,
-not that the code implements them: §7's fixing tool is still to be built, and
-steps 7 and 8 of the restructure tool are the placeholders waiting for it.
+not that the code implements them: §7's fixing tool is steps 7 and 8 of the
+restructure tool, and what it covers is listed there rule by rule; everything
+outside that list is still a contract waiting for its tool.
 
 ## Current Default Behaviour
 
@@ -410,6 +411,11 @@ the folder itself is kept — its name still records which day it was and what i
 held. `__EMPTY_SUBFOLDERS` carries no day prefix, so the grouping review neither
 matches it nor descends into it, and a parked folder cannot hold up a run.
 
+`__ORPHANS` is the other folder of this kind and sits in the same places by the
+same rule (H2/H4) — it holds companions whose subject has gone rather than
+emptied days. Nothing descends into either, which is what keeps parking
+idempotent: what is parked is not offered back to the next run.
+
 Empty means empty _all the way down_. A day whose media was routed into
 `__VIDEOS` or `__RAW` is not empty — it is a day the GUI happens not to show,
 which is a different thing and is skipped where it stands. Nothing is ever
@@ -634,20 +640,21 @@ any kind — authenticating the share is the operating system's job.
 
 `_restructure_archive.bat` at the repo root — or `_restructure_archive.ps1`, the
 same thing for PowerShell — is the front door for restructuring work, over
-`tools/restructure_archive.py`. It runs the five steps that turn a
+`tools/restructure_archive.py`. It runs the eight steps that turn a
 tree written by an older Photosorter, an older grouper or a third-party tool
 into the shape [`ARCHIVE_STANDARD.md`](ARCHIVE_STANDARD.md) describes, in the one
 order that makes sense, over one target, under one set of safety rules:
 
 | Step | What it does                                                                             |
 | ---- | ---------------------------------------------------------------------------------------- |
-| 1    | Canonicalise names (the tool above)                                                      |
+| 1    | Canonicalise names and park the empty (the tool above)                                   |
 | 2    | Reunite companions with their representatives, and sidecars/previews with their subjects |
 | 3    | Open the grouper GUI on every `__TO_SPLIT__` folder, one at a time                       |
 | 4    | Reunite companions and sidecars again                                                    |
-| 5    | Canonicalise names again                                                                 |
-| 6    | Check compliance with the archive standard — **not implemented**                         |
-| 7    | Fix compliance with the archive standard — **not implemented**                           |
+| 5    | Canonicalise names and park again                                                        |
+| 6    | Mark and time the groups                                                                 |
+| 7    | Check compliance with the archive standard                                               |
+| 8    | Fix compliance with the archive standard                                                 |
 
 ```powershell
 _restructure_archive.bat                                        # dry run over <root_folder>\<year>
@@ -855,9 +862,16 @@ index so its contents are not re-reported as orphans.
 > job, and nothing migrates between the two. Empty legacy containers park in
 > the `__EMPTY_SUBFOLDERS` beside their dated folder under H2/L4.
 
-A companion whose subject is nowhere in the target is **left exactly where it
-is** and reported (X3). The pass also counts the media that have **no sidecar at
-all** (X4).
+A companion whose subject is nowhere in the target is reported and never
+deleted — it is the last record that the subject existed (X3). Where the pass
+is looking at the whole archive, which is what step 8 does, it is also
+**parked in the `__ORPHANS`** of the nearest month folder or group above it
+(X4/H9): the record is kept, and it stops sitting in an `__EXIF` naming a file
+directly above it that is not there. A name already taken there gains a
+`_2_`, `_3_` **in front**, so the trailing extension that makes it a sidecar
+survives (H10/X2). Steps 2 and 4 look at one folder at a time and so leave it
+where it is — there "nowhere" could mean one directory away. The pass also
+counts the media that have **no sidecar at all** (X4).
 
 **Folders that fit no shape are reported at the end, in red.** Anything that is
 neither a dated folder, nor an allowed subfolder, nor a holding area, nor a
@@ -890,14 +904,17 @@ favours — and step 4 then moves files between folders, changing those counts
 again. Running the canonicaliser last folds all of it back onto the canonical
 form and re-derives the audit markers from what is finally on disk.
 
-**Steps 7 and 8 are placeholders.** The standard is v1.0 and settled, but only
-partly enforced: what is missing is the tool, not the decisions. Both steps
-announce themselves and do nothing; the plumbing is there so implementing them
-is a change to one function each, against "The fixing tool" in §7 and the
-machine-readable definitions in §8. The two obligations to build first are the
-ones v1.0 settled and step 6 already reports — gathering loose media out of a
-group (C4) and moving a group whose start crossed into another month folder
-(C12) — both writing only under `--apply` and only after a prompt.
+**Steps 7 and 8 are the standard's own fixing tool** (§7). Step 7 reports; step
+8 repairs what the standard says a tool may repair, and only under `--apply`.
+What it moves, each after showing every source and destination and taking a
+yes: loose media gathered out of a group into a `__TO_LABEL__` child (C4), a
+group whose start crossed into another month folder (C12), and a dated leaf
+sitting under a month its own name disagrees with (P5). What it moves without a
+prompt of its own, having reported each line: a companion into the `__EXIF`
+holding its subject (X10), and one whose subject is nowhere in the archive into
+`__ORPHANS` (X4). Everything else — unknown structure, unreadable dates,
+anything needing attribution — stays a report, because a repair that has to
+guess is not one.
 
 #### Targets
 
@@ -935,6 +952,13 @@ folders and `__DUPLICATES` (`P6`). That works only because **every walk skips it
 by name** (`J2`) — by name and not by path, since a dry run writes no journal and
 so has no path to skip. Without that, a journal outliving its run would be
 renamed, parked, counted or reported on every later pass.
+
+Directly under a year folder is also the **only** place one belongs (`J4`). A
+`__LOGS` further down — under a month folder, inside a dated folder — is
+reported by step 7 like any other folder that fits no shape. It is still never
+walked into, so no journal's contents are read either way, and nothing moves
+it: where a stray journal belongs, and whether it is wanted at all, is a
+person's call.
 
 #### On a network target
 

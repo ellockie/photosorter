@@ -53,10 +53,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.pipeline_stages.parking import \
+    free_prefixed_name, \
     free_versioned_name, \
+    is_parking_area, \
     parking_area_for
 from src.pipeline_stages.grouping_names import \
     EMPTY_SUBFOLDERS_FOLDER, \
+    ORPHANS_FOLDER, \
     extension_sets, \
     companion_extension_spellings, \
     ocr_extensions, \
@@ -519,6 +522,10 @@ class PlacementReport:
     parked_duplicate: int = 0
     parked_differing: int = 0
     orphaned: int = 0
+    # How many of ``orphaned`` were moved into an "__ORPHANS" (X4). A subset,
+    # never a bucket of its own: an orphan is an orphan wherever it now sits,
+    # and the count a person acts on is still ``orphaned``.
+    parked_orphans: int = 0
     ambiguous: int = 0
     errors: int = 0
 
@@ -561,6 +568,7 @@ class PlacementReport:
             ("parked as duplicates", self.parked_duplicate),
             ("parked as DIFFERING", self.parked_differing),
             ("no subject found", self.orphaned),
+            (f"of those parked in {ORPHANS_FOLDER}", self.parked_orphans),
             ("subject ambiguous", self.ambiguous),
             ("media with no sidecar", self.media_without_sidecar),
             ("errors", self.errors),
@@ -572,7 +580,8 @@ class PlacementReport:
     def merge(self, other: "PlacementReport") -> None:
         for field in ("moved", "renamed", "across_folders", "in_place",
                       "parked_duplicate", "parked_differing", "orphaned",
-                      "ambiguous", "errors", "media", "media_without_sidecar"):
+                      "parked_orphans", "ambiguous", "errors", "media",
+                      "media_without_sidecar"):
             setattr(self, field, getattr(self, field) + getattr(other, field))
         self.non_compliant.extend(other.non_compliant)
         self.legacy_containers.extend(other.legacy_containers)
@@ -631,7 +640,7 @@ def _folder_problem(name: str, inside_dated: bool, depth: int,
     """
     if day_prefix(name):
         return None                       # a dated folder is legal at any level
-    if name == EMPTY_SUBFOLDERS_FOLDER:
+    if is_parking_area(name):
         return None                       # a holding area (H2)
     folded = name.casefold()
     if folded in legacy_names:
@@ -723,11 +732,13 @@ def index_trees(roots, config: dict, reporter: "_Reporter",
                     # was dealt with. Walking in would re-offer those files as
                     # subjects and then report them as orphans.
                     continue
-                if entry.name == EMPTY_SUBFOLDERS_FOLDER:
-                    # H1/H5: a parking area is an archive of hollow folders,
-                    # not a source tree, wherever it sits. Parked days must
-                    # not re-enter companion reconciliation just because they
-                    # still carry dated names.
+                if is_parking_area(entry.name):
+                    # H1/H5: a parking area holds records, not a source tree,
+                    # wherever it sits. Parked days must not re-enter
+                    # companion reconciliation just because they still carry
+                    # dated names -- and a companion already in "__ORPHANS"
+                    # must not be picked up as a companion again, which is
+                    # what makes parking one idempotent.
                     continue
                 walk(path, inside_dated or bool(day_prefix(entry.name)), depth + 1)
                 continue
@@ -787,6 +798,32 @@ def _free_parking_name(folder: Path, stem: str, extension: str,
         index += 1
 
 
+def _park_orphan(path: Path, orphans_for, move, reporter: "_Reporter",
+                 reserved: set[str]) -> Path | None:
+    """Move one orphaned companion into its ``__ORPHANS`` (X4/H2).
+
+    ``None`` when the caller asked for no parking, when there is no level
+    above the orphan allowed to hold a parking area (H2), or when the move
+    failed -- in all three the orphan stays where it is, which is the outcome
+    that loses nothing.
+    """
+    if orphans_for is None:
+        return None
+    destination = orphans_for(path)
+    if destination is None:
+        reporter.note(
+            "orphaned",
+            f"- left {path}: no month folder or group above it to park it in (H2)")
+        return None
+    target = free_prefixed_name(Path(destination), path.name, reserved)
+    try:
+        move(path, target)
+    except Exception as error:
+        reporter.error(f"could not park orphaned {path} in {destination}: {error}")
+        return None
+    return target
+
+
 def _path_key(path: Path) -> str:
     """Case-insensitive absolute key, matching Windows archive semantics."""
     return os.path.normcase(os.path.abspath(str(path)))
@@ -831,7 +868,7 @@ def _subject_candidates(index: _Index, subject_name: str, sidecar_folder: Path,
 
 def place_companions(roots, config: dict, duplicates_for,
                      log=lambda _msg: None, move=None, checksum=None,
-                     prune: bool = True) -> PlacementReport:
+                     prune: bool = True, orphans_for=None) -> PlacementReport:
     r"""Put every sidecar and preview under ``roots`` in the folder that belongs to it.
 
     Standard X10 for sidecars, X13 for previews, and they say the same thing: a
@@ -876,10 +913,18 @@ def place_companions(roots, config: dict, duplicates_for,
         overwritten and nothing is deleted (T1, T2); the file at the destination
         is left exactly as it was.
 
-    A companion whose subject is nowhere in the tree is **left exactly where it
-    is** and counted as orphaned. It is the only surviving record that the
-    subject ever existed (X3), and moving it on a guess would lose the one thing
-    it still says. That is what ``e`` reports (X4).
+    A companion whose subject is nowhere in the tree is counted as orphaned and
+    never deleted: it is the only surviving record that the subject existed
+    (X3), and that is what ``e`` reports (X4).
+
+    Where it is *put* is the caller's decision, because only the caller knows
+    whether it is looking at a whole archive. ``orphans_for(path)`` returns the
+    ``__ORPHANS`` that orphan belongs in, and the orphan is moved there under a
+    name nothing else holds -- ``_2_``, ``_3_`` in front, so the trailing
+    extension that makes it a sidecar survives (X2). Passing ``None`` leaves it
+    exactly where it is, which is what a pass over one folder must do: "nowhere
+    in the tree" then means "nowhere in *this* folder", and parking on that
+    would strand a sidecar whose subject is one directory away.
 
     The report also carries the other half of the audit: how many media files
     the tree holds and how many of them have no sidecar at all.
@@ -917,14 +962,28 @@ def place_companions(roots, config: dict, duplicates_for,
     spellings = companion_extension_spellings(config)
     covered = set()
     emptied: list[Path] = []
+    # Planned orphan destinations. A dry run creates nothing, so two orphans
+    # of one name would otherwise both be reported onto the same target.
+    reserved: set[str] = set()
 
     for path, folder, key, subject_name, extension in index.companions:
         candidates, used_stem = _subject_candidates(
             index, subject_name, folder, key, config)
         if not candidates:
             report.orphaned += 1
-            reporter.note("orphaned",
-                          f"- left {path}: {subject_name} is nowhere in the tree")
+            parked = _park_orphan(path, orphans_for, move, reporter, reserved)
+            if parked is None:
+                reporter.note(
+                    "orphaned",
+                    f"- left {path}: {subject_name} is nowhere in the tree")
+                continue
+            report.parked_orphans += 1
+            reporter.note(
+                "orphaned",
+                f"- parked {path}: {subject_name} is nowhere in the tree, "
+                f"so it goes to {parked}")
+            if folder not in emptied:
+                emptied.append(folder)
             continue
         if len(candidates) > 1:
             report.ambiguous += 1

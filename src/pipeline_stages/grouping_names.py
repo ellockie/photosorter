@@ -85,6 +85,12 @@ LEGACY_GROUP_MARKER = "__CONTAINER__"
 # and the two must not drift over the spelling.
 EMPTY_SUBFOLDERS_FOLDER = "__EMPTY_SUBFOLDERS"
 
+# Where a companion whose subject is nowhere in the archive is parked (X4).
+# It sits where "__EMPTY_SUBFOLDERS" sits and for the same reason: the record
+# leaves the working list without leaving the month it belongs to. Named here
+# beside the other parking folder so the two cannot drift over the spelling.
+ORPHANS_FOLDER = "__ORPHANS"
+
 # V8: the unresolved-video prefix is shared by counting and migration.
 TO_RENAME_PREFIX = "__TO_RENAME__"
 

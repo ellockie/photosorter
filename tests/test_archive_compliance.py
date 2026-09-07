@@ -607,3 +607,223 @@ def test_f9c_keeps_the_fraction_where_a_sibling_shares_the_second(tmp_path, conf
     assert run(str(root), "--steps", "7") == 0, "a settled sibling pair is compliant"
     assert run(str(root), "--steps", "8", "--apply", "--yes") == 0
     assert snapshot(root / "2026") == before, "nothing to change"
+
+
+# --------------------------------------------------------------------------
+# PS-11: a leaf under the wrong month, an orphan with nowhere to point, and
+# a __LOGS that is not where journals go
+# --------------------------------------------------------------------------
+
+def misplaced_leaf(tmp_path, month="08. August"):
+    """One dated leaf whose own name disagrees with the month holding it (P5)."""
+    root = make_archive(tmp_path)
+    event = root / "2026" / month / "2026-07-15_(Wed)__08.00.00 - Flowers"
+    write(event / "2026-07-15_(Wed)__08.00.00.jpg")
+    return root, event
+
+
+def test_p5_dry_run_names_the_destination_and_writes_nothing(tmp_path, config, capsys):
+    root, event = misplaced_leaf(tmp_path)
+    before = snapshot(root)
+    assert run(str(root), "--steps", "8") == 1
+    assert snapshot(root) == before
+    output = capsys.readouterr().out
+    assert "P5" in output and "07. July" in output
+
+
+def test_p5_moves_a_leaf_to_the_month_its_own_name_states(tmp_path, config):
+    root, event = misplaced_leaf(tmp_path)
+    assert run(str(root), "--steps", "8", "--apply", "--yes") == 0
+    assert not event.exists()
+    moved = root / "2026" / "07. July" / event.name
+    assert (moved / "2026-07-15_(Wed)__08.00.00.jpg").is_file()
+    assert run(str(root), "--steps", "7") == 0
+
+
+def test_p5_crossing_a_year_creates_the_tree_and_keeps_checking_it(tmp_path, config):
+    root = make_archive(tmp_path)
+    event = root / "2026" / "07. July" / "2025-07-15_(Tue)__08.00.00 - Last year"
+    write(event / "2025-07-15_(Tue)__08.00.00.jpg")
+    assert run(str(root), "--steps", "8", "--apply", "--yes") == 0
+    assert (root / "2025" / "07. July" / event.name
+            / "2025-07-15_(Tue)__08.00.00.jpg").is_file()
+    assert run(str(root), "--steps", "7") == 0
+
+
+def test_p5_asks_once_for_the_whole_run_and_a_refusal_moves_nothing(tmp_path, config,
+                                                                    monkeypatch):
+    root, first = misplaced_leaf(tmp_path)
+    second = root / "2026" / "08. August" / "2026-07-16_(Thu)__09.00.00 - Also July"
+    write(second / "2026-07-16_(Thu)__09.00.00.jpg")
+    prompts = []
+    monkeypatch.setattr(tool.Run, "confirm", lambda self, message: prompts.append(message) or False)
+    assert run(str(root), "--steps", "8", "--apply") == 1
+    assert len(prompts) == 1
+    assert first.is_dir() and second.is_dir()
+
+
+def test_p5_never_moves_a_folder_whose_date_cannot_be_read(tmp_path, config, capsys):
+    root = make_archive(tmp_path)
+    event = root / "2026" / "07. July" / "2026-02-31_(Mon)__12.00.00 - Bad"
+    write(event / "photo.jpg")
+    assert run(str(root), "--steps", "8", "--apply", "--yes") == 1
+    assert event.is_dir()
+    assert "N6" in capsys.readouterr().out
+
+
+def orphaned_sidecar(tmp_path, name="2026-07-15_(Wed)__12.00.00.jpg"):
+    """A sidecar correctly placed and named for a subject that is not there."""
+    root = make_archive(tmp_path)
+    event = root / "2026" / "07. July" / "2026-07-15_(Wed)__12.00.00 - Day"
+    write(event / name)
+    orphan = write(event / "__EXIF" / ("gone_" + name + "._exif"), b"exif")
+    return root, event, orphan
+
+
+def test_x1_orphan_is_parked_in_the_months_orphans_and_stays_parked(tmp_path, config):
+    root, event, orphan = orphaned_sidecar(tmp_path)
+    assert run(str(root), "--steps", "8", "--apply", "--yes") == 0
+    assert not orphan.exists()
+    parked = root / "2026" / "07. July" / "__ORPHANS" / orphan.name
+    assert parked.read_bytes() == b"exif"
+    assert run(str(root), "--steps", "7") == 0
+    before = snapshot(root / "2026")
+    assert run(str(root), "--steps", "8", "--apply", "--yes") == 0
+    assert snapshot(root / "2026") == before
+
+
+def test_x1_orphan_dry_run_reports_the_destination_without_writing(tmp_path, config,
+                                                                   capsys):
+    root, event, orphan = orphaned_sidecar(tmp_path)
+    before = snapshot(root)
+    assert run(str(root), "--steps", "8") == 1
+    assert snapshot(root) == before
+    assert "__ORPHANS" in capsys.readouterr().out
+
+
+def test_x1_a_sidecar_whose_subject_is_elsewhere_follows_it_instead(tmp_path, config):
+    """X10 first: parking is only for a subject that is nowhere at all."""
+    root, event, _orphan = orphaned_sidecar(tmp_path)
+    other = root / "2026" / "07. July" / "2026-07-16_(Thu)__12.00.00 - Next"
+    name = "2026-07-16_(Thu)__12.00.00.jpg"
+    write(other / name)
+    stray = write(event / "__EXIF" / (name + "._exif"), b"follows")
+    assert run(str(root), "--steps", "8", "--apply", "--yes") == 0
+    assert not stray.exists()
+    assert (other / "__EXIF" / (name + "._exif")).read_bytes() == b"follows"
+
+
+def test_two_orphans_of_one_name_are_prefixed_rather_than_overwritten(tmp_path, config):
+    """The counter goes in front so the trailing extension survives (X2)."""
+    root = make_archive(tmp_path)
+    month = root / "2026" / "07. July"
+    for day, payload in (("15_(Wed)", b"first"), ("16_(Thu)", b"second")):
+        event = month / ("2026-07-%s__12.00.00 - Day" % day)
+        write(event / ("2026-07-%s__12.00.00.jpg" % day))
+        write(event / "__EXIF" / "gone.jpg._exif", payload)
+    assert run(str(root), "--steps", "8", "--apply", "--yes") == 0
+    parked = {path.name: path.read_bytes()
+              for path in (month / "__ORPHANS").iterdir()}
+    assert parked == {"gone.jpg._exif": b"first", "_2_gone.jpg._exif": b"second"}
+    assert run(str(root), "--steps", "7") == 0
+
+
+def test_an_orphans_folder_inside_a_leaf_is_hoisted_to_its_month(tmp_path, config):
+    """H2/H6 apply to both parking areas, and never pool one into the other."""
+    root = make_archive(tmp_path)
+    event = root / "2026" / "07. July" / "2026-07-15_(Wed)__12.00.00 - Day"
+    write(event / "2026-07-15_(Wed)__12.00.00.jpg")
+    write(event / "__ORPHANS" / "gone.jpg._exif", b"exif")
+    assert run(str(root), "--steps", "2", "--apply", "--yes") == 0
+    assert not (event / "__ORPHANS").exists()
+    assert (root / "2026" / "07. July" / "__ORPHANS" / "gone.jpg._exif"
+            ).read_bytes() == b"exif"
+
+
+def test_a_logs_folder_below_a_year_is_reported_but_never_walked(tmp_path, config,
+                                                                 capsys):
+    """J1: journals go directly under a year folder, and nowhere else."""
+    root = make_archive(tmp_path)
+    write(root / "2026" / "07. July" / "__LOGS" / "_restructure_journal.jsonl", b"{}")
+    assert run(str(root), "--steps", "7") == 1
+    output = capsys.readouterr().out
+    assert "J4" in output
+    assert "_restructure_journal.jsonl" not in output
+
+
+def test_a_years_own_logs_folder_is_still_exempt(tmp_path, config, capsys):
+    root = make_archive(tmp_path)
+    write(root / "2026" / "__LOGS" / "_restructure_journal.jsonl", b"{}")
+    assert run(str(root), "--steps", "7") == 0
+    assert "__LOGS" not in capsys.readouterr().out
+
+
+def test_an_orphan_inside_a_group_parks_in_that_group(tmp_path, config):
+    """H2: the nearest level a parking area may sit on, not the month."""
+    root, group = group_fixture(tmp_path)
+    child = next(path for path in group.iterdir() if path.is_dir())
+    write(child / "__EXIF" / "gone.jpg._exif", b"exif")
+    assert run(str(root), "--steps", "8", "--apply", "--yes") == 0
+    # The marker pass renames the group in the same run, so it is found again
+    # by the one thing that did not change: the parking area it now holds.
+    parked = list(root.rglob("__ORPHANS/gone.jpg._exif"))
+    assert len(parked) == 1
+    assert parked[0].read_bytes() == b"exif"
+    assert parked[0].parent.parent.parent.name == "07. July"
+    assert not (root / "2026" / "07. July" / "__ORPHANS").exists()
+    assert run(str(root), "--steps", "7") == 0
+
+
+def test_ps11_reported_shapes_are_all_settled_in_one_run(tmp_path, config, capsys):
+    """The three findings PS-11 was opened for, in the shapes it reported them.
+
+    A leaf under the wrong month, a canonically named sidecar whose subject is
+    gone from a marked folder, and a year's own ``__LOGS`` -- which was never
+    a violation and must not be named as one.
+    """
+    root = make_archive(tmp_path)
+    write(root / "2026" / "__LOGS" / "_restructure_journal_2026.jsonl", b"{}")
+
+    misplaced = root / "2026" / "07. July" / "2026-08-01_(Sat)__00.10.51 - Flowers"
+    write(misplaced / "2026-08-01_(Sat)__00.10.51.jpg")
+
+    marked = root / "2026" / "07. July" / "2026-07-22_(Wed)__18.35.29 - __TO_SPLIT__(e=1)"
+    write(marked / "2026-07-22_(Wed)__18.35.29.jpg")
+    subject = "2026-07-22_(Wed)__18.35.29__f2.2__T1_313__L13.0.eq__I50__SG23U.jpg"
+    write(marked / "__EXIF" / (subject + "._exif"), b"exif")
+
+    assert run(str(root), "--steps", "7") == 1
+    reported = capsys.readouterr().out
+    assert "P5" in reported and "X1" in reported
+    assert "__LOGS" not in reported and "P3" not in reported
+
+    assert run(str(root), "--steps", "8", "--apply", "--yes") == 0
+    assert (root / "2026" / "08. August" / misplaced.name
+            / "2026-08-01_(Sat)__00.10.51.jpg").is_file()
+    assert (root / "2026" / "07. July" / "__ORPHANS" / (subject + "._exif")
+            ).read_bytes() == b"exif"
+    assert (root / "2026" / "__LOGS" / "_restructure_journal_2026.jsonl").is_file()
+    assert run(str(root), "--steps", "7") == 0
+
+
+def test_a_parked_orphan_survives_every_other_step_untouched(tmp_path, config,
+                                                             fake_grouper):
+    """Nothing after step 8 renames, re-matches or re-parks what it parked."""
+    root = make_archive(tmp_path)
+    event = root / "2026" / "07. July" / "2026-07-15_(Wed)__12.00.00 - Day"
+    write(event / "2026-07-15_(Wed)__12.00.00.jpg")
+    write(event / "__EXIF" / "2026-07-15_(Wed)__12.00.00.jpg._exif", b"kept")
+    write(event / "__EXIF" / "2026-07-14_(Tue)__09.00.00.jpg._exif", b"orphan")
+
+    steps = "1,2,4,5,6,7,8"          # 3 opens the grouper GUI
+    assert run(str(root), "--steps", steps, "--apply", "--yes") == 0
+    parked = root / "2026" / "07. July" / "__ORPHANS" / "2026-07-14_(Tue)__09.00.00.jpg._exif"
+    assert parked.read_bytes() == b"orphan"
+
+    def archive(): # J2: a run's own journals are not part of the archive
+        return {name: content for name, content in snapshot(root / "2026").items()
+                if not name.startswith("__LOGS")}
+
+    before = archive()
+    assert run(str(root), "--steps", steps, "--apply", "--yes") == 0
+    assert archive() == before
