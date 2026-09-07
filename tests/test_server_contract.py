@@ -1,4 +1,5 @@
 import json
+import pathlib
 
 import pytest
 
@@ -181,6 +182,48 @@ def test_regroup_opens_the_grouper_on_the_prompt_folders(client, tmp_path, monke
     assert calls == [[str(python), str(project / "main.py"), str(folder)]]
     # The prompt is still pending: the user answers Re-scan themselves.
     assert prompt.answered is False
+
+
+def test_regroup_stops_the_batch_when_a_window_loses_a_file(client, tmp_path,
+                                                            monkeypatch):
+    """T9: the count around each window, on the dashboard's own launcher too.
+
+    Caught rather than left to kill the worker thread: the alarm has to reach
+    the log a reviewer is actually looking at, and the folders still queued
+    would go to the same grouper that just lost a file.
+    """
+    import subprocess
+
+    install_grouper(client, tmp_path)
+    month = tmp_path / "PHOTOS" / "2026" / "07. July"
+    first = month / "2026-07-18_(Sat) - __TO_SPLIT__(i=2)"
+    second = month / "2026-07-19_(Sun) - __TO_SPLIT__(i=1)"
+    for folder in (first, second):
+        folder.mkdir(parents=True)
+    for index in range(2):
+        (first / f"img_{index}.jpg").write_bytes(b"x")
+    (second / "img_0.jpg").write_bytes(b"x")
+    prompt = grouper_prompt(client, [first, second])
+
+    opened = []
+
+    def fake_run(cmd, **kwargs):
+        folder = pathlib.Path(cmd[-1])
+        opened.append(folder)
+        if len(opened) == 1:
+            sorted(folder.glob("*.jpg"))[1].unlink()
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert client.post(f"/api/prompts/{prompt.prompt_id}/regroup").status_code == 200
+    _runtime(client).grouper_thread.join(timeout=5)
+
+    assert opened == [first]                  # the second was never opened
+    logs = "\n".join(_runtime(client).context.logs)
+    assert "FILES WENT MISSING WHILE THE GROUPER WAS OPEN" in logs
+    assert "img_1.jpg" in logs
+    assert "1 folder(s) were not opened" in logs
 
 
 def test_regroup_rejects_unknown_and_non_review_prompts(client, tmp_path):

@@ -60,6 +60,34 @@ A folder holding nothing at all reaches step 3 only when step 1 was skipped or
 could not park it -- a run of "--steps 3" alone, a folder with no level above
 it allowed to hold a parking area (H2). It is passed over on the same grounds.
 
+Counted in, counted out
+-----------------------
+The grouper is another project, and it is bound by neither T1 ("no file is
+deleted") nor T2 ("rename, never replace"). Handed two files captured in the
+same second it has renamed both onto one name and lost the one underneath,
+silently, with nothing in any log to say the second had ever existed.
+
+So step 3 brackets every window with a count and journals both readings (T9).
+Four totals, and a window may lower none of them -- files, media, sidecars and
+bytes -- because none of them subsumes another. A sidecar lost while the
+grouper writes a state file of its own leaves the file count exactly where it
+was; a file overwritten in place leaves all three counts where they were and
+moves only the byte total. A sidecar is not a lesser file either: it is the
+only record of what the camera said about a shot, and X3 makes a stranded
+companion the only surviving evidence that its subject existed.
+
+Any of the four coming back lower ends the run on the spot: the alarm names
+what went, the batch opens nothing else, and steps 4 to 8 never start --
+because each of them rewrites names, and the names are the last record of what
+the missing file was called and where it sat.
+
+The count is over the folder's **parent**, not the folder. Splitting a day is
+allowed to consume the folder the window was opened on, so a count scoped to
+the folder would read zero after every successful split. Everything a window
+is supposed to do happens inside that parent and leaves its total alone. The
+closing count is kept and reused as the next window's opening count when the
+two share a parent, which also brackets the gap between them.
+
 The count is taken off the disk, never off the folder's own name: the
 canonicaliser counts the whole subtree when a top level is bare, so a day
 whose every file sits in a subfolder is still named "__TO_SPLIT__(v=3)"
@@ -735,6 +763,7 @@ NON_COMPLIANT = "NON-COMPLIANT FOLDERS"
 STEPS_FAILED = "STEPS THAT DID NOT FINISH"
 REFUSED_PATHS = "PATHS REFUSED"
 GROUPER_FAILURES = "FOLDERS THE GROUPER COULD NOT OPEN"
+FILES_LOST = "FILES THAT WENT MISSING WHILE THE GROUPER WAS OPEN"
 PASSED_OVER = "MARKED FOLDERS WITH NOTHING TO SHOW"
 PARK_FAILURES = "EMPTY FOLDERS THAT COULD NOT BE PARKED"
 RECONCILE_ERRORS = "RECONCILIATION ERRORS"
@@ -743,6 +772,8 @@ AWAITING_A_NAME = "GROUPS NOBODY HAS NAMED"
 RENAME_FAILURES = "FOLDERS THAT COULD NOT BE RENAMED"
 
 ISSUE_NOTES = {
+    FILES_LOST: "the run stopped the moment it noticed -- recover these from "
+    "a backup before anything else touches the tree",
     NON_COMPLIANT: "reported, never fixed -- what to do with a folder the "
     "standard does not describe is a decision for a person",
     STEPS_FAILED: "the run stopped here; whatever follows a stopped step " "never ran",
@@ -762,10 +793,13 @@ ISSUE_NOTES = {
     RENAME_FAILURES: "the name on the disk still says what it said before",
 }
 
-# Failures first, because they change what the rest of the run means; the
-# folders the standard cannot describe last, because they are the only group
-# no future step will ever settle on its own.
+# A lost file first, always: it is the only finding here that cannot be put
+# right by running the tool again, and the only one where what to do next is
+# "stop and go to a backup". Then the other failures, because they change what
+# the rest of the run means; the folders the standard cannot describe last,
+# because they are the only group no future step will ever settle on its own.
 ISSUE_ORDER = [
+    FILES_LOST,
     STEPS_FAILED,
     GROUPER_FAILURES,
     RENAME_FAILURES,
@@ -1228,6 +1262,169 @@ def grouper_paths(run):
     return python_exe, project_path
 
 
+# How many of the files a window took away are named in the alarm before the
+# list is cut off. Enough to recognise the shot; short enough that the frame is
+# still readable, with the count of the rest after it.
+VANISHED_TO_NAME = 12
+
+
+def census_classifier(run):
+    """``kind(name)`` for the census: media, sidecar, or anything else.
+
+    Both readings come off the project's own definitions rather than a list
+    spelled here (T8): ``count_media`` for what an image or a video is, and
+    ``companion_subject_name`` over every companion extension there is --
+    "._exif", the ".THM.jpg"/".lrv" previews, the ".OCR.txt" -- for what is a
+    companion of something. X6 makes all of those sidecars, and the census
+    counts them as one number because they are lost the same way.
+
+    Media is asked first only because it is the cheaper question. The two
+    cannot both be true: ``count_media`` already excludes previews (X7), and no
+    companion extension is in the image or video sets.
+    """
+    settings = run.grouping_settings
+    companion_exts = set(
+        canonicalise.grouping.companion_extension_spellings(canonicalise._config())
+    )
+
+    def kind(name):
+        images, videos = canonicalise.grouping.count_media(
+            [name], settings.image_exts, settings.video_exts, settings.preview_exts
+        )
+        if images or videos:
+            return grouper.MEDIA
+        if canonicalise.grouping.companion_subject_name(name, companion_exts) is not None:
+            return grouper.SIDECAR
+        return grouper.OTHER
+
+    return kind
+
+
+class WindowCensus:
+    """The count taken around each grouper window, and the one it is against.
+
+    Scoped to the folder's **parent**, because splitting a day is allowed to
+    consume the folder the window was opened on -- the grouper writes the
+    sub-events as siblings and takes the original away. A count scoped to the
+    folder would read zero after every successful split.
+
+    The count taken when a window closes is kept and reused as the opening
+    count of the next window in the same parent, which is not merely half the
+    walking: it means the two counts also bracket the gap between windows,
+    where this tool does nothing but write a journal line outside the scope.
+    A different parent starts a fresh count.
+    """
+
+    def __init__(self, run):
+        self.run = run
+        self.classify = census_classifier(run)
+        self.scope = None
+        self.census = None
+
+    def take(self, scope):
+        # The canonicaliser is passed as the path library: its extended_path
+        # is what keeps a deep tree from coming back short (T6) and its
+        # is_reparse_point is what stops the count crossing a junction (T4),
+        # both exactly as every other walk in this tool does it.
+        return grouper.folder_census(scope, self.classify, paths=canonicalise)
+
+    def scope_for(self, folder):
+        """The folder's parent -- unless that is outside the target.
+
+        This tool reads nothing outside what it was pointed at, and a marked
+        folder that *is* a tree root has no parent it is allowed to count.
+        There the folder itself is the scope, and a window that splits its
+        contents out into siblings has moved them out of the target: a loss
+        from where this run is standing, and reported as one.
+        """
+        scope = grouper.census_scope(folder)
+        if any(inside(path_key(tree), scope) for tree in self.run.trees):
+            return scope
+        return Path(folder)
+
+    def before(self, folder):
+        """``(scope, census)`` as things stand before this window opens."""
+        scope = self.scope_for(folder)
+        if self.scope is None or path_key(self.scope) != path_key(scope):
+            self.scope = scope
+            self.census = self.take(scope)
+        return scope, self.census
+
+    def after(self, scope):
+        """The count once the window has closed. Kept for the next one."""
+        self.scope = scope
+        self.census = self.take(scope)
+        return self.census
+
+
+def report_census(run, scope, census, which):
+    """One reading, in the four totals a window must not lower.
+
+    All four on the line, every time, rather than only the one that broke: the
+    line before the window is the only place the reader can see what was there
+    to lose, and it is written before anybody knows whether anything will.
+    """
+    run.report(
+        "dim",
+        "    %-8s %d file(s), %d media, %d sidecar(s), %s byte(s) below %s"
+        % (which + ":", census.files, census.media, census.sidecars,
+           format(census.bytes, ","), scope.name),
+    )
+    for path in census.unreadable:
+        # Said every time, not only when something goes missing: a count that
+        # skipped a junction is not evidence, and the moment to know that is
+        # before the window opens rather than after the alarm.
+        run.report("warn", "    ! not counted: %s" % path)
+
+
+def report_lost_files(run, loss):
+    """The alarm. A file is gone and nothing else in this run matters now.
+
+    Printed in a heavy red frame with the right edge left open, so the paths
+    in it can be copied whole -- they are the actionable half, and the names
+    in the "vanished" list are about to stop existing anywhere at all: the
+    file is already gone, and steps 4 to 8 would rewrite the folder names that
+    are the last record of where it was.
+    """
+    lines = [
+        line(FAILED, "A grouper window gave back fewer files than it was handed."),
+        line("dim", ""),
+        line(FAILED, "  folder opened:  %s" % loss.folder),
+        line(FAILED, "  counted below:  %s" % loss.scope),
+    ]
+    for text in loss.losses:
+        lines.append(line(FAILED, "  %s" % text))
+    if loss.vanished:
+        lines.append(line("dim", ""))
+        lines.append(
+            line("warn", "  no longer accounted for "
+                         "(size, and the name it had BEFORE the window opened):")
+        )
+        for size, name in loss.vanished[:VANISHED_TO_NAME]:
+            lines.append(line("warn", "    %12s B  %s"
+                              % (format(size, ","), name)))
+        if len(loss.vanished) > VANISHED_TO_NAME:
+            lines.append(
+                line("warn", "    ... and %d more"
+                             % (len(loss.vanished) - VANISHED_TO_NAME))
+            )
+    for path in tuple(loss.before.unreadable) + tuple(loss.after.unreadable):
+        lines.append(line("warn", "  ! not counted either time: %s" % path))
+    lines.append(line("dim", ""))
+    lines.append(
+        line(FAILED, "  Nothing further was opened and no later step ran.")
+    )
+    lines.append(
+        line(FAILED, "  Recover the file(s) from a backup or from Dropbox "
+                     "version history")
+    )
+    lines.append(
+        line(FAILED, "  before anything else is allowed to touch this tree.")
+    )
+    print()
+    frame("FILES WENT MISSING", lines, FAILED, run.colour, heavy=True, closed=False)
+
+
 def still_safe_to_open(folder, run):
     """``None`` when the folder may be opened, otherwise why it may not.
 
@@ -1252,10 +1449,17 @@ def still_safe_to_open(folder, run):
 
 
 def step_group(run):
-    """Open the grouper on each marked folder, one at a time.
+    """Open the grouper on each marked folder, one at a time, counting each.
 
     A folder the GUI failed on is counted and the batch carries on: one bad
     folder must not cost the reviewer the other ninety.
+
+    A folder the GUI *lost a file from* ends the run on the spot. Every window
+    is bracketed by a count over the folder's parent -- files, media, sidecars
+    and bytes -- journalled both times, and any of the four coming back lower
+    returns 2, which is what this tool means by "stopped", so steps 4 to 8
+    never run. They would rewrite the names that are the last record of what
+    the missing file was called.
     """
     marked = find_to_split_folders(run)
     if not marked:
@@ -1319,6 +1523,7 @@ def step_group(run):
         return 2
 
     opened = failures = skipped = 0
+    census = WindowCensus(run)
     for number, folder in enumerate(folders, start=1):
         reason = still_safe_to_open(folder, run)
         if reason is not None:
@@ -1331,15 +1536,66 @@ def step_group(run):
             continue
 
         run.report("bold", "[%d/%d] %s" % (number, len(folders), folder.name))
-        run.journal.write("group_opened", folder=str(folder))
+        scope, before = census.before(folder)
+        report_census(run, scope, before, "before")
+        run.journal.write(
+            "group_opened",
+            folder=str(folder),
+            scope=str(scope),
+            before=grouper.census_record(before),
+        )
         try:
             result = grouper.run_grouper(python_exe, project_path, folder)
         except OSError as error:
+            # The window never opened, so nothing below the scope can have
+            # moved and the opening count still stands for the next folder.
             run.report(FAILED, "    ! could not launch the grouper: %s" % error)
             run.flag(GROUPER_FAILURES, folder, "could not launch: %s" % error)
             run.journal.write("group_failed", folder=str(folder), error=str(error))
             failures += 1
             continue
+
+        # Counted before the exit code is even looked at: a window that
+        # crashed after destroying a file has still destroyed it, and that is
+        # the finding that decides what happens next.
+        after = census.after(scope)
+        report_census(run, scope, after, "after")
+        run.journal.write(
+            "group_closed",
+            folder=str(folder),
+            scope=str(scope),
+            before=grouper.census_record(before),
+            after=grouper.census_record(after),
+            exit_code=result.returncode,
+        )
+        try:
+            grouper.guard_grouper_window(folder, before, after)
+        except grouper.GrouperLostFiles as loss:
+            run.journal.write(
+                "group_lost_files",
+                folder=str(folder),
+                scope=str(scope),
+                before=grouper.census_record(before),
+                after=grouper.census_record(after),
+                losses=loss.losses,
+                vanished=[{"bytes": size, "name": name}
+                          for size, name in loss.vanished],
+            )
+            report_lost_files(run, loss)
+            run.flag(FILES_LOST, folder, "; ".join(loss.losses))
+            for size, name in loss.vanished[:VANISHED_TO_NAME]:
+                # By name and not as a path: the path it had is gone, and
+                # joining the old name onto the scope would print a location
+                # the file was never at.
+                run.flag(FILES_LOST, name,
+                         "%s byte(s), last seen somewhere below %s"
+                         % (format(size, ","), scope))
+            # 2 is what this tool means by "stopped": the run loop prints
+            # "stopping here" and steps 4 to 8 never run. That is the point --
+            # every one of them rewrites names, and the names are the last
+            # record of what the missing file was and where it sat.
+            return 2
+
         if result.returncode != 0:
             # The bare exit code says nothing about what went wrong -- the
             # grouper's own message only reaches its stderr.
@@ -1363,7 +1619,6 @@ def step_group(run):
             )
             failures += 1
             continue
-        run.journal.write("group_closed", folder=str(folder))
         opened += 1
 
     run.report(
@@ -2800,7 +3055,18 @@ def report_summary(run, outcomes, worst, issues, colour):
         "SUMMARY  (%s)" % ("applied" if run.apply else "dry run"), lines, "bold", colour
     )
 
-    if issues:
+    if any(heading == FILES_LOST for _step, heading, _item, _note in run.issues):
+        # Ahead of the issue count, because "3 issues to address" is the
+        # verdict a naming problem gets and this is not one. The run stopped,
+        # a file is gone, and the next thing to happen is a restore -- so that
+        # is what the last box on the screen says.
+        banner(
+            "%s  FILES WENT MISSING  %s" % (glyph("cross"), glyph("cross")),
+            "The run stopped. Recover them before anything touches this tree.",
+            FAILED,
+            colour,
+        )
+    elif issues:
         banner(
             "%s  %d ISSUE(S) TO ADDRESS  %s" % (glyph("cross"), issues, glyph("cross")),
             "Listed in the block above. None of them was fixed for you.",

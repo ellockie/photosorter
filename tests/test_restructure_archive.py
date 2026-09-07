@@ -840,6 +840,401 @@ def test_nothing_to_group_is_success(tmp_path, config, fake_grouper):
 
 
 # --------------------------------------------------------------------------
+# Step 3 -- the count around each window (T9)
+# --------------------------------------------------------------------------
+#
+# The grouper is a separate project and obeys neither T1 nor T2. Handed two
+# files captured in the same second it has renamed both onto one name and lost
+# the one underneath, silently. These are the tests that say the tool notices.
+
+
+def grouper_that(action):
+    """Run ``action(folder)`` in place of the window, then launch for real.
+
+    The real launcher still runs, so the argument vector, the working
+    directory and the exit code are all exercised exactly as they are in the
+    tests around these -- ``action`` only stands in for what a window does to
+    the disk while it is open.
+    """
+    real = tool.grouper.run_grouper
+
+    def stand_in(python_exe, project_path, folder):
+        action(folder)
+        return real(python_exe, project_path, folder)
+
+    return real, stand_in
+
+
+def journal_records(path):
+    return [json.loads(line) for line in
+            path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_a_window_that_loses_a_file_stops_the_run(tmp_path, config,
+                                                  fake_grouper, capsys):
+    """The same-second overwrite, in the shape it reaches this tool in."""
+    root = make_archive(tmp_path)
+    first = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=2)",
+                       images=2)
+    second = make_event(root, "2026-07-18_(Sat)__09.00.00 - __TO_SPLIT__(i=1)")
+    doomed = sorted(first.glob("*.jpg"))[1]
+
+    real, stand_in = grouper_that(
+        lambda folder: doomed.unlink() if folder == first else None)
+    tool.grouper.run_grouper = stand_in
+    try:
+        assert run(str(root), "--steps", "3", "--apply", "--yes") == 2
+    finally:
+        tool.grouper.run_grouper = real
+
+    out = capsys.readouterr().out
+    assert "FILES WENT MISSING" in out
+    assert "1 file(s) went missing" in out
+    assert "1 image(s)/video(s) went missing" in out
+    assert doomed.name in out                 # named, not just counted
+    # The batch stopped where it noticed: the next folder was never opened.
+    assert opened_folders(fake_grouper) == [first]
+    assert second.is_dir()
+
+
+def test_the_run_stops_before_any_later_step(tmp_path, config, fake_grouper,
+                                             capsys):
+    """Steps 4-8 rewrite names, and the names are the last record."""
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=2)", images=2)
+
+    # A whole run, so step 1 has already renamed everything by the time the
+    # window opens -- the file to destroy is found inside the folder the
+    # grouper is handed, exactly as the real one would find it.
+    real, stand_in = grouper_that(
+        lambda target: sorted(target.glob("*.jpg"))[1].unlink())
+    tool.grouper.run_grouper = stand_in
+    try:
+        assert run(str(root), "--apply", "--yes") == 2
+    finally:
+        tool.grouper.run_grouper = real
+
+    out = capsys.readouterr().out
+    assert "Step 3 could not run; stopping here." in out
+    assert "STEP 4" not in out
+    assert "STEP 5" not in out
+    assert tool.FILES_LOST in out             # in the end-of-run issue block
+    # And in the closing box, which is what is still on the screen at the end.
+    # "3 issue(s) to address" is the verdict a naming problem gets; this is not
+    # one of those.
+    assert "Recover them before anything touches this tree." in out
+
+
+def test_a_normal_split_is_not_a_loss(tmp_path, config, fake_grouper, capsys):
+    """Moving a day's files down into sub-events is the whole point."""
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=3)", images=3)
+
+    def split(target):
+        sub = target / "2026-07-15_(Wed)__08.14.02 - Pier"
+        sub.mkdir()
+        for path in sorted(target.glob("*.jpg"))[1:]:
+            path.rename(sub / path.name)
+
+    real, stand_in = grouper_that(split)
+    tool.grouper.run_grouper = stand_in
+    try:
+        assert run(str(root), "--steps", "3", "--apply", "--yes") == 0
+    finally:
+        tool.grouper.run_grouper = real
+    assert "FILES WENT MISSING" not in capsys.readouterr().out
+
+
+def test_a_window_that_consumes_its_own_folder_is_not_a_loss(tmp_path, config,
+                                                             fake_grouper,
+                                                             capsys):
+    """Splitting a day may take the folder away; the count is over its parent."""
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=2)",
+                        images=2)
+
+    def split_away(target):
+        for index, path in enumerate(sorted(target.glob("*.jpg"))):
+            sub = target.parent / ("2026-07-15_(Wed)__08.14.0%d - Part %d"
+                                   % (index, index))
+            sub.mkdir()
+            path.rename(sub / path.name)
+        target.rmdir()
+
+    real, stand_in = grouper_that(split_away)
+    tool.grouper.run_grouper = stand_in
+    try:
+        assert run(str(root), "--steps", "3", "--apply", "--yes") == 0
+    finally:
+        tool.grouper.run_grouper = real
+    assert "FILES WENT MISSING" not in capsys.readouterr().out
+    assert not folder.exists()
+
+
+def test_a_window_that_adds_a_file_is_not_a_loss(tmp_path, config,
+                                                 fake_grouper, capsys):
+    """A grouper writing a state file of its own has taken nothing away."""
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=1)")
+
+    real, stand_in = grouper_that(
+        lambda target: (target / "grouper-state.json").write_text("{}",
+                                                                 encoding="utf-8"))
+    tool.grouper.run_grouper = stand_in
+    try:
+        assert run(str(root), "--steps", "3", "--apply", "--yes") == 0
+    finally:
+        tool.grouper.run_grouper = real
+    assert "FILES WENT MISSING" not in capsys.readouterr().out
+
+
+def test_a_file_lost_from_a_sibling_folder_is_still_caught(tmp_path, config,
+                                                           fake_grouper):
+    """The count is over the parent, so it sees the whole month, not one day."""
+    root = make_archive(tmp_path)
+    first = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=1)")
+    neighbour = make_event(root, "2026-07-20_(Mon)__10.00.00 - Sopot weekend")
+    doomed = next(neighbour.glob("*.jpg"))
+
+    real, stand_in = grouper_that(lambda _folder: doomed.unlink())
+    tool.grouper.run_grouper = stand_in
+    try:
+        assert run(str(root), "--steps", "3", "--apply", "--yes") == 2
+    finally:
+        tool.grouper.run_grouper = real
+
+
+def test_a_crash_that_also_lost_a_file_reports_the_loss(tmp_path, config,
+                                                        fake_grouper, capsys):
+    """A window that died after destroying a file has still destroyed it."""
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=2)",
+                        images=2)
+    doomed = sorted(folder.glob("*.jpg"))[1]
+    Path(fake_grouper["project_path"], "main.py").write_text(
+        "import sys\n"
+        "open(%r, 'a', encoding='utf-8').write(sys.argv[1] + '\\n')\n"
+        "sys.exit(3)\n" % str(fake_grouper["_log"]),
+        encoding="utf-8")
+
+    real, stand_in = grouper_that(lambda _folder: doomed.unlink())
+    tool.grouper.run_grouper = stand_in
+    try:
+        assert run(str(root), "--steps", "3", "--apply", "--yes") == 2
+    finally:
+        tool.grouper.run_grouper = real
+    assert "FILES WENT MISSING" in capsys.readouterr().out
+
+
+def test_a_lost_sidecar_stops_the_run_like_a_lost_shot(tmp_path, config,
+                                                       fake_grouper, capsys):
+    """X6/X3: a companion is not a lesser file, and is not counted as one."""
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=1)")
+    sidecar = folder / "2026-07-15_(Wed)_08.14.00__f1.7.jpg._exif"
+    sidecar.write_bytes(b"what the camera said")
+
+    real, stand_in = grouper_that(
+        lambda target: next(target.glob("*._exif")).unlink())
+    tool.grouper.run_grouper = stand_in
+    try:
+        assert run(str(root), "--steps", "3", "--apply", "--yes") == 2
+    finally:
+        tool.grouper.run_grouper = real
+
+    out = capsys.readouterr().out
+    assert "1 sidecar(s)/companion(s) went missing: 1 before, 0 after" in out
+    assert sidecar.name in out
+
+
+def test_a_file_overwritten_in_place_stops_the_run(tmp_path, config,
+                                                   fake_grouper, capsys):
+    """Every count stays level; only the byte total says the file is gone."""
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=2)",
+                        images=2)
+    for index, path in enumerate(sorted(folder.glob("*.jpg"))):
+        path.write_bytes(b"a whole shot" * (index + 50))
+
+    # What a same-second collision looks like when the loser is truncated
+    # rather than unlinked: one name, one file, a fraction of the bytes.
+    real, stand_in = grouper_that(
+        lambda target: sorted(target.glob("*.jpg"))[1].write_bytes(b"stub"))
+    tool.grouper.run_grouper = stand_in
+    try:
+        assert run(str(root), "--steps", "3", "--apply", "--yes") == 2
+    finally:
+        tool.grouper.run_grouper = real
+
+    out = capsys.readouterr().out
+    assert "byte(s) of content went missing" in out
+    # Nothing else would have caught it: the file count never moved.
+    assert "file(s) went missing" not in out
+
+
+def test_each_window_is_journalled_with_a_count_both_sides(tmp_path, config,
+                                                           fake_grouper):
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=2)", images=2)
+    journal = tmp_path / "journal.jsonl"
+    assert run(str(root), "--steps", "3", "--apply", "--yes",
+               "--journal", str(journal)) == 0
+
+    records = journal_records(journal)
+    opened = [record for record in records if record["event"] == "group_opened"]
+    closed = [record for record in records if record["event"] == "group_closed"]
+    assert len(opened) == 1 and len(closed) == 1
+    # The month folder, not the day: the day may not survive its own window.
+    assert opened[0]["scope"].endswith("07. July")
+    assert opened[0]["before"]["files"] == 2
+    assert opened[0]["before"]["media"] == 2
+    assert opened[0]["before"]["sidecars"] == 0
+    assert opened[0]["before"]["bytes"] == 2
+    assert closed[0]["before"] == opened[0]["before"]
+    assert closed[0]["after"] == opened[0]["before"]
+
+
+def test_a_loss_is_journalled_with_the_names_that_went(tmp_path, config,
+                                                       fake_grouper):
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=2)",
+                        images=2)
+    doomed = sorted(folder.glob("*.jpg"))[1]
+    journal = tmp_path / "journal.jsonl"
+
+    real, stand_in = grouper_that(lambda _folder: doomed.unlink())
+    tool.grouper.run_grouper = stand_in
+    try:
+        assert run(str(root), "--steps", "3", "--apply", "--yes",
+                   "--journal", str(journal)) == 2
+    finally:
+        tool.grouper.run_grouper = real
+
+    lost = [record for record in journal_records(journal)
+            if record["event"] == "group_lost_files"]
+    assert len(lost) == 1
+    assert lost[0]["before"]["files"] == 2
+    assert lost[0]["after"]["files"] == 1
+    assert [entry["name"] for entry in lost[0]["vanished"]] == [doomed.name]
+
+
+def test_a_dry_run_takes_no_census_and_opens_nothing(tmp_path, config,
+                                                     fake_grouper, capsys):
+    root = make_archive(tmp_path)
+    make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=1)")
+    assert run(str(root), "--steps", "3") == 1
+    out = capsys.readouterr().out
+    assert "the grouper was not opened" in out
+    assert "FILES WENT MISSING" not in out
+
+
+# --------------------------------------------------------------------------
+# The census itself
+# --------------------------------------------------------------------------
+
+def census(files=0, media=0, sidecars=0, bytes=0, sizes=(), unreadable=()):
+    """A Census by keyword, so a new total does not rewrite every case."""
+    return tool.grouper.Census(files=files, media=media, sidecars=sidecars,
+                               bytes=bytes, sizes=tuple(sizes),
+                               unreadable=tuple(unreadable))
+
+
+def test_the_census_counts_the_whole_subtree(tmp_path):
+    root = tmp_path / "month"
+    (root / "day" / "__RAW").mkdir(parents=True)
+    (root / "day" / "a.jpg").write_bytes(b"12345")
+    (root / "day" / "__RAW" / "a.cr2").write_bytes(b"1234567890")
+    counted = tool.grouper.folder_census(root, paths=tool.canonicalise)
+    assert counted.files == 2
+    assert counted.bytes == 15
+    assert counted.unreadable == ()
+
+
+def test_the_census_tells_media_from_sidecars(tmp_path, config):
+    """X6: an "._exif", a ".THM.jpg" and an ".OCR.txt" are all sidecars."""
+    config["extensions"]["previews"] = [".THM.jpg", ".lrv"]
+    config["extensions"]["ocr"] = [".OCR.txt"]
+    root = tmp_path / "month"
+    root.mkdir()
+    for name in ("a.jpg", "b.mp4", "c.cr2"):
+        (root / name).write_bytes(b"x")
+    for name in ("a.jpg._exif", "b.mp4.THM.jpg", "b.mp4.lrv", "a.jpg.OCR.txt"):
+        (root / name).write_bytes(b"xx")
+    (root / "notes.txt").write_bytes(b"xxx")
+
+    run_object = make_run(tmp_path, config)
+    counted = tool.grouper.folder_census(
+        root, tool.census_classifier(run_object), paths=tool.canonicalise)
+    assert counted.files == 8
+    assert counted.media == 3                 # the RAW is media; the preview is not
+    assert counted.sidecars == 4              # ._exif, .THM.jpg, .lrv, .OCR.txt
+    assert counted.bytes == 3 + 8 + 3
+
+
+def test_the_count_is_over_the_parent_and_never_outside_the_target(tmp_path,
+                                                                  config):
+    root = make_archive(tmp_path)
+    folder = make_event(root, "2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=1)")
+    run_object = make_run(root, config)
+    window = tool.WindowCensus(run_object)
+
+    # An event folder: the month above it is inside the target, so that is
+    # what the two counts are taken over.
+    assert window.scope_for(folder) == folder.parent
+
+    # A tree root has no parent this run is allowed to read, so it counts
+    # itself rather than reaching out of the target.
+    tree = run_object.trees[0]
+    assert window.scope_for(tree) == tree
+
+
+def test_only_a_drop_is_a_loss():
+    same = census(files=3, media=2, sidecars=1, bytes=30)
+    more = census(files=4, media=3, sidecars=2, bytes=40)
+    assert tool.grouper.census_loss(same, same) == []
+    assert tool.grouper.census_loss(same, more) == []
+    fewer = census(files=2, media=1, sidecars=0, bytes=20)
+    assert len(tool.grouper.census_loss(same, fewer)) == 4
+
+
+def test_each_total_alarms_on_its_own():
+    """None of the four subsumes another, so each is checked separately."""
+    before = census(files=3, media=2, sidecars=1, bytes=300)
+
+    # A sidecar lost while a state file arrives: the file count never moves.
+    swapped = census(files=3, media=2, sidecars=0, bytes=300)
+    assert [text.split(" ")[1] for text in
+            tool.grouper.census_loss(before, swapped)] == ["sidecar(s)/companion(s)"]
+
+    # A file overwritten in place: every count is level and only the size moved.
+    truncated = census(files=3, media=2, sidecars=1, bytes=180)
+    losses = tool.grouper.census_loss(before, truncated)
+    assert len(losses) == 1
+    assert "120 byte(s) of content went missing" in losses[0]
+
+    # A shot lost while a sidecar arrives.
+    shuffled = census(files=3, media=1, sidecars=2, bytes=300)
+    assert len(tool.grouper.census_loss(before, shuffled)) == 1
+
+
+def test_a_rename_is_not_a_vanishing():
+    before = census(files=2, media=2, bytes=30,
+                    sizes=((10, "IMG_1.jpg"), (20, "IMG_2.jpg")))
+    after = census(files=2, media=2, bytes=30,
+                   sizes=((10, "2026-07-15.jpg"), (20, "2026-07-16.jpg")))
+    assert tool.grouper.census_loss(before, after) == []
+    assert tool.grouper.census_vanished(before, after) == []
+
+
+def test_what_vanished_is_named_by_the_size_that_did_not_come_back():
+    before = census(files=3, media=3, bytes=60,
+                    sizes=((10, "a.jpg"), (20, "b.jpg"), (30, "c.jpg")))
+    after = census(files=2, media=2, bytes=40,
+                   sizes=((10, "renamed.jpg"), (30, "also-renamed.jpg")))
+    assert tool.grouper.census_vanished(before, after) == [(20, "b.jpg")]
+
+
+# --------------------------------------------------------------------------
 # Confirmation
 # --------------------------------------------------------------------------
 

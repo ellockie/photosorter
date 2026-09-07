@@ -9,8 +9,10 @@ from src.core import \
     load_config, \
     save_config
 from src.pipeline_stages.screenshot_grouping import \
+    GrouperLostFiles, \
     grouper_install, \
-    launch_grouper
+    launch_grouper, \
+    report_lost_files
 from src.stages import build_default_orchestrator
 
 
@@ -237,13 +239,26 @@ class PipelineRuntime:
         self.context.log(
             f"Re-opening the grouper on {len(folders)} folder(s) from the review"
         )
-        for folder in folders:
+        for number, folder in enumerate(folders, start=1):
             # An earlier window in this same batch may have renamed this one
             # (the grouper splits a day into new folders and removes the old).
             if not folder.is_dir():
                 self.context.log(f"Skipping {folder.name}: no longer under that name")
                 continue
-            launch_grouper(self.context, folder, python_exe, project_path)
+            try:
+                launch_grouper(self.context, folder, python_exe, project_path)
+            except GrouperLostFiles as loss:
+                # A window gave back fewer files than it was handed. Caught
+                # rather than left to kill the thread, so the alarm reaches the
+                # dashboard log a reviewer is actually looking at -- and the
+                # batch stops here, because every folder still queued would be
+                # opened in the same grouper that just lost a file.
+                report_lost_files(self.context, loss)
+                self.context.log(
+                    "Grouper batch stopped - %d folder(s) were not opened"
+                    % (len(folders) - number)
+                )
+                return
         self.context.log("Grouper closed - press Re-scan when the folders are named")
 
     def answer_prompt(self, prompt_id: str, answer: dict):

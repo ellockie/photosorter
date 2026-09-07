@@ -807,6 +807,7 @@ Any tool writing to the archive, first-party or third-party:
 | T6 | **Long paths.** Windows syscalls cap at `MAX_PATH`; a deep tree needs the `\\?\` prefix or a walk silently comes back short. |
 | T7 | **A folder named by a human is finished** (N8). Its tail is never rewritten. |
 | T8 | **One definition per rule.** Read names, markers and patterns from §8 or from the project's central modules — never restate them inline. A convention defined twice drifts, and half the pipeline ends up writing names the other half cannot parse. |
+| T9 | **Count what you hand to another program, and count it again when it comes back.** A tool that opens a folder in a program it does not control — the grouper GUI — counts that folder's **parent** before the window opens and again after it closes, journals both, and **stops the run** if any of four totals came back lower: **files**, **media**, **sidecars** (X6, so previews and OCR count) and **bytes**. Four, because none subsumes another: a sidecar lost while a state file arrives leaves the file count level, and a file overwritten in place leaves every count level and moves only the byte total. A sidecar is not a lesser file — X3 makes a stranded companion the only surviving evidence its subject existed. The parent, because splitting a day may legitimately consume the folder itself. T1 and T2 bind this project's own tools; a third-party one can only be watched, and a loss noticed on the next window is a loss noticed too late. |
 
 ### Where the definitions live in this repo
 
@@ -1304,6 +1305,14 @@ tool_obligations:
   resolve_mapped_drive_to_unc: true
   long_path_prefix: '\\?\'
   human_named_folder_is_final: true
+  # T9 - a program this project does not control is watched, not trusted.
+  census_around_external_tool:
+    scope: parent_of_the_folder_handed_over   # a split may consume the folder
+    counts: [files, media, sidecars, bytes]   # sidecars per X6; bytes catch an
+                                              # overwrite in place, which moves
+                                              # none of the other three
+    journal: [before, after]
+    on_decrease: stop_the_run
   prompts_before: [group_loose_media_migration, group_month_folder_move, misplaced_dated_folder_move]  # C4/C12/P5
   exit_codes: {clean: 0, pending_or_failed: 1, error: 2}
 ```

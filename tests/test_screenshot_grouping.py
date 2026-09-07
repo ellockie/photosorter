@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from src.core import PipelineContext
-from src.pipeline_stages.screenshot_grouping import ScreenshotGroupingStage
+from src.pipeline_stages.screenshot_grouping import GrouperLostFiles, ScreenshotGroupingStage
 
 PLACEHOLDER = " - 1. ######"
 
@@ -384,3 +384,163 @@ def test_stage_in_default_pipeline_after_folder_sorting():
     assert "screenshot-grouping" in ids
     stage = stages[ids.index("screenshot-grouping")]
     assert stage.dependencies == ("folder-sorting",)
+
+
+# --------------------------------------------------------------------------
+# The count around each window (T9)
+# --------------------------------------------------------------------------
+#
+# The grouper is a separate project and obeys neither T1 nor T2. Handed two
+# files captured in the same second it has renamed both onto one name and lost
+# the one underneath, silently. These say the stage notices, and stops.
+
+
+def window_that(action, opened):
+    """A ``subprocess.run`` stand-in that does ``action`` to the folder it opens."""
+
+    def fake_run(cmd, **kwargs):
+        folder = Path(cmd[-1])
+        opened.append(folder)
+        action(folder, len(opened))
+        return ok(cmd)
+
+    return fake_run
+
+
+def test_a_window_that_loses_a_file_stops_the_stage(tmp_path, monkeypatch,
+                                                    grouper_install):
+    python, project = grouper_install
+    first = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=2)
+    second = make_event_folder(tmp_path, f"2026-07-19_(Sun){PLACEHOLDER}", images=1)
+
+    opened = []
+    monkeypatch.setattr(subprocess, "run", window_that(
+        lambda folder, nth: sorted(folder.glob("*.jpg"))[1].unlink() if nth == 1
+        else None, opened))
+    context = make_context(tmp_path, python=python, project=project)
+    affect(context, first, second)
+
+    with pytest.raises(GrouperLostFiles):
+        ScreenshotGroupingStage().execute(context)
+
+    # The second folder was never opened: every one still queued would go to
+    # the same grouper that just lost a file.
+    assert len(opened) == 1
+    logs = "\n".join(context.logs)
+    assert "FILES WENT MISSING WHILE THE GROUPER WAS OPEN" in logs
+    assert "1 file(s) went missing" in logs
+    assert "img_1.jpg" in logs                # named, not just counted
+    assert context.stage_stats["screenshot-grouping"]["errors"] == 1
+
+
+def test_a_normal_split_is_not_a_loss(tmp_path, monkeypatch, grouper_install):
+    """Moving a day's files down into sub-events is what a window is for."""
+    python, project = grouper_install
+    folder = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=3)
+
+    def split(target, _nth):
+        sub = target / "2026-07-18_(Sat) - Pier"
+        sub.mkdir()
+        for path in sorted(target.glob("*.jpg"))[1:]:
+            path.rename(sub / path.name)
+
+    opened = []
+    monkeypatch.setattr(subprocess, "run", window_that(split, opened))
+    context = make_context(tmp_path, python=python, project=project)
+    affect(context, folder)
+
+    ScreenshotGroupingStage().execute(context)
+    assert context.counters["screenshot_folders_grouped"] == 1
+    assert not any("WENT MISSING" in line for line in context.logs)
+
+
+def test_a_window_that_consumes_its_own_folder_is_not_a_loss(tmp_path, monkeypatch,
+                                                             grouper_install):
+    """The count is over the parent, because the day folder may not survive."""
+    python, project = grouper_install
+    folder = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=2)
+
+    def split_away(target, _nth):
+        for index, path in enumerate(sorted(target.glob("*.jpg"))):
+            sub = target.parent / f"2026-07-18_(Sat) - Part {index}"
+            sub.mkdir()
+            path.rename(sub / path.name)
+        target.rmdir()
+
+    opened = []
+    monkeypatch.setattr(subprocess, "run", window_that(split_away, opened))
+    context = make_context(tmp_path, python=python, project=project)
+    affect(context, folder)
+
+    ScreenshotGroupingStage().execute(context)
+    assert not any("WENT MISSING" in line for line in context.logs)
+
+
+def test_each_window_is_logged_with_a_count_both_sides(tmp_path, monkeypatch,
+                                                       grouper_install):
+    python, project = grouper_install
+    folder = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}",
+                               images=2, videos=1, with_raw_subdir=True)
+
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: ok(cmd))
+    context = make_context(tmp_path, python=python, project=project)
+    affect(context, folder)
+
+    ScreenshotGroupingStage().execute(context)
+    logs = "\n".join(context.logs)
+    # Four files below the month folder, all four of them media: two images, a
+    # video, and the RAW in the day's __RAW subdir -- the count is taken over
+    # the whole subtree, not the top level the GUI happens to show. One byte
+    # each, because that is what the fixture writes.
+    assert "before:  4 file(s), 4 media, 0 sidecar(s), 4 byte(s) below 07. July" in logs
+    assert "after:   4 file(s), 4 media, 0 sidecar(s), 4 byte(s) below 07. July" in logs
+
+
+def test_a_lost_sidecar_stops_the_stage_like_a_lost_shot(tmp_path, monkeypatch,
+                                                         grouper_install):
+    """X6/X3: a companion is not a lesser file, and is not counted as one."""
+    python, project = grouper_install
+    folder = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=2)
+    (folder / "img_0.jpg._exif").write_bytes(b"what the camera said")
+
+    # Reached for inside the folder the window is handed, not by a path
+    # captured beforehand: _prepare_folder renames the day onto the
+    # __TO_SPLIT__ convention first, so the earlier path is already stale.
+    opened = []
+    monkeypatch.setattr(subprocess, "run", window_that(
+        lambda opened_folder, _nth: next(
+            opened_folder.glob("*._exif")).unlink(), opened))
+    context = make_context(tmp_path, python=python, project=project)
+    affect(context, folder)
+
+    with pytest.raises(GrouperLostFiles):
+        ScreenshotGroupingStage().execute(context)
+    logs = "\n".join(context.logs)
+    assert "1 sidecar(s)/companion(s) went missing: 1 before, 0 after" in logs
+    assert "img_0.jpg._exif" in logs
+
+
+def test_a_file_overwritten_in_place_stops_the_stage(tmp_path, monkeypatch,
+                                                     grouper_install):
+    """Every count stays level; only the byte total says the file is gone."""
+    python, project = grouper_install
+    folder = make_event_folder(tmp_path, f"2026-07-18_(Sat){PLACEHOLDER}", images=0)
+    (folder / "img_0.jpg").write_bytes(b"the whole shot" * 100)
+    (folder / "img_1.jpg").write_bytes(b"the other whole shot" * 100)
+
+    def overwrite(opened_folder, _nth):
+        # What a same-second collision looks like when the loser is truncated
+        # rather than unlinked: one name, one file, a fraction of the bytes.
+        sorted(opened_folder.glob("*.jpg"))[1].write_bytes(b"stub")
+
+    opened = []
+    monkeypatch.setattr(subprocess, "run", window_that(overwrite, opened))
+    context = make_context(tmp_path, python=python, project=project)
+    affect(context, folder)
+
+    with pytest.raises(GrouperLostFiles):
+        ScreenshotGroupingStage().execute(context)
+    logs = "\n".join(context.logs)
+    assert "byte(s) of content went missing" in logs
+    # The file count never moved, so nothing else would have caught it.
+    assert "file(s) went missing" not in logs

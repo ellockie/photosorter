@@ -393,6 +393,59 @@ Explorer shows, so it is always obvious which folder the GUI is on and which are
 still to come. With `screenshot_grouping.max_folders` set, the cap keeps the
 first N in that order.
 
+### Counted in, counted out
+
+The grouper is a separate project, and it obeys neither of this archive's two
+hard rules — `T1`, no file is deleted, and `T2`, rename never replace. Handed
+two files captured in the same second, it has renamed both onto one name and
+lost the one underneath, silently, with nothing anywhere to say the second had
+ever existed.
+
+Nothing written inside this project would have stopped that; the overwrite
+happens in another process, in another virtualenv. So every grouper window —
+in the pipeline, from the dashboard's **Re-group**, and in step 3 of the
+restructuring tool — is **bracketed by a count**, logged both times:
+
+```text
+Launching grouper GUI on 2026-07-18_(Sat) - __TO_SPLIT__(i=12_v=2)
+  before:  41 file(s), 38 media, 3 sidecar(s), 214,880,551 byte(s) below 07. July
+  after:   41 file(s), 38 media, 3 sidecar(s), 214,880,551 byte(s) below 07. July
+```
+
+**Four totals, and a window may lower none of them.** None subsumes another:
+
+| Total      | Catches                                                                   |
+| ---------- | ------------------------------------------------------------------------- |
+| `files`    | the plain disappearance                                                    |
+| `media`    | a shot lost while something else arrives — no change in the file count     |
+| `sidecars` | the same for a companion                                                   |
+| `bytes`    | a file destroyed without disappearing: overwritten in place, or truncated  |
+
+A **sidecar is not a lesser file**. It is the only record of what the camera
+said about a shot, and `X3` makes a stranded companion the only surviving
+evidence that its subject ever existed — so losing one can be losing the thing
+that would have identified what else was lost. All of `X6`'s companions count:
+the `._exif`, the `.THM.jpg` / `.lrv` previews, the `.OCR.txt`.
+
+And **bytes are a total in their own right** because a file can be destroyed
+without disappearing. Overwritten in place or truncated, it is still one file
+under one name: the file, media and sidecar counts are all unchanged, and the
+only thing that moved is the size.
+
+If any of the four comes back lower, that is an alarm and the batch **stops
+where it noticed**. The message names what went — its size, and the name it had
+before the window opened — nothing further is opened, and in the restructuring
+tool steps 4 to 8 never start, because every one of them rewrites names and the
+names are the last record of what the missing file was called.
+
+The count is taken over the folder's **parent**, not the folder: splitting a day
+is allowed to consume the folder the window was opened on, so a count scoped to
+the folder would read zero after every successful split. Everything a window is
+supposed to do — creating folders, renaming files, moving them down into
+sub-events — happens inside that parent and leaves every total alone.
+
+Only a *drop* is an alarm. A window that adds a file has taken nothing away.
+
 ### Empty folders are parked, not grouped
 
 Opening the grouper on a folder with nothing in it costs the reviewer a window
@@ -649,7 +702,7 @@ order that makes sense, over one target, under one set of safety rules:
 | ---- | ---------------------------------------------------------------------------------------- |
 | 1    | Canonicalise names and park the empty (the tool above)                                   |
 | 2    | Reunite companions with their representatives, and sidecars/previews with their subjects |
-| 3    | Open the grouper GUI on every `__TO_SPLIT__` folder, one at a time                       |
+| 3    | Open the grouper GUI on every `__TO_SPLIT__` folder, one at a time, counting each        |
 | 4    | Reunite companions and sidecars again                                                    |
 | 5    | Canonicalise names and park again                                                        |
 | 6    | Mark and time the groups                                                                 |

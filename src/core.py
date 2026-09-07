@@ -492,6 +492,19 @@ def with_retry(operation, attempts=DEFAULT_RETRY_ATTEMPTS, delay_seconds=DEFAULT
     raise last_error
 
 
+def same_file(source, target) -> bool:
+    """True when two names are one file -- which is what a case-only rename is.
+
+    Windows' filesystem is case-insensitive, so ``target.exists()`` is true for
+    a rename that changes only the case of a name ("._EXIF" onto "._exif").
+    That is not a collision to refuse; it is the file itself.
+    """
+    try:
+        return os.path.samefile(str(source), str(target))
+    except OSError:
+        return False
+
+
 def safe_move(source: str | Path, destination: str | Path, attempts=DEFAULT_RETRY_ATTEMPTS,
               delay_seconds=DEFAULT_RETRY_DELAY_SECONDS) -> Path:
     source = Path(source)
@@ -499,6 +512,15 @@ def safe_move(source: str | Path, destination: str | Path, attempts=DEFAULT_RETR
 
     def operation():
         destination.parent.mkdir(parents=True, exist_ok=True)
+        # T2, rename never replace. shutil.move keeps that promise only within
+        # one volume, where it delegates to os.rename and Windows raises on a
+        # collision. Across volumes -- the Dropbox intake on one disk, the
+        # archive on another -- it falls back to copy2 plus unlink, which
+        # overwrites whatever is already sitting on that name, silently. So
+        # the collision is refused here instead, on every path.
+        if destination.exists() and not same_file(source, destination):
+            raise FileExistsError(
+                "%s already exists; not moved onto (T2)" % destination)
         return Path(shutil.move(str(source), str(destination)))
 
     return with_retry(operation, attempts, delay_seconds)

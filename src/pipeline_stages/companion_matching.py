@@ -88,6 +88,19 @@ from src.utils.checksums import file_md5
 _MAX_REPORTED_PER_KIND = 20
 
 
+def same_file(source, target) -> bool:
+    """True when two names are one file -- which is what a case-only rename is.
+
+    Windows' filesystem is case-insensitive, so ``target.exists()`` is true for
+    a rename that changes only the case of a name ("._EXIF" onto "._exif").
+    That is not a collision to refuse; it is the file itself.
+    """
+    try:
+        return os.path.samefile(str(source), str(target))
+    except OSError:
+        return False
+
+
 def default_move(source: Path, target: Path) -> Path:
     """Move one file, creating the destination folder. The plain version.
 
@@ -96,6 +109,10 @@ def default_move(source: Path, target: Path) -> Path:
     and no caller is *obliged* to supply one.
     """
     target.parent.mkdir(parents=True, exist_ok=True)
+    # T2, rename never replace -- see src.core.safe_move for why shutil.move
+    # alone does not keep that promise across a volume boundary.
+    if target.exists() and not same_file(source, target):
+        raise FileExistsError("%s already exists; not moved onto (T2)" % target)
     return Path(shutil.move(str(source), str(target)))
 
 

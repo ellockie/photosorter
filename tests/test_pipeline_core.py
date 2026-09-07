@@ -625,3 +625,66 @@ def test_classify_other_images_stage_publishes_live_input_output_stats(monkeypat
         "outputs": 3,
         "errors": 1,
     }
+
+
+# --------------------------------------------------------------------------
+# T2 -- rename, never replace
+# --------------------------------------------------------------------------
+#
+# shutil.move keeps that promise only within one volume, where it delegates to
+# os.rename and Windows raises on a collision. Across volumes -- the intake on
+# one disk, the archive on another -- it falls back to copy2 plus unlink, and
+# whatever was already on that name is gone with nothing said. Both movers
+# refuse the collision themselves so the promise does not depend on which two
+# disks a particular install happens to have.
+
+def test_safe_move_refuses_to_land_on_an_existing_file(tmp_path):
+    from src.core import safe_move
+
+    source = tmp_path / "new.jpg"
+    source.write_bytes(b"the one being moved")
+    occupied = tmp_path / "taken.jpg"
+    occupied.write_bytes(b"the one already there")
+
+    with pytest.raises(FileExistsError):
+        safe_move(source, occupied, attempts=1, delay_seconds=0)
+
+    # Neither file moved and neither was touched.
+    assert source.read_bytes() == b"the one being moved"
+    assert occupied.read_bytes() == b"the one already there"
+
+
+def test_default_move_refuses_to_land_on_an_existing_file(tmp_path):
+    from src.pipeline_stages.companion_matching import default_move
+
+    source = tmp_path / "new.jpg"
+    source.write_bytes(b"the one being moved")
+    occupied = tmp_path / "taken.jpg"
+    occupied.write_bytes(b"the one already there")
+
+    with pytest.raises(FileExistsError):
+        default_move(source, occupied)
+    assert source.is_file()
+    assert occupied.read_bytes() == b"the one already there"
+
+
+def test_a_case_only_rename_is_not_a_collision(tmp_path):
+    """Windows says the target exists because the target IS the source."""
+    from src.core import safe_move
+
+    source = tmp_path / "shot.JPG"
+    source.write_bytes(b"payload")
+    moved = safe_move(source, tmp_path / "shot.jpg", attempts=1, delay_seconds=0)
+    assert moved.read_bytes() == b"payload"
+    assert [path.name for path in tmp_path.iterdir()] == ["shot.jpg"]
+
+
+def test_safe_move_still_moves_where_nothing_is_in_the_way(tmp_path):
+    from src.core import safe_move
+
+    source = tmp_path / "new.jpg"
+    source.write_bytes(b"payload")
+    moved = safe_move(source, tmp_path / "sorted" / "new.jpg",
+                      attempts=1, delay_seconds=0)
+    assert moved.read_bytes() == b"payload"
+    assert not source.exists()
