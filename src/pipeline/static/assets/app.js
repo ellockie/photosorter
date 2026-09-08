@@ -1,14 +1,16 @@
 const graphEl = document.querySelector("#graph");
 const statusEl = document.querySelector("#status");
+const nowEl = document.querySelector("#now");
 const alertEl = document.querySelector("#alert");
-const assetsEl = document.querySelector("#assets");
-const processedEl = document.querySelector("#processed");
-const promptsEl = document.querySelector("#prompts");
+const summaryEl = document.querySelector("#summary");
 const promptListEl = document.querySelector("#prompt-list");
 const promptDialogEl = document.querySelector("#prompt-dialog");
 const logsEl = document.querySelector("#logs");
 const soundToggleEl = document.querySelector("#sound-toggle");
 let graph = [];
+// The last state the server pushed, so the once-a-second clock tick can
+// recompute elapsed times without waiting for the next websocket frame.
+let lastState = {};
 
 // --- Sound effects -----------------------------------------------------
 // Small synthesized tones (Web Audio API) rather than shipped audio files,
@@ -323,30 +325,171 @@ const STATE_ICON = {
   skipped: "–",   // –  skipped
 };
 
+// --- Formatting --------------------------------------------------------
+// Deliberately mirrors src/utils/progress.py: the same run should read the
+// same in the terminal and in the browser.
+
+function formatCount(value) {
+  if (value === null || value === undefined) return "";
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toLocaleString() : String(value);
+}
+
+function formatBytes(value) {
+  let size = Number(value);
+  if (!Number.isFinite(size)) return String(value);
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let index = 0;
+  while (Math.abs(size) >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index += 1;
+  }
+  return index === 0 ? `${size.toFixed(0)} B` : `${size.toFixed(1)} ${units[index]}`;
+}
+
+function formatDuration(seconds) {
+  const total = Number(seconds);
+  if (!Number.isFinite(total) || total < 0) return "";
+  if (total < 1) return "<1s";
+  if (total < 60) return `${Math.round(total)}s`;
+  const minutes = Math.floor(total / 60);
+  const secs = Math.floor(total % 60);
+  if (minutes < 60) return `${minutes}m ${String(secs).padStart(2, "0")}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
+}
+
+// A stage still running has no finish time, so its elapsed is measured
+// against the wall clock — which is why the page ticks once a second rather
+// than only when the server pushes.
+function stageElapsed(timing) {
+  if (!timing) return null;
+  if (timing.duration_seconds !== undefined && timing.duration_seconds !== null) {
+    return timing.duration_seconds;
+  }
+  if (!timing.started_at) return null;
+  return Math.max(0, Date.now() / 1000 - timing.started_at);
+}
+
+// --- Stage nodes -------------------------------------------------------
+
+// Stages whose detail the user has opened. Kept outside the render so a
+// rebuild on every state push does not slam them shut mid-read.
+const expandedStages = new Set();
+
+// in/out/err first and always in that order; anything else a stage recorded
+// follows. Matches the console banner, so the two are comparable line by line.
+const PRIMARY_STAT_KEYS = ["inputs", "outputs", "errors"];
+const STAT_LABELS = { inputs: "in", outputs: "out", errors: "err" };
+const BYTE_STAT_KEYS = new Set(["bytes", "bytes_read"]);
+
+function statChips(stats) {
+  const chips = [];
+  PRIMARY_STAT_KEYS.forEach(key => {
+    const value = stats[key];
+    if (value === undefined || value === null) return;
+    if (key === "errors" && !value) return;
+    chips.push([STAT_LABELS[key], formatCount(value), key === "errors"]);
+  });
+  Object.keys(stats)
+    .filter(key => !PRIMARY_STAT_KEYS.includes(key))
+    .sort()
+    .forEach(key => {
+      const value = stats[key];
+      if (!value) return;
+      const shown = BYTE_STAT_KEYS.has(key) ? formatBytes(value) : formatCount(value);
+      chips.push([key.replace(/_/g, " "), shown, false]);
+    });
+  return chips;
+}
+
 function renderNodeStats(stats) {
   const box = document.createElement("span");
   box.className = "node-stats";
-  const parts = [
-    ["in", stats.inputs, "node-stat"],
-    ["out", stats.outputs, "node-stat"],
-    ["err", stats.errors, "node-stat node-errors"],
-  ];
-  parts.forEach(([label, value, className]) => {
-    if (value === undefined || (label === "err" && !value)) return;
+  statChips(stats).forEach(([label, value, isError]) => {
     const part = document.createElement("span");
-    part.className = className;
+    part.className = isError ? "node-stat node-errors" : "node-stat";
     part.textContent = `${label} ${value}`;
     box.appendChild(part);
   });
   return box;
 }
 
-function renderGraph(states, stats = {}) {
+function renderNodeProgress(progress) {
+  const box = document.createElement("div");
+  box.className = "node-progress";
+  const track = document.createElement("div");
+  track.className = "progress-track";
+  const fill = document.createElement("div");
+  // A stage that cannot know its total yet gets a barber-pole rather than a
+  // bar frozen at zero, which reads as stuck.
+  if (progress.fraction === null || progress.fraction === undefined) {
+    fill.className = "progress-fill indeterminate";
+    fill.style.width = "100%";
+  } else {
+    fill.className = "progress-fill";
+    fill.style.width = `${Math.max(1, Math.round(progress.fraction * 100))}%`;
+  }
+  track.appendChild(fill);
+  const text = document.createElement("div");
+  text.className = "progress-text";
+  text.textContent = progress.summary || progress.activity || "";
+  box.append(track, text);
+  return box;
+}
+
+function renderNodeDetail(node, stats, notes, timing) {
+  const box = document.createElement("div");
+  box.className = "node-detail";
+  if (node.description) {
+    const description = document.createElement("p");
+    description.className = "node-description";
+    description.textContent = node.description;
+    box.appendChild(description);
+  }
+  (notes || []).forEach(note => {
+    const row = document.createElement("p");
+    row.className = "node-note";
+    row.textContent = note;
+    box.appendChild(row);
+  });
+  const facts = [];
+  if (timing && timing.started_at) {
+    facts.push(`started ${new Date(timing.started_at * 1000).toLocaleTimeString()}`);
+  }
+  if (timing && timing.detail) facts.push(timing.detail);
+  const chips = statChips(stats || {});
+  if (chips.length) {
+    facts.push(chips.map(([label, value]) => `${label} ${value}`).join(", "));
+  }
+  if (facts.length) {
+    const row = document.createElement("p");
+    row.className = "node-facts";
+    row.textContent = facts.join(" · ");
+    box.appendChild(row);
+  }
+  return box;
+}
+
+function renderGraph(states, stats = {}, timings = {}, progress = {}, notes = {}) {
+  const scroll = graphEl.scrollTop;
   graphEl.innerHTML = "";
   graph.forEach((node, index) => {
     const state = states[node.id] || "pending";
+    const nodeStats = stats[node.id] || {};
+    const nodeProgress = progress[node.id];
+    const timing = timings[node.id];
+    // The running stage always shows its detail: it is the one the reader is
+    // asking about. Anything else opens on click and stays open.
+    const expanded = expandedStages.has(node.id) || state === "active";
+
     const el = document.createElement("div");
-    el.className = `node ${state}`;
+    el.className = `node ${state}${expanded ? " expanded" : ""}`;
+    // The description is the tooltip too, so it is reachable without a click.
+    if (node.description) el.title = `${node.label} — ${node.description}`;
+
+    const row = document.createElement("div");
+    row.className = "node-row";
     const icon = document.createElement("span");
     icon.className = "node-icon";
     icon.textContent = STATE_ICON[state] || STATE_ICON.pending;
@@ -359,13 +502,32 @@ function renderGraph(states, stats = {}) {
     const text = document.createElement("span");
     text.className = "node-text";
     text.textContent = node.label;
-    el.append(icon, number, separator, text);
-    const nodeStats = stats[node.id];
-    if (nodeStats && Object.values(nodeStats).some(value => value !== undefined)) {
-      el.appendChild(renderNodeStats(nodeStats));
+    row.append(icon, number, separator, text);
+
+    if (Object.keys(nodeStats).length) row.appendChild(renderNodeStats(nodeStats));
+
+    const elapsed = stageElapsed(timing);
+    if (elapsed !== null) {
+      const time = document.createElement("span");
+      time.className = state === "active" ? "node-time running" : "node-time";
+      time.textContent = formatDuration(elapsed);
+      row.appendChild(time);
     }
+    el.appendChild(row);
+
+    if (nodeProgress) el.appendChild(renderNodeProgress(nodeProgress));
+    if (expanded) {
+      el.appendChild(renderNodeDetail(node, nodeStats, notes[node.id], timing));
+    }
+
+    el.addEventListener("click", () => {
+      if (expandedStages.has(node.id)) expandedStages.delete(node.id);
+      else expandedStages.add(node.id);
+      renderGraph(states, stats, timings, progress, notes);
+    });
     graphEl.appendChild(el);
   });
+  graphEl.scrollTop = scroll;
 }
 
 function renderStageLog(parent, line) {
@@ -382,6 +544,165 @@ function renderStageLog(parent, line) {
   name.textContent = stageId;
   parent.className = "log-line stage-log";
   parent.append(number, label, name);
+}
+
+// --- Run summary -------------------------------------------------------
+// The same groups src/pipeline_stages/show_stats.py logs, so the panel and the
+// transcript never disagree about what a run did. Zero rows are dropped: a
+// column of zeroes hides the one number that is not zero.
+
+const SUMMARY_GROUPS = [
+  ["Came in", [
+    ["input_files", "files in the inbox"],
+    ["input_checksums", "of them distinct by content"],
+    ["input_bytes", "bytes to process"],
+    ["legacy_unsorted_migrated", "migrated from legacy unsorted"],
+    ["uploaded_files_moved", "harvested from Camera Uploads"],
+    ["folder_intake_files", "flattened out of subfolders"],
+    ["camera_upload_photos", "camera photos separated"],
+    ["camera_upload_videos", "videos separated"],
+  ]],
+  ["Processed", [
+    ["assets", "assets with metadata read"],
+    ["renamed_assets", "renamed"],
+    ["timezone_corrected_assets", "capture times corrected"],
+    ["sorted_assets", "moved into event folders"],
+    ["event_folders_touched", "event folders written"],
+    ["companions_reconciled", "companions placed"],
+  ]],
+  ["Set aside", [
+    ["moved_old_exifs", "stale EXIF sidecars parked"],
+    ["empty_files_quarantined", "zero-byte files quarantined"],
+    ["rename_skipped_assets", "left with original names"],
+    ["raw_only_shots", "RAW-only shots"],
+    ["other_image_infographics", "infographics"],
+    ["other_image_text_screenshots", "text screenshots"],
+  ]],
+  ["Needs a look", [
+    ["rename_exif_missing", "no EXIF capture time"],
+    ["timezone_ambiguous_assets", "readings in a repeated hour"],
+    ["companions_left_behind", "companions with no shot"],
+    ["companions_reconcile_errors", "folders that failed to reconcile"],
+  ]],
+  ["Verified", [
+    ["safety_inputs_matched", "inputs found again in the output"],
+    ["safety_files_scanned", "archive files checksummed"],
+    ["safety_bytes_read", "bytes re-read to prove it"],
+  ]],
+];
+
+const BYTE_COUNTERS = new Set(["input_bytes", "safety_bytes_read"]);
+const ATTENTION_GROUP = "Needs a look";
+
+function summaryRow(label, value, className) {
+  const row = document.createElement("div");
+  row.className = className ? `summary-row ${className}` : "summary-row";
+  const key = document.createElement("span");
+  key.className = "summary-label";
+  key.textContent = label;
+  const shown = document.createElement("span");
+  shown.className = "summary-value";
+  shown.textContent = value;
+  row.append(key, shown);
+  return row;
+}
+
+function renderRunSummary(state) {
+  summaryEl.innerHTML = "";
+  const counters = state.counters || {};
+  const timings = state.stage_timings || {};
+  const run = timings.__run__;
+  const states = state.stage_states || {};
+
+  const done = Object.values(states).filter(v => v === "complete").length;
+  const stageTotal = graph.length || (run && run.stage_count) || 0;
+  const runElapsed = run
+    ? (run.duration_seconds ?? Math.max(0, Date.now() / 1000 - run.started_at))
+    : null;
+
+  const head = document.createElement("div");
+  head.className = "summary-head";
+  if (stageTotal) head.appendChild(summaryRow("Stages complete", `${done} / ${stageTotal}`));
+  if (runElapsed !== null) {
+    head.appendChild(summaryRow(
+      state.running ? "Running for" : "Run took", formatDuration(runElapsed)));
+  }
+  const pending = (state.prompts || []).filter(prompt => !prompt.answered).length;
+  if (pending) head.appendChild(summaryRow("Decisions waiting", formatCount(pending), "attention"));
+  if (head.children.length) summaryEl.appendChild(head);
+
+  SUMMARY_GROUPS.forEach(([heading, rows]) => {
+    const present = rows.filter(([key]) => counters[key]);
+    if (!present.length) return;
+    const title = document.createElement("h2");
+    title.className = "summary-heading";
+    title.textContent = heading;
+    summaryEl.appendChild(title);
+    present.forEach(([key, label]) => {
+      const value = BYTE_COUNTERS.has(key) ? formatBytes(counters[key]) : formatCount(counters[key]);
+      summaryEl.appendChild(
+        summaryRow(label, value, heading === ATTENTION_GROUP ? "attention" : ""));
+    });
+  });
+
+  // Where the wall clock actually went. The single most-asked question about
+  // a slow run, and until now the dashboard had no answer at all.
+  const slowest = (run && run.slowest) || rankStages(timings);
+  const worth = slowest.filter(entry => (entry.duration_seconds || 0) >= 1).slice(0, 5);
+  if (worth.length && runElapsed) {
+    const title = document.createElement("h2");
+    title.className = "summary-heading";
+    title.textContent = "Where the time went";
+    summaryEl.appendChild(title);
+    worth.forEach(entry => {
+      const share = Math.round((entry.duration_seconds / runElapsed) * 100);
+      summaryEl.appendChild(summaryRow(
+        labelFor(entry.stage_id),
+        `${formatDuration(entry.duration_seconds)} (${share}%)`));
+    });
+  }
+
+  if (!summaryEl.children.length) {
+    const idle = document.createElement("p");
+    idle.className = "summary-idle";
+    idle.textContent = "No run yet. Press Run to start the pipeline.";
+    summaryEl.appendChild(idle);
+  }
+}
+
+function rankStages(timings) {
+  return Object.entries(timings)
+    .filter(([stageId, timing]) => stageId !== "__run__" && timing.duration_seconds)
+    .map(([stageId, timing]) => ({ stage_id: stageId, duration_seconds: timing.duration_seconds }))
+    .sort((a, b) => b.duration_seconds - a.duration_seconds);
+}
+
+function labelFor(stageId) {
+  const node = graph.find(candidate => candidate.id === stageId);
+  return node ? node.label : stageId;
+}
+
+// The one-line answer to "what is it doing right now": which stage, how far
+// in, and what that stage is for.
+function renderNowLine(state) {
+  if (!nowEl) return;
+  const states = state.stage_states || {};
+  const activeId = Object.keys(states).find(key => states[key] === "active");
+  if (!activeId) {
+    nowEl.textContent = "";
+    return;
+  }
+  const index = graph.findIndex(node => node.id === activeId);
+  const node = graph[index] || {};
+  const elapsed = stageElapsed((state.stage_timings || {})[activeId]);
+  const progress = (state.stage_progress || {})[activeId];
+  const parts = [
+    `Stage ${index + 1}/${graph.length || "?"}: ${node.label || activeId}`,
+  ];
+  if (elapsed !== null) parts.push(formatDuration(elapsed));
+  if (progress && progress.summary) parts.push(progress.summary);
+  else if (node.description) parts.push(node.description);
+  nowEl.textContent = parts.join(" — ");
 }
 
 function showError(error) {
@@ -602,6 +923,7 @@ function renderPrompts(prompts) {
 }
 
 function renderState(state) {
+  lastState = state;
   detectAndPlayTransitionSounds(state);
   // A run blocked on a prompt is still running; saying so is the difference
   // between "it is waiting for me" and "it hung".
@@ -616,11 +938,16 @@ function renderState(state) {
   } else {
     alertEl.classList.add("hidden");
   }
-  assetsEl.textContent = state.counters?.other_images_classification_pending ?? state.counters?.assets ?? state.counters?.input_files ?? 0;
-  processedEl.textContent = state.counters?.other_images_classification_processed ?? state.counters?.sorted_assets ?? 0;
-  promptsEl.textContent = (state.prompts || []).filter(prompt => !prompt.answered).length;
   renderPrompts(state.prompts);
-  renderGraph(state.stage_states || {}, state.stage_stats || {});
+  renderGraph(
+    state.stage_states || {},
+    state.stage_stats || {},
+    state.stage_timings || {},
+    state.stage_progress || {},
+    state.stage_notes || {},
+  );
+  renderRunSummary(state);
+  renderNowLine(state);
   logsEl.innerHTML = "";
   // Stage outcome is shown by the node icons, so drop the bare status lines.
   const STATUS_LINES = new Set(["Completed.", "Failed.", "Paused."]);
@@ -636,6 +963,30 @@ function renderState(state) {
   });
   logsEl.parentElement.scrollTop = logsEl.parentElement.scrollHeight;
 }
+
+// A stage that runs for twenty minutes pushes state only when something
+// changes, so without this its elapsed time would sit frozen at whatever it
+// read when the stage began — the exact appearance of a hang this whole
+// change exists to remove. One second is fine: nothing here is expensive.
+setInterval(() => {
+  if (!lastState.running) return;
+  const timings = lastState.stage_timings || {};
+  const states = lastState.stage_states || {};
+  const activeId = Object.keys(states).find(key => states[key] === "active");
+  document.querySelectorAll(".node-time.running").forEach(el => el.remove());
+  if (activeId) {
+    const elapsed = stageElapsed(timings[activeId]);
+    const row = graphEl.children[graph.findIndex(node => node.id === activeId)];
+    if (row && elapsed !== null) {
+      const time = document.createElement("span");
+      time.className = "node-time running";
+      time.textContent = formatDuration(elapsed);
+      row.querySelector(".node-row").appendChild(time);
+    }
+  }
+  renderRunSummary(lastState);
+  renderNowLine(lastState);
+}, 1000);
 
 let serverStopped = false;
 

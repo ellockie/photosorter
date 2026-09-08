@@ -69,6 +69,9 @@ photosorter — Python 3.13 photo processing pipeline: rename, sort, and organis
 | Where the grouper GUI lives | `src/pipeline_stages/grouper_launch.py` | Leaf module: install detection, command line, and the before/after count — files, media, sidecars, bytes — every caller brackets a window with (T9). One definition |
 | Two shots in one second | `src/pipeline_stages/siblings.py` | Leaf module: the one definition of F9a/F9b — sub-second evidence, ordinal fallback. Consulted before the collision resolver by both rename and folder sorting, and by restructure step 8 |
 | Companion + sidecar matching | `src/pipeline_stages/companion_matching.py` | Leaf module: the engine. `reconcile_folder` (per event folder, capture time), `place_companions` (whole target, gather-then-distribute, name match; X10/X13 + MD5 on collision), `migrate_legacy_containers` (`##   EXIFs   ##`->`__EXIF`), `survey_trees` (read-only: non-compliant folders, legacy containers). Pipeline stage AND restructure tool both run it |
+| Stage progress + ETA | `src/utils/progress.py` | Leaf module: `StageProgress` — the one definition of how a long stage reports where it is (bar, rate, ETA) to both the dashboard and the log. Built via `context.progress(...)` |
+| What a stage is for | `PipelineStage.description` in `src/core.py` | One sentence per stage, shown in the dashboard and logged on entry. `tests/test_stage_insights.py` fails if a stage ships without one |
+| Where a run's time went | `PipelineOrchestrator._close_run` | Times every stage from a `finally` (so a failed one is timed too) and ranks the slowest five |
 | Tests | `tests/test_organise_date_folders.py` | Pytest, 6 cases |
 
 ## ISSUE TRACKING

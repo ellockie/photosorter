@@ -22,6 +22,11 @@ class TimezoneAndTravelStage(PipelineStage):
         super().__init__(
             stage_id="timezone-and-travel",
             display_name="Timezone and Travel",
+            description=(
+                "Corrects each capture time against the camera-clock and travel "
+                "timelines, so filenames and folders carry the local time and place the "
+                "shot was actually taken in."
+            ),
             dependencies=("metadata-extraction",),
         )
 

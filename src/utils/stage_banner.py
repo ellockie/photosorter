@@ -47,12 +47,43 @@ def format_start(index: int, total: int, stage_id: str, display_name: str) -> st
     return f">> {_prefix(index, total)}  {'START':<{_LABEL_WIDTH}}  {display_name}  [{stage_id}]"
 
 
+def format_stats(stats: dict | None) -> str:
+    """A stage's own numbers, compacted onto its closing banner.
+
+    ``in``/``out``/``err`` first and always in that order, because they are the
+    three every stage reports and a fixed order makes a column of banners
+    scannable; anything else the stage recorded follows, alphabetically.
+    A zero error count is dropped -- "err 0" on twenty lines hides the one
+    line that says "err 3".
+    """
+    if not stats:
+        return ""
+    order = ("inputs", "outputs", "errors")
+    labels = {"inputs": "in", "outputs": "out", "errors": "err"}
+    parts = []
+    for key in order:
+        value = stats.get(key)
+        if value is None or (key == "errors" and not value):
+            continue
+        parts.append(f"{labels[key]} {value:,}" if isinstance(value, int) else f"{labels[key]} {value}")
+    for key in sorted(set(stats) - set(order)):
+        value = stats[key]
+        if value in (None, 0, "", False):
+            continue
+        parts.append(f"{key} {value:,}" if isinstance(value, int) else f"{key} {value}")
+    return ", ".join(parts)
+
+
 def format_end(index: int, total: int, stage_id: str, display_name: str,
-               outcome: str, seconds: float, detail: str = "") -> str:
+               outcome: str, seconds: float, detail: str = "",
+               stats: dict | None = None) -> str:
     line = (
         f"<< {_prefix(index, total)}  {outcome:<{_LABEL_WIDTH}}  "
         f"{display_name}  [{stage_id}]  ({seconds:.1f}s)"
     )
+    summary = format_stats(stats)
+    if summary:
+        line = f"{line}  {summary}"
     return f"{line}  {detail}" if detail else line
 
 

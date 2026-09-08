@@ -233,6 +233,11 @@ class FolderSortingStage(PipelineStage):
         super().__init__(
             stage_id="folder-sorting",
             display_name="Folder Sorting",
+            description=(
+                "Moves every finished asset into ROOT/<year>/<month>/<dated folder>, "
+                "placing sidecars, RAWs and duplicates in their subfolders. This is the "
+                "stage that writes to the archive."
+            ),
             dependencies=("move-results",),
         )
 
@@ -272,9 +277,23 @@ class FolderSortingStage(PipelineStage):
         sorted_by_label: dict[str, list] = {}
         located_folders: dict[Path, dict] = {}
 
-        for asset in context.assets:
-            if not asset.primary_path.exists():
-                continue
+        placeable = [asset for asset in context.assets if asset.primary_path.exists()]
+        skipped = len(context.assets) - len(placeable)
+        if skipped:
+            # An asset with no file left is one an earlier stage consumed --
+            # a discarded duplicate, a converted RAW. Reported so the drop
+            # between "assets" and "sorted" is explained rather than noticed.
+            context.log(
+                f"{skipped} asset(s) no longer on disk (consumed by an earlier stage), skipping"
+            )
+        reporter = context.progress(
+            self.stage_id,
+            "Placing assets into event folders",
+            total=len(placeable),
+            unit="assets",
+        )
+
+        for asset in placeable:
             captured_at = _captured_at(asset)
             # An explicit origin folder wins; otherwise a trip location names
             # the event folder (e.g. "2026-04-12_(Sun) - Japan").
@@ -384,19 +403,52 @@ class FolderSortingStage(PipelineStage):
             if info and captured_at is not None:
                 located_folders[event_folder] = info
             moved += 1
+            reporter.advance(note=event_folder.name)
+
+        context.log(reporter.finish())
 
         for event_folder, info in located_folders.items():
             write_location_stamp(event_folder, config, info)
 
         self._route_geodata(context, sorted_by_label)
 
+        event_folders = sorted(context.affected_event_folders, key=str)
         context.counters["sorted_assets"] = moved
+        context.counters["event_folders_touched"] = len(event_folders)
         context.counters["raw_only_shots"] = len(raw_only_unconverted)
         context.counters["raw_only_promoted"] = raw_only_promoted
-        context.set_stage_stats(self.stage_id, inputs=moved, outputs=moved, errors=undated)
-        context.log(f"Sorted {moved} assets into event folders")
+        context.set_stage_stats(
+            self.stage_id,
+            inputs=len(context.assets),
+            outputs=moved,
+            errors=undated,
+            folders=len(event_folders),
+            skipped=skipped,
+        )
+        context.log(
+            f"Sorted {moved} asset(s) into {len(event_folders)} event folder(s)"
+        )
+        if event_folders:
+            # Naming them is the difference between "it worked" and knowing
+            # which evening of which trip just landed in the archive.
+            root = Path(config["paths"]["root_folder"])
+            context.add_stage_note(
+                self.stage_id, f"{len(event_folders)} event folder(s) written")
+            for folder in event_folders[:30]:
+                try:
+                    shown = folder.relative_to(root)
+                except ValueError:
+                    shown = folder
+                context.log(f"  -> {shown}")
+            if len(event_folders) > 30:
+                context.log(f"  ... and {len(event_folders) - 30} more")
         if undated:
-            context.log(f"Routed {undated} assets without a capture date to READY")
+            note = (
+                f"{undated} asset(s) had no capture date and went to READY instead of "
+                "a dated folder"
+            )
+            context.log(note)
+            context.add_stage_note(self.stage_id, note)
         if raw_only_unconverted:
             # Every RAW-only shot is named, not just counted: a shot with no
             # extraction has no representative at all, so the folder shows a

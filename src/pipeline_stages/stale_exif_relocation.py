@@ -12,6 +12,10 @@ class StaleExifRelocationStage(PipelineStage):
         super().__init__(
             stage_id="stale-exif-relocation",
             display_name="Stale EXIF Relocation",
+            description=(
+                "Parks ._exif sidecars that arrived with the intake, so they cannot be "
+                "mistaken for the fresh ones ExifTool is about to write."
+            ),
             dependencies=("folder-intake",),
         )
 

@@ -175,6 +175,11 @@ class ScreenshotGroupingStage(PipelineStage):
         super().__init__(
             stage_id="screenshot-grouping",
             display_name="Screenshot Grouping",
+            description=(
+                "Opens this run's crowded event folders in the external Image Grouper so "
+                "you can split them into real events. Blocks on a GUI window, so it takes "
+                "exactly as long as you take."
+            ),
             dependencies=("folder-sorting",),
         )
 

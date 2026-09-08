@@ -101,6 +101,24 @@ class PipelineRuntime:
                     key: dict(value)
                     for key, value in self.context.stage_stats.items()
                 },
+                # When each stage ran and for how long, so the dashboard can
+                # show a duration next to a finished node and a live clock
+                # next to the running one. "__run__" holds the whole run.
+                "stage_timings": {
+                    key: dict(value)
+                    for key, value in self.context.stage_timings.items()
+                },
+                # Where a long stage currently is. Present only while that
+                # stage is mid-flight; the orchestrator clears it on exit, so
+                # a node with a bar is a node genuinely still working.
+                "stage_progress": {
+                    key: dict(value)
+                    for key, value in self.context.stage_progress.items()
+                },
+                "stage_notes": {
+                    key: list(value)
+                    for key, value in self.context.stage_notes.items()
+                },
                 # A single large run can log ~700 per-file lines; keep enough
                 # history that earlier stages stay visible in the dashboard.
                 "logs": self.context.logs[-2000:],

@@ -14,6 +14,11 @@ class LegacyUnsortedMigrationStage(PipelineStage):
         super().__init__(
             stage_id="legacy-unsorted-migration",
             display_name="Legacy Unsorted Migration",
+            description=(
+                "Empties the old __UNSORTED folder into the INBOX so a single intake "
+                "point feeds the rest of the run. Whole folders move intact; __DONT_MOVE "
+                "is never touched."
+            ),
             dependencies=("initialization",),
         )
 

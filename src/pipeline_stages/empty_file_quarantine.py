@@ -12,6 +12,10 @@ class EmptyFileQuarantineStage(PipelineStage):
         super().__init__(
             stage_id="empty-file-quarantine",
             display_name="Empty File Quarantine",
+            description=(
+                "Quarantines zero-byte files before ExifTool sees them -- an empty file "
+                "can crash the batch and take the rest of the run's metadata with it."
+            ),
             dependencies=("stale-exif-relocation",),
         )
 

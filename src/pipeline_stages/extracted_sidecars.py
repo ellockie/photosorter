@@ -54,6 +54,10 @@ class ExtractedSidecarsStage(PipelineStage):
         super().__init__(
             stage_id="extracted-sidecars",
             display_name="Extracted Sidecars",
+            description=(
+                "Pairs each converter-produced JPEG with the sidecar of the RAW it came "
+                "from, so metadata travels with the extraction into the archive."
+            ),
             dependencies=("raw-staged-conversion",),
         )
 

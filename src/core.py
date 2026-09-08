@@ -14,6 +14,11 @@ from pathlib import Path
 
 from src.utils.checksums import file_md5  # noqa: F401  (re-export)
 from src.utils.dimensions import is_downscaled
+from src.utils.progress import \
+    StageProgress, \
+    format_bytes, \
+    format_count, \
+    format_duration
 from src.utils.stage_banner import \
     announce_to_console, \
     format_end, \
@@ -652,6 +657,17 @@ class PipelineContext:
     counters: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     stage_states: dict[str, PipelineState] = field(default_factory=dict)
     stage_stats: dict[str, dict[str, int]] = field(default_factory=dict)
+    # Three per-stage records, each with exactly one writer, so nothing has to
+    # guess who owns a key:
+    #   stage_stats     -- the stage: how much went in, out, and wrong.
+    #   stage_timings   -- the orchestrator: when it ran and for how long.
+    #   stage_progress  -- StageProgress: where a long stage is right now.
+    stage_timings: dict[str, dict] = field(default_factory=dict)
+    stage_progress: dict[str, dict] = field(default_factory=dict)
+    # Free-form findings a stage wants a reader to see next to its node --
+    # "3 files had no capture date", "42 GB rehashed". Distinct from the log,
+    # which is a chronological transcript nobody scrolls back through.
+    stage_notes: dict[str, list[str]] = field(default_factory=dict)
     input_snapshot: dict[str, SafetySnapshotEntry] = field(default_factory=dict)
     safety_exceptions: dict[str, str] = field(default_factory=dict)
     prompt_queue: deque[PromptRequest] = field(default_factory=deque)
@@ -690,7 +706,14 @@ class PipelineContext:
             self.stage_states[stage_id] = state
 
     def set_stage_stats(self, stage_id: str, inputs: int | None = None,
-                        outputs: int | None = None, errors: int | None = None) -> None:
+                        outputs: int | None = None, errors: int | None = None,
+                        **extra) -> None:
+        """In / out / errors for a stage, plus any stage-specific numbers.
+
+        ``extra`` is how a stage reports the counts only it knows about --
+        ``skipped``, ``bytes``, ``folders`` -- without every such number having
+        to become a parameter here. The dashboard renders them generically.
+        """
         with self.lock:
             stats = self.stage_stats.setdefault(stage_id, {})
             if inputs is not None:
@@ -699,6 +722,28 @@ class PipelineContext:
                 stats["outputs"] = outputs
             if errors is not None:
                 stats["errors"] = errors
+            for key, value in extra.items():
+                if value is not None:
+                    stats[key] = value
+
+    def set_stage_progress(self, stage_id: str, record: dict | None) -> None:
+        """Where a long-running stage currently is. Written by StageProgress."""
+        with self.lock:
+            if record is None:
+                self.stage_progress.pop(stage_id, None)
+            else:
+                self.stage_progress[stage_id] = record
+
+    def add_stage_note(self, stage_id: str, note: str) -> None:
+        """A finding worth showing next to the stage after it has finished."""
+        with self.lock:
+            notes = self.stage_notes.setdefault(stage_id, [])
+            if note not in notes:
+                notes.append(note)
+
+    def progress(self, stage_id: str, activity: str, **kwargs) -> StageProgress:
+        """A progress reporter bound to this context and stage."""
+        return StageProgress(self, stage_id, activity, **kwargs)
 
     def media_extensions(self) -> set[str]:
         extensions = self.config.get("extensions", {})
@@ -711,12 +756,31 @@ class PipelineContext:
             for value in values
         }
 
-    def snapshot_inputs(self, roots: list[str | Path] | None = None) -> None:
+    def snapshot_inputs(self, roots: list[str | Path] | None = None,
+                        stage_id: str | None = None) -> dict:
+        """MD5 every media file about to be processed, so the run can prove
+        later that none of them vanished.
+
+        Reports progress: this reads every input byte, so on a big intake it is
+        minutes of apparently doing nothing. ``stage_id`` is what binds the
+        report to a dashboard node; without it the hashing is silent as before.
+
+        Returns the tally the caller needs for its own log line.
+        """
         roots = roots or [self.config["paths"]["unsorted_folder"]]
         media_extensions = self.media_extensions()
         chunk_size = self.config.get("safety", {}).get("hash_chunk_size", 1024 * 1024)
         snapshot = {}
 
+        # Walk first, hash second. Two passes over the tree costs one cheap
+        # directory listing and buys a real total, so the progress bar is a
+        # percentage from its first tick instead of an open-ended count.
+        candidates: list[tuple[Path, os.stat_result]] = []
+        # Where the intake actually came from, one entry per containing folder.
+        # A count alone says how much arrived; this says from where, which is
+        # what tells a stray import apart from the one you meant to run — and
+        # these same folder names become origin labels in folder-intake.
+        folders: dict[Path, dict] = {}
         for root in roots:
             root_path = Path(root)
             if not root_path.exists():
@@ -724,17 +788,56 @@ class PipelineContext:
             for path in root_path.rglob("*"):
                 if not path.is_file() or normalize_suffix(path.suffix) not in media_extensions:
                     continue
-                md5 = file_md5(path, chunk_size)
-                stat = path.stat()
-                snapshot[md5] = SafetySnapshotEntry(
-                    original_path=path,
-                    size=stat.st_size,
-                    modified_at=stat.st_mtime,
-                    md5=md5,
-                )
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                candidates.append((path, stat))
+                folder = folders.setdefault(
+                    path.parent, {"files": 0, "bytes": 0, "root": root_path})
+                folder["files"] += 1
+                folder["bytes"] += stat.st_size
+
+        total_bytes = sum(stat.st_size for _path, stat in candidates)
+        reporter = None
+        if stage_id:
+            reporter = self.progress(
+                stage_id,
+                "Checksumming inputs",
+                total=len(candidates),
+                total_bytes=total_bytes,
+            )
+
+        duplicates = 0
+        for path, stat in candidates:
+            md5 = file_md5(path, chunk_size)
+            if md5 in snapshot:
+                # Two byte-identical inputs collapse to one snapshot entry, so
+                # the "N files in" and "N hashes to find" numbers legitimately
+                # differ. Counted rather than hidden: it is the difference
+                # between a shrinking count and a lost file.
+                duplicates += 1
+            snapshot[md5] = SafetySnapshotEntry(
+                original_path=path,
+                size=stat.st_size,
+                modified_at=stat.st_mtime,
+                md5=md5,
+            )
+            if reporter:
+                reporter.advance(size_bytes=stat.st_size)
 
         with self.lock:
             self.input_snapshot = snapshot
+
+        tally = {
+            "files": len(candidates),
+            "bytes": total_bytes,
+            "unique": len(snapshot),
+            "duplicates": duplicates,
+        }
+        if reporter:
+            reporter.finish()
+        return tally
 
     def register_safety_exception(self, md5: str, reason: str) -> None:
         with self.lock:
@@ -820,6 +923,13 @@ class PipelineContext:
 class PipelineStage(ABC):
     stage_id: str
     display_name: str
+    # One sentence saying what this stage does to the archive, in the terms a
+    # person thinks in ("Moves every file out of inbox subfolders..."), not in
+    # the terms the code thinks in. The dashboard shows it under the stage
+    # name, so a reader never has to open the source to know what is running.
+    # Where a stage is slow or destructive, say so here -- this is the only
+    # place the UI has to explain a stage before it starts.
+    description: str = ""
     dependencies: tuple[str, ...] = ()
     input_contract: tuple[str, ...] = ()
     output_contract: tuple[str, ...] = ()
@@ -880,20 +990,68 @@ class PipelineOrchestrator:
                 {
                     "id": stage.stage_id,
                     "label": stage.display_name,
+                    # What the stage does, in words, so the dashboard can say
+                    # it without the reader opening the source.
+                    "description": stage.description,
+                    "position": index,
                     "dependencies": list(stage.dependencies),
                     "headless": stage.headless,
                 }
-                for stage in self.ordered_stages()
-            ]
+                for index, stage in enumerate(self.ordered_stages(), start=1)
+            ],
+            "total": len(self.stages),
         }
 
     def run(self, context: PipelineContext) -> PipelineContext:
         context.mode = self.mode
         ordered = self.ordered_stages()
         total = len(ordered)
-        for index, stage in enumerate(ordered, start=1):
-            context = self._run_stage(context, stage, index, total)
+        run_started = time.time()
+        context.stage_timings["__run__"] = {
+            "started_at": run_started,
+            "stage_count": total,
+        }
+        try:
+            for index, stage in enumerate(ordered, start=1):
+                context = self._run_stage(context, stage, index, total)
+        finally:
+            # From a finally so an aborted run still gets its wall-clock and
+            # its slowest-stage list -- which is exactly when you want them.
+            self._close_run(context, run_started, total)
         return context
+
+    def _close_run(self, context: PipelineContext, run_started: float, total: int) -> None:
+        elapsed = time.time() - run_started
+        finished = [
+            (stage_id, timing.get("duration_seconds") or 0.0)
+            for stage_id, timing in context.stage_timings.items()
+            if stage_id != "__run__"
+        ]
+        ranked = sorted(finished, key=lambda item: item[1], reverse=True)
+        context.stage_timings["__run__"] = {
+            "started_at": run_started,
+            "finished_at": time.time(),
+            "duration_seconds": elapsed,
+            "stage_count": total,
+            "stages_run": len(finished),
+            # Where the time actually went. Without this, "the run took 22
+            # minutes" is a fact nobody can act on.
+            "slowest": [
+                {"stage_id": stage_id, "duration_seconds": seconds}
+                for stage_id, seconds in ranked[:5]
+            ],
+        }
+        if not finished:
+            return
+        context.log(
+            f"Run finished in {format_duration(elapsed)} "
+            f"({len(finished)}/{total} stages)"
+        )
+        for stage_id, seconds in ranked[:5]:
+            if seconds < 1:
+                continue
+            share = (seconds / elapsed * 100) if elapsed else 0
+            context.log(f"  time: {stage_id} {format_duration(seconds)} ({share:.0f}%)")
 
     def _run_stage(self, context: PipelineContext, stage: PipelineStage,
                    index: int, total: int) -> PipelineContext:
@@ -903,11 +1061,23 @@ class PipelineOrchestrator:
         stage — success, failure, pause, or an interrupt that no `except` here
         catches — is announced exactly once. A stage can never leave the
         transcript with an opening line and no closing one.
+
+        Timing is recorded here rather than by the stages for the same reason
+        the banners are: a stage cannot forget to do it, and a failing stage
+        cannot skip it. The duration of a stage that died is the most useful
+        one there is.
         """
         self.announce(format_start(index, total, stage.stage_id, stage.display_name))
         context.log(f"Stage: {stage.stage_id}")
+        if stage.description:
+            context.log(f"  {stage.description}")
         context.set_stage_state(stage.stage_id, PipelineState.ACTIVE)
         started = time.monotonic()
+        context.stage_timings[stage.stage_id] = {
+            "started_at": time.time(),
+            "position": index,
+            "outcome": None,
+        }
         # Nothing below catches BaseException, so an interrupt lands here.
         outcome, detail = "ABORTED", ""
         try:
@@ -930,9 +1100,20 @@ class PipelineOrchestrator:
             stage.cleanup(context)
             raise
         finally:
+            duration = time.monotonic() - started
+            context.stage_timings[stage.stage_id].update({
+                "finished_at": time.time(),
+                "duration_seconds": duration,
+                "outcome": outcome,
+                "detail": detail,
+            })
+            # A finished stage's progress bar is stale the moment it exits;
+            # leaving it up makes a completed stage look mid-flight.
+            context.set_stage_progress(stage.stage_id, None)
             self.announce(format_end(
                 index, total, stage.stage_id, stage.display_name,
-                outcome, time.monotonic() - started, detail,
+                outcome, duration, detail,
+                stats=context.stage_stats.get(stage.stage_id),
             ))
 
 
@@ -984,39 +1165,102 @@ class StagedWorkspaceStage(PipelineStage):
 
 
 class SafetyValidationStage(PipelineStage):
+    """Proves no input file was lost, by finding every input MD5 in the output.
+
+    This is the stage that takes the longest, and the reason is worth stating
+    plainly because it is not obvious from the outside: there is no index of
+    the archive's checksums, so the only way to prove a file is still there is
+    to read it. It therefore walks *the whole archive root* -- not just this
+    run's output -- and MD5s every media file in it. On a multi-terabyte
+    archive that is minutes to hours of pure disk read, every run, and it
+    scales with the size of the archive rather than the size of the intake.
+
+    So it says so: how many files and bytes it is about to read, then a live
+    count with a throughput and an ETA, then what it proved.
+    """
+
     def __init__(self):
         super().__init__(
             stage_id="safety-validation",
             display_name="Safety Validation",
+            description=(
+                "Proves nothing was lost: re-reads and checksums every media "
+                "file in the archive and confirms each input file's MD5 is "
+                "among them. Slowest stage by far -- its cost is the size of "
+                "the whole archive, not of this run's intake."
+            ),
         )
 
     def execute(self, context: PipelineContext) -> PipelineContext:
         if not context.config.get("safety", {}).get("enabled", True):
+            context.log("Safety validation disabled in config, skipping")
+            context.add_stage_note(self.stage_id, "disabled in config")
             return context
 
+        expected = {
+            md5: entry
+            for md5, entry in context.input_snapshot.items()
+            if md5 not in context.safety_exceptions
+        }
         output_roots = self._output_roots(context)
-        media_extensions = context.media_extensions()
         chunk_size = context.config.get("safety", {}).get("hash_chunk_size", 1024 * 1024)
-        found = {}
-        zero_byte_files = []
 
-        for root in output_roots:
-            if not root.exists():
-                continue
-            for path in root.rglob("*"):
-                if not path.is_file() or normalize_suffix(path.suffix) not in media_extensions:
-                    continue
-                if path.stat().st_size == 0:
-                    zero_byte_files.append(path)
-                    continue
-                found.setdefault(file_md5(path, chunk_size), []).append(path)
+        if expected:
+            context.log(
+                f"Verifying {format_count(len(expected))} ingested file(s) survived the run."
+            )
+            context.log(
+                "  Every media file under the output roots has to be re-read and "
+                "checksummed -- there is no stored index to consult, so this stage "
+                "costs the size of the archive, not the size of the intake:"
+            )
+        else:
+            context.log(
+                "Nothing was ingested this run, so no checksums have to be matched; "
+                "the output roots are still walked for zero-byte files."
+            )
 
-        missing = []
-        for md5, entry in context.input_snapshot.items():
-            if md5 in context.safety_exceptions:
-                continue
-            if md5 not in found:
-                missing.append(entry.original_path)
+        candidates, zero_byte_files, per_root = self._scan(context, output_roots)
+        for root, count, size in per_root:
+            context.log(f"  - {root}: {format_count(count)} files, {format_bytes(size)}")
+
+        total_bytes = sum(size for _path, size in candidates)
+
+        if expected:
+            context.log(
+                f"  Reading {format_count(len(candidates))} files "
+                f"({format_bytes(total_bytes)}) to match {format_count(len(expected))} checksum(s)."
+            )
+            found = self._hash_all(context, candidates, chunk_size, expected, total_bytes)
+        else:
+            # Hashing exists only to locate this run's inputs. With none to
+            # locate, reading every byte of the archive proves nothing, so the
+            # walk alone is the whole stage.
+            found = set()
+            total_bytes = 0
+            context.log(
+                f"  Skipped checksumming {format_count(len(candidates))} archive "
+                "file(s): with no inputs to account for, there is nothing to match."
+            )
+            context.add_stage_note(self.stage_id, "no intake this run, checksumming skipped")
+
+        missing = [
+            entry.original_path
+            for md5, entry in expected.items()
+            if md5 not in found
+        ]
+        matched = len(expected) - len(missing)
+        context.set_stage_stats(
+            self.stage_id,
+            inputs=len(expected),
+            outputs=matched,
+            errors=len(missing) + len(zero_byte_files),
+            scanned=len(candidates),
+            bytes_read=total_bytes,
+        )
+        context.counters["safety_files_scanned"] = len(candidates)
+        context.counters["safety_bytes_read"] = total_bytes
+        context.counters["safety_inputs_matched"] = matched
 
         if zero_byte_files or missing:
             # Log the specific offenders so the dashboard shows what actually
@@ -1032,7 +1276,96 @@ class SafetyValidationStage(PipelineStage):
                 f"{len(zero_byte_files)} zero-byte output file(s).{truncated}"
             )
 
+        if expected:
+            context.add_stage_note(
+                self.stage_id,
+                f"all {format_count(matched)} ingested file(s) accounted for in "
+                f"{format_count(len(candidates))} archive files ({format_bytes(total_bytes)} read)",
+            )
+            context.log(
+                f"All {format_count(matched)} ingested file(s) accounted for; "
+                "no zero-byte outputs."
+            )
+        else:
+            context.log(
+                f"Walked {format_count(len(candidates))} archive file(s); no zero-byte outputs."
+            )
         return context
+
+    def _scan(self, context: PipelineContext, output_roots: list[Path]):
+        """List what has to be hashed, per root, before hashing any of it.
+
+        The walk is cheap next to the hashing and it is what turns the bar into
+        a percentage. The per-root breakdown is the answer to "why is this
+        slow" -- it names the root holding the millions of files.
+        """
+        media_extensions = context.media_extensions()
+        walk = context.progress(self.stage_id, "Scanning output roots", unit="files")
+        candidates: list[tuple[Path, int]] = []
+        zero_byte_files: list[Path] = []
+        per_root = []
+        # The output roots nest: READY and INBOX live *inside* root_folder in
+        # the default layout, so walking all three visits those files two or
+        # three times. Hashing them twice reads the same bytes twice and
+        # proves nothing new, so each resolved path counts once, for the first
+        # root that reaches it.
+        seen: set[Path] = set()
+
+        for root in output_roots:
+            if not root.exists():
+                context.log(f"  - {root}: does not exist, skipped")
+                continue
+            walk.set_activity("Scanning output roots", note=str(root))
+            root_count, root_bytes = 0, 0
+            for path in root.rglob("*"):
+                if not path.is_file() or normalize_suffix(path.suffix) not in media_extensions:
+                    continue
+                try:
+                    resolved = path.resolve()
+                    size = path.stat().st_size
+                except OSError:
+                    continue
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                if size == 0:
+                    zero_byte_files.append(path)
+                    continue
+                candidates.append((path, size))
+                root_count += 1
+                root_bytes += size
+                walk.advance()
+            per_root.append((root, root_count, root_bytes))
+        walk.finish()
+        return candidates, zero_byte_files, per_root
+
+    def _hash_all(self, context: PipelineContext, candidates, chunk_size: int,
+                  expected: dict, total_bytes: int) -> set[str]:
+        """Checksum everything, reporting throughput and what is still owed.
+
+        The note carries the count still unaccounted for, so a run watching
+        this stage can see the number fall to zero rather than only learning
+        the verdict at the end.
+        """
+        reporter = context.progress(
+            self.stage_id,
+            "Checksumming archive",
+            total=len(candidates),
+            total_bytes=total_bytes,
+        )
+        found: set[str] = set()
+        outstanding = len(expected)
+        for path, size in candidates:
+            md5 = file_md5(path, chunk_size)
+            if md5 in expected and md5 not in found:
+                outstanding -= 1
+            found.add(md5)
+            reporter.advance(
+                size_bytes=size,
+                note=f"{format_count(outstanding)} of this run's files still to find",
+            )
+        context.log(reporter.finish())
+        return found
 
     def _output_roots(self, context: PipelineContext) -> list[Path]:
         paths = context.config.get("paths", {})

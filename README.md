@@ -347,8 +347,8 @@ The orchestrator prints a banner on entry to each stage and another on exit,
 carrying the display name, the stage id and the outcome:
 
 ```
->> STAGE  12/23  START     Rename and Sort  [rename-and-sort]
-<< STAGE  12/23  COMPLETE  Rename and Sort  [rename-and-sort]  (4.1s)
+>> STAGE  12/24  START     Rename and Sort  [rename-and-sort]
+<< STAGE  12/24  COMPLETE  Rename and Sort  [rename-and-sort]  (4.1s)  in 1,200, out 1,198, err 2, crowded_seconds 30
 ```
 
 The exit banner comes from a `finally` block, so **every** way out of a stage is
@@ -357,6 +357,66 @@ announced exactly once — `COMPLETE`, `FAILED` (with the exception), `PAUSED`
 transcript with an opening line and no closing one, and a new stage cannot
 forget to announce itself: stages never emit these, only the orchestrator does.
 `tests/test_stage_banners.py` enforces it against the whole default graph.
+
+The closing banner carries the stage's own counts — `in`/`out`/`err` first,
+then whatever else that stage recorded — so a column of banners is a readable
+account of the run without opening the dashboard.
+
+### Every stage says what it is for
+
+Each `PipelineStage` carries a `description`: one sentence, in the terms a
+person thinks in, saying what it does to the archive and flagging it where it
+is slow or destructive. It is logged when the stage starts, shown under the
+stage name in the dashboard, and used as the node's tooltip.
+`tests/test_stage_insights.py` fails if a stage ships without one.
+
+### Long stages report progress, not silence
+
+A stage that walks tens of thousands of files looks identical, from outside, to
+one that has deadlocked. `src/utils/progress.py` is the fix: a stage builds a
+reporter with `context.progress(...)` and advances it as it works. That
+publishes a structured record the dashboard renders as a bar, and drips a
+throttled line into the log:
+
+```
+  ... Checksumming archive | 41,204/128,900 files (32%) | 18.2 GB of 56.9 GB | 212 MB/s | ETA 3m 40s
+```
+
+Item rate and byte rate are tracked separately because they answer different
+questions: how fast the loop is turning, versus whether the disk is the
+bottleneck. The ETA is remaining-over-average-rate — an indicator, not a
+promise. The orchestrator clears a stage's progress record when it exits, so a
+node showing a bar is a node genuinely still working.
+
+### Why the last stage takes so long
+
+`safety-validation` is the slowest stage by a wide margin, and the reason is
+not obvious: there is no stored index of the archive's checksums, so the only
+way to prove an ingested file still exists is to read it. It therefore walks
+**the whole archive root** — not just this run's output — and MD5s every media
+file in it. Its cost scales with the size of the archive, not the size of the
+intake, which is why a 40-photo import can still spend minutes there.
+
+It now says all of this: the per-root file count and byte total before it
+starts, a live throughput and ETA while it runs, and a count of this run's
+files still to find that falls to zero. Two things also make it cheaper than
+it was — the output roots nest (`READY` and `INBOX` live inside `root_folder`),
+so each file is now hashed once instead of two or three times; and a run that
+ingested nothing skips the hashing entirely, since there are no checksums to
+match. The zero-byte walk still happens in that case.
+
+### Where the time went
+
+The orchestrator times every stage — from a `finally`, so a stage that died is
+timed too — and writes a run summary ranking the slowest five by share of wall
+clock. It lands in the log and in the dashboard's **Where the time went**
+panel:
+
+```
+Run finished in 24m 12s (24/24 stages)
+  time: safety-validation 18m 40s (77%)
+  time: exiftool-batch 2m 30s (10%)
+```
 
 ### Prompts never time out
 

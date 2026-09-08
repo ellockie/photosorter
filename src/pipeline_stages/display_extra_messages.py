@@ -8,6 +8,10 @@ class DisplayExtraMessagesStage(PipelineStage):
         super().__init__(
             stage_id="display-extra-messages",
             display_name="Display Extra Messages",
+            description=(
+                "Surfaces anything still needing attention before the final safety check "
+                "runs."
+            ),
             dependencies=("show-stats",),
         )
 

@@ -18,6 +18,11 @@ class ExiftoolBatchStage(PipelineStage):
         super().__init__(
             stage_id="exiftool-batch",
             display_name="ExifTool Batch",
+            description=(
+                "Runs ExifTool once over the whole INBOX to write one ._exif sidecar per "
+                "media file. One external process per chunk, so cost tracks the number of "
+                "files, not their size."
+            ),
             dependencies=("empty-file-quarantine",),
         )
 
@@ -41,6 +46,7 @@ class ExiftoolBatchStage(PipelineStage):
         ]
         if not targets:
             context.log("ExifTool batch skipped: no media files found")
+            context.set_stage_stats(self.stage_id, inputs=0, outputs=0, errors=0)
             return context
 
         base_command = [
@@ -51,9 +57,27 @@ class ExiftoolBatchStage(PipelineStage):
             "-w!",
             WRITE_FORMAT,
         ]
-        for chunk in chunk_targets(targets):
+        # Chunked because a Windows command line has a length limit, and a
+        # chunk is the only unit of progress there is: ExifTool says nothing
+        # until the whole batch it was given returns. Counting them is the
+        # difference between "running" and "3 of 14 batches done".
+        chunks = list(chunk_targets(targets))
+        context.log(
+            f"Running {exiftool} over {len(targets)} file(s) "
+            f"in {len(chunks)} batch(es) of up to {MAX_COMMAND_CHARS} command characters"
+        )
+        reporter = context.progress(
+            self.stage_id,
+            "Running ExifTool",
+            total=len(targets),
+            unit="files",
+        )
+        for index, chunk in enumerate(chunks, start=1):
+            reporter.set_activity(
+                "Running ExifTool", note=f"batch {index}/{len(chunks)} ({len(chunk)} files)")
             try:
                 subprocess.check_call(base_command + chunk)
+                reporter.advance(len(chunk))
             except FileNotFoundError as error:
                 # WinError 206 ("filename or extension is too long") also maps
                 # to FileNotFoundError; do not mistake it for a missing binary.
@@ -65,15 +89,32 @@ class ExiftoolBatchStage(PipelineStage):
             except subprocess.CalledProcessError as error:
                 # Exit code 1 means some files could not be read; the sidecars
                 # for the remaining files were still written, so keep going.
-                context.log(f"ExifTool reported errors (exit code {error.returncode})")
+                context.log(
+                    f"ExifTool reported errors in batch {index}/{len(chunks)} "
+                    f"(exit code {error.returncode}); the readable files in it still "
+                    "got sidecars"
+                )
+                reporter.advance(len(chunk), errors=1)
             except OSError as error:
                 context.log(f"ExifTool batch failed: {error}")
                 break
 
+        context.log(reporter.finish())
         created = len(list(unsorted.glob("*._exif")))
         failed = max(0, len(targets) - created)
-        context.set_stage_stats(self.stage_id, inputs=len(targets), outputs=created, errors=failed)
+        context.set_stage_stats(
+            self.stage_id,
+            inputs=len(targets),
+            outputs=created,
+            errors=failed,
+            batches=len(chunks),
+        )
         context.log(f"Generated {created} EXIF sidecars for {len(targets)} media files")
         if failed:
-            context.log(f"Missing EXIF sidecars for {failed} media files")
+            note = (
+                f"{failed} file(s) got no EXIF sidecar -- ExifTool could not read them; "
+                "they will have no capture time downstream"
+            )
+            context.log(note)
+            context.add_stage_note(self.stage_id, note)
         return context

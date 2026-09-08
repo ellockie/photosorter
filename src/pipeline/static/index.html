@@ -15,6 +15,9 @@
           <div>
             <h1>photosorter</h1>
             <p id="status">Loading dashboard</p>
+            <!-- What is running right now and how long it has been running:
+                 the two things you look for before reading anything else. -->
+            <p id="now" class="now"></p>
           </div>
           <nav>
             <button data-action="run" class="primary">Run</button>
@@ -29,11 +32,10 @@
         <section class="layout">
           <div id="graph" class="graph"></div>
           <aside>
-            <dl>
-              <dt>Pending</dt><dd id="assets">0</dd>
-              <dt>Processed</dt><dd id="processed">0</dd>
-              <dt>Prompts</dt><dd id="prompts">0</dd>
-            </dl>
+            <!-- The run in numbers, grouped the way the questions are asked:
+                 what came in, where it went, what still needs a look. Empty
+                 groups are dropped rather than shown as rows of zeroes. -->
+            <section id="summary" class="summary"></section>
             <h2>Logs</h2>
             <div id="logs" class="logs"></div>
           </aside>

@@ -8,6 +8,10 @@ class ConvertCrwsStage(PipelineStage):
         super().__init__(
             stage_id="convert-crws",
             display_name="Convert CRWs",
+            description=(
+                "Hands any CRW files over for manual conversion and waits: later stages "
+                "would move them out from under the converter."
+            ),
             dependencies=("rename-and-sort",),
         )
 

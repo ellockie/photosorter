@@ -15,6 +15,11 @@ class MoveOtherImagesStage(PipelineStage):
         super().__init__(
             stage_id="move-other-images",
             display_name="Move Other Images",
+            description=(
+                "Splits Dropbox Camera Uploads by kind: camera photos and videos stay for "
+                "the pipeline, screenshots and other images go to _Other images, "
+                "everything else to _Other files."
+            ),
             dependencies=("legacy-unsorted-migration",),
         )
 

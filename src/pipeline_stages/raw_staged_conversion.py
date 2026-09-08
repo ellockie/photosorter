@@ -11,6 +11,10 @@ class RawStagedConversionStage(StagedWorkspaceStage):
         super().__init__(
             stage_id="raw-staged-conversion",
             display_name="RAW Staged Conversion",
+            description=(
+                "Stages the remaining RAWs in a scratch workspace for hand conversion, "
+                "then sweeps whatever JPEGs you produced back to their originals."
+            ),
             dependencies=("launch-dpviewer",),
             target_extensions=(".cr2", ".crw", ".arw"),
             sidecar_extension_map={"converted_jpg": ".jpg"},

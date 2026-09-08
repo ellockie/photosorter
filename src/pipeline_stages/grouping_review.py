@@ -127,6 +127,10 @@ class GroupingReviewStage(PipelineStage):
         super().__init__(
             stage_id="grouping-review",
             display_name="Grouping Review",
+            description=(
+                "Checks whether any folder came back from the grouper still called "
+                "__TO_SPLIT__, and asks you to name it before the run continues."
+            ),
             dependencies=("screenshot-grouping",),
         )
 

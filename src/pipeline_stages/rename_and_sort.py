@@ -42,6 +42,11 @@ class RenameAndSortStage(PipelineStage):
         super().__init__(
             stage_id="rename-and-sort",
             display_name="Rename and Sort",
+            description=(
+                "Renames each file to the canonical timestamp-and-camera name, and "
+                "settles every name clash -- same-second siblings, duplicates, "
+                "lower-resolution copies -- asking only where the evidence cannot."
+            ),
             dependencies=("timezone-and-travel",),
         )
 
@@ -57,8 +62,20 @@ class RenameAndSortStage(PipelineStage):
         # shot in a second meets no name collision at all, because the first
         # two took fractions and left the plain name free.
         crowded = self._crowded_seconds(context)
+        if crowded:
+            context.log(
+                f"{len(crowded)} second(s) hold more than one shot; those files get a "
+                "sub-second fraction in their name to tell them apart"
+            )
+        reporter = context.progress(
+            self.stage_id,
+            "Renaming to canonical names",
+            total=len(context.assets),
+            unit="assets",
+        )
 
         for asset in context.assets:
+            reporter.advance(note=asset.primary_path.name)
             source_path = asset.primary_path
             if not source_path.exists():
                 skipped += 1
@@ -160,15 +177,29 @@ class RenameAndSortStage(PipelineStage):
             self._rename_sidecars(asset, old_primary_name, target_path.name)
             renamed += 1
 
+        context.log(reporter.finish())
         context.counters["renamed_assets"] = renamed
         context.counters["rename_skipped_assets"] = skipped
+        context.counters["rename_exif_missing"] = exif_missing
         context.set_stage_stats(
             self.stage_id,
             inputs=len(context.assets),
             outputs=renamed,
             errors=exif_missing,
+            skipped=skipped,
+            crowded_seconds=len(crowded),
         )
-        context.log(f"Renamed {renamed} media assets and EXIF sidecars")
+        context.log(
+            f"Renamed {renamed} media asset(s) and their EXIF sidecars"
+            + (f"; skipped {skipped}" if skipped else "")
+        )
+        if exif_missing:
+            note = (
+                f"{exif_missing} asset(s) kept their original name -- no EXIF capture "
+                "time to build one from"
+            )
+            context.log(note)
+            context.add_stage_note(self.stage_id, note)
         return context
 
     def _crowded_seconds(self, context: PipelineContext) -> set:

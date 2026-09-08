@@ -12,6 +12,10 @@ class UploadHarvestStage(PipelineStage):
         super().__init__(
             stage_id="upload-harvest",
             display_name="Upload Harvest",
+            description=(
+                "Moves the camera photos and videos left in Camera Uploads into the "
+                "INBOX, asking what to do whenever a name is already taken."
+            ),
             dependencies=("move-other-images",),
         )
 

@@ -20,6 +20,10 @@ class MoveResultsStage(PipelineStage):
         super().__init__(
             stage_id="move-results",
             display_name="Move Results",
+            description=(
+                "Works out which event folder each finished asset belongs in and lists "
+                "the destinations, before anything is moved."
+            ),
             dependencies=("raw-staged-conversion",),
         )
 

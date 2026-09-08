@@ -10,6 +10,11 @@ class ClassifyOtherImagesStage(PipelineStage):
         super().__init__(
             stage_id="classify-other-images",
             display_name="Classify Other Images",
+            description=(
+                "Sorts the _Other images pile into photos, infographics and text "
+                "screenshots. Opens and inspects each image, so it is slow in proportion "
+                "to how many non-camera images arrived."
+            ),
             dependencies=("move-other-images",),
         )
 

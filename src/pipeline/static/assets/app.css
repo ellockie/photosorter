@@ -91,14 +91,21 @@ button:disabled:hover {
   gap: 3px;
   align-items: stretch;
 }
+/* A node is one compact row by default and grows only when it has something
+   to say — a progress bar while it runs, its description and findings when
+   opened. Twenty-four stages all showing their description at once would be a
+   wall of prose nobody reads. */
 .node {
-  flex: 1 1 0;
-  min-height: 20px;
+  flex: 0 0 auto;
+  min-height: 26px;
   border: 2px solid #525641;
   background: #24281f;
   border-radius: 6px;
-  padding: 1px 10px;
-  white-space: pre-line;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.node.expanded {
+  background: #2a2f24;
 }
 .node.active {
   border-color: #4fd5d5;
@@ -246,10 +253,11 @@ button.danger:hover {
   border-color: #ff8a8a;
   background: #4a2727;
 }
-.node {
+.node-row {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-height: 22px;
 }
 .node-icon {
   flex: 0 0 auto;
@@ -316,4 +324,136 @@ button.danger:hover {
   50% {
     border-color: #2c7c7c;
   }
+}
+
+/* --- Elapsed time ---------------------------------------------------- */
+.node-time {
+  flex: 0 0 auto;
+  min-width: 62px;
+  text-align: right;
+  font-size: 13px;
+  color: #8b8f7a;
+  font-variant-numeric: tabular-nums;
+}
+.node-time.running {
+  color: #4fd5d5;
+  font-weight: 700;
+}
+
+/* --- Live progress ---------------------------------------------------- */
+.node-progress {
+  margin: 4px 0 5px;
+}
+.progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: #171a13;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: #4fd5d5;
+  transition: width 400ms ease;
+}
+/* No total yet: sweep rather than sit at zero, which reads as stuck. */
+.progress-fill.indeterminate {
+  background: repeating-linear-gradient(
+    90deg,
+    #4fd5d5 0 12px,
+    #2c7c7c 12px 24px
+  );
+  animation: barber 900ms linear infinite;
+}
+@keyframes barber {
+  from { background-position: 0 0; }
+  to { background-position: 24px 0; }
+}
+.progress-text {
+  margin-top: 3px;
+  font-size: 12px;
+  color: #aaa690;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Opened node detail ---------------------------------------------- */
+.node-detail {
+  padding: 2px 0 6px 36px;
+  border-top: 1px solid #373a2d;
+  margin-top: 4px;
+}
+.node-description {
+  margin: 6px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #d8d3c0;
+}
+.node-note {
+  margin: 4px 0;
+  font-size: 13px;
+  color: #e9c789;
+}
+.node-facts {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #8b8f7a;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Header "what is running now" ------------------------------------ */
+.now {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #74c7bd;
+  font-variant-numeric: tabular-nums;
+  max-width: 70ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Run summary ------------------------------------------------------ */
+.summary {
+  margin-bottom: 20px;
+}
+.summary-head {
+  padding-bottom: 8px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #373a2d;
+}
+.summary-heading {
+  margin: 14px 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #74c7bd;
+}
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+  font-size: 13px;
+}
+.summary-label {
+  color: #aaa690;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.summary-value {
+  flex: 0 0 auto;
+  color: #f4f1e8;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.summary-row.attention .summary-value {
+  color: #e9c789;
+}
+.summary-idle {
+  font-size: 13px;
+  color: #8b8f7a;
 }

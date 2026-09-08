@@ -52,6 +52,11 @@ class CompanionReconciliationStage(PipelineStage):
         super().__init__(
             stage_id="companion-reconciliation",
             display_name="Companion Reconciliation",
+            description=(
+                "Walks the folders the grouper touched and moves each sidecar, RAW and "
+                "preview to sit beside the shot it belongs to, matching by capture time "
+                "and name."
+            ),
             dependencies=("grouping-review",),
         )
 

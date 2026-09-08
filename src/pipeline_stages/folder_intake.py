@@ -33,6 +33,11 @@ class FolderIntakeStage(PipelineStage):
         super().__init__(
             stage_id="folder-intake",
             display_name="Folder Intake",
+            description=(
+                "Flattens subfolders dropped into the INBOX. Each file's containing "
+                "folder name is journalled as its origin label first, so the label "
+                "survives a crash and can later name the event folder."
+            ),
             dependencies=("upload-harvest",),
         )
 

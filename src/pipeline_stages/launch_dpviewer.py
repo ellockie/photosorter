@@ -8,6 +8,10 @@ class LaunchDpviewerStage(PipelineStage):
         super().__init__(
             stage_id="launch-dpviewer",
             display_name="Launch DPViewer",
+            description=(
+                "Hands any CR2 files to Canon DPViewer and waits for you to finish "
+                "converting them."
+            ),
             dependencies=("convert-crws",),
         )
 
