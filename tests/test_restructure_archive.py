@@ -1738,7 +1738,8 @@ def test_nested_parking_is_hoisted_to_the_month_and_its_shell_removed(
         tmp_path, config):
     root = make_archive(tmp_path)
     event = make_event(
-        root, "2026-07-15_(Wed)__08.14.02 - ____GROUP____(d=1)", images=0)
+        root, "2026-07-15_(Wed)__08.14.02 __GROUP[ Sopot ] ___08.14.02_(n=1)",
+        images=0)
     nested = event / "__EMPTY_SUBFOLDERS"
     parked = nested / "2026-07-15_(Wed)__09.00.00 - __TO_SPLIT__(EMPTY)"
     parked.mkdir(parents=True)
@@ -1938,7 +1939,8 @@ def test_a_parent_of_dated_folders_is_marked_timed_and_spanned(tmp_path, config)
     })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-15_(Wed)__08.14.02#2026-07-16_(Thu)__19.02.44 - ____GROUP____(d=2) - Sopot weekend"]
+        "2026-07-15_(Wed)__08.14.02 __GROUP[ Sopot weekend ]"
+        " ___2026-07-16_(Thu)__19.02.44_(n=2)"]
 
 
 def test_a_single_day_group_still_states_both_ends(tmp_path, config):
@@ -1950,7 +1952,7 @@ def test_a_single_day_group_still_states_both_ends(tmp_path, config):
     })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-18_(Sat)__11.03.27#22.14.09 - ____GROUP____(d=2) - pier"]
+        "2026-07-18_(Sat)__11.03.27 __GROUP[ pier ] ___22.14.09_(n=2)"]
 
 
 def test_a_leaf_folder_is_left_alone(tmp_path, config):
@@ -1980,7 +1982,8 @@ def test_the_legacy_marker_is_converted_and_the_description_kept(tmp_path, confi
         })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-15_(Wed)__08.14.02#2026-07-16_(Thu)__17.40.11 - ____GROUP____(d=2) - Malbork trip"]
+        "2026-07-15_(Wed)__08.14.02 __GROUP[ Malbork trip ]"
+        " ___2026-07-16_(Thu)__17.40.11_(n=2)"]
 
 
 def test_a_stale_count_and_a_stale_span_are_both_rebuilt(tmp_path, config):
@@ -1993,7 +1996,8 @@ def test_a_stale_count_and_a_stale_span_are_both_rebuilt(tmp_path, config):
         })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-15_(Wed)__08.14.02#2026-07-16_(Thu)__19.02.44 - ____GROUP____(d=2) - Sopot"]
+        "2026-07-15_(Wed)__08.14.02 __GROUP[ Sopot ]"
+        " ___2026-07-16_(Thu)__19.02.44_(n=2)"]
 
 
 def test_a_folder_that_lost_its_children_loses_the_marker_and_the_span(
@@ -2024,11 +2028,13 @@ def test_a_nested_group_spans_everything_beneath_it(tmp_path, config):
 
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(outer) == [
-        "2026-07-15_(Wed)__08.14.02#2026-07-18_(Sat)__20.11.19 - ____GROUP____(d=2) - Norway"]
+        "2026-07-15_(Wed)__08.14.02 __GROUP[ Norway ]"
+        " ___2026-07-18_(Sat)__20.11.19_(n=2)"]
     renamed = outer.parent / month_entries(outer)[0]
     assert sorted(path.name for path in renamed.iterdir()) == [
         "2026-07-15_(Wed)__08.14.02",
-        "2026-07-16_(Thu)__09.10.44#2026-07-18_(Sat)__20.11.19 - ____GROUP____(d=2) - the fjords",
+        "2026-07-16_(Thu)__09.10.44 __GROUP[ the fjords ]"
+        " ___2026-07-18_(Sat)__20.11.19_(n=2)",
     ]
 
 
@@ -2150,8 +2156,7 @@ def test_a_split_day_with_nothing_left_at_its_top_level_becomes_a_group(
     })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-15_(Wed)__08.14.02#16.20.31 - ____GROUP____(d=2) "
-        "- __TO_LABEL__"]
+        "2026-07-15_(Wed)__08.14.02 __GROUP[ __TO_LABEL__ ] ___16.20.31_(n=2)"]
 
 
 def test_a_half_split_day_keeps_its_marker_and_is_reported(tmp_path, config, capsys):
@@ -2182,7 +2187,7 @@ def test_a_name_a_person_wrote_survives_becoming_a_group(tmp_path, config):
     })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-15_(Wed)__08.14.02#08.14.02 - ____GROUP____(d=1) - Sopot weekend"]
+        "2026-07-15_(Wed)__08.14.02 __GROUP[ Sopot weekend ] ___08.14.02_(n=1)"]
 
 
 def test_the_legacy_placeholder_is_not_mistaken_for_a_name(tmp_path, config):
@@ -2192,8 +2197,7 @@ def test_the_legacy_placeholder_is_not_mistaken_for_a_name(tmp_path, config):
     })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-15_(Wed)__08.14.02#08.14.02 - ____GROUP____(d=1) "
-        "- __TO_LABEL__"]
+        "2026-07-15_(Wed)__08.14.02 __GROUP[ __TO_LABEL__ ] ___08.14.02_(n=1)"]
 
 
 # --------------------------------------------------------------------------
@@ -2209,7 +2213,7 @@ def test_a_group_takes_the_description_all_its_children_agree_on(tmp_path, confi
     })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-15_(Wed)__08.14.02#16.20.31 - ____GROUP____(d=2) - Sopot"]
+        "2026-07-15_(Wed)__08.14.02 __GROUP[ Sopot ] ___16.20.31_(n=2)"]
 
 
 def test_children_that_disagree_leave_the_group_asking_for_a_name(tmp_path, config):
@@ -2220,8 +2224,7 @@ def test_children_that_disagree_leave_the_group_asking_for_a_name(tmp_path, conf
     })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-15_(Wed)__08.14.02#16.20.31 - ____GROUP____(d=2) "
-        "- __TO_LABEL__"]
+        "2026-07-15_(Wed)__08.14.02 __GROUP[ __TO_LABEL__ ] ___16.20.31_(n=2)"]
 
 
 def test_one_unnamed_child_is_enough_to_withhold_the_name(tmp_path, config):
@@ -2233,8 +2236,7 @@ def test_one_unnamed_child_is_enough_to_withhold_the_name(tmp_path, config):
     })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-15_(Wed)__08.14.02#16.20.31 - ____GROUP____(d=2) "
-        "- __TO_LABEL__"]
+        "2026-07-15_(Wed)__08.14.02 __GROUP[ __TO_LABEL__ ] ___16.20.31_(n=2)"]
 
 
 def test_to_label_is_not_sticky(tmp_path, config):
@@ -2250,7 +2252,7 @@ def test_to_label_is_not_sticky(tmp_path, config):
     })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     named = root / "2026" / "07. July" / month_entries(group)[0]
-    assert named.name.endswith("- Sopot")
+    assert "__GROUP[ Sopot ]" in named.name
 
     # A second child arrives, agreeing with the first: the name still holds.
     child = named / "2026-07-15_(Wed)__14.31.09 - Sopot"
@@ -2258,7 +2260,7 @@ def test_to_label_is_not_sticky(tmp_path, config):
     (child / "2026-07-15_(Wed)__16.20.31__f1.7__SG23U.jpg").write_bytes(b"x")
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(named) == [
-        "2026-07-15_(Wed)__08.14.02#16.20.31 - ____GROUP____(d=2) - Sopot"]
+        "2026-07-15_(Wed)__08.14.02 __GROUP[ Sopot ] ___16.20.31_(n=2)"]
 
 
 def test_a_person_replacing_the_marker_is_never_overwritten(tmp_path, config):
@@ -2273,8 +2275,7 @@ def test_a_person_replacing_the_marker_is_never_overwritten(tmp_path, config):
         })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == [
-        "2026-07-15_(Wed)__08.14.02#16.20.31 - ____GROUP____(d=2) "
-        "- Sopot weekend"]
+        "2026-07-15_(Wed)__08.14.02 __GROUP[ Sopot weekend ] ___16.20.31_(n=2)"]
 
 
 def test_a_group_falling_back_to_a_leaf_drops_the_marker_and_the_question(
@@ -2283,7 +2284,8 @@ def test_a_group_falling_back_to_a_leaf_drops_the_marker_and_the_question(
     root = make_archive(tmp_path)
     group = make_group(
         root,
-        "2026-07-15_(Wed)__08.14.02 - ____GROUP____(d=1) - __TO_LABEL__", {})
+        "2026-07-15_(Wed)__08.14.02 __GROUP[ __TO_LABEL__ ] ___08.14.02_(n=1)",
+        {})
     (group / "2026-07-15_(Wed)__08.14.02__f1.7__SG23U.jpg").write_bytes(b"x")
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
     assert month_entries(group) == ["2026-07-15_(Wed)__08.14.02"]
@@ -2302,9 +2304,10 @@ def test_a_parking_area_inside_a_group_is_left_where_it_is(tmp_path, config):
     from.
     """
     root = make_archive(tmp_path)
-    group = make_group(root, "2026-07-15_(Wed)__08.14.02 - ____GROUP____(d=1)", {
-        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
-    })
+    group = make_group(
+        root, "2026-07-15_(Wed)__08.14.02 __GROUP[ Sopot ] ___08.14.02_(n=1)", {
+            "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+        })
     parked = group / "__EMPTY_SUBFOLDERS" / "2026-07-16_(Thu)__00.00.00 - __TO_SPLIT__(EMPTY)"
     parked.mkdir(parents=True)
 
@@ -2335,9 +2338,10 @@ def test_a_parking_area_inside_a_leaf_day_inside_a_group_stops_at_the_group(
         tmp_path, config):
     """The two rules together: hoist out of the leaf, but no further than the group."""
     root = make_archive(tmp_path)
-    group = make_group(root, "2026-07-15_(Wed)__08.14.02 - ____GROUP____(d=1)", {
-        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
-    })
+    group = make_group(
+        root, "2026-07-15_(Wed)__08.14.02 __GROUP[ Sopot ] ___08.14.02_(n=1)", {
+            "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+        })
     day = group / "2026-07-15_(Wed)__08.14.02"
     nested = day / "__EMPTY_SUBFOLDERS"
     (nested / "##   EXIFs   ##").mkdir(parents=True)

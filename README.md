@@ -246,26 +246,37 @@ and previews follow; the verified-empty legacy folder is parked under the
 month's `__EMPTY_SUBFOLDERS` (V12/L4).
 
 **Groups (§3) are written.** A dated folder holding dated child folders carries
-`____GROUP____` as the first element of its tail and states the whole span it
-covers in its prefix -- start stamp, then `#` and the end. The end says all of
-the date or none of it: the time alone when the span closes the day it opened,
-and the whole canonical stamp when it crosses a day.
+`__GROUP[ ... ]` directly after its start stamp, with its description in the
+brackets, and states the whole span it covers -- the start stamp opening the
+name and ` ___` and the end closing it, in front of `_(n=N)` -- the count of
+nested dated folders, divided off the end stamp so the bracket does not read as
+part of the time. The end says all of the date or none of it: the time alone when the
+span closes the day it opened, and the whole canonical stamp when it crosses a
+day.
 
-    2026-08-20_(Thu)__09.14.02#2026-08-27_(Thu)__18.31.50 - ____GROUP____(d=7) - Norway
-    2026-08-14_(Fri)__13.40.23#17.47.04 - ____GROUP____(d=3) - Kajaki z Marco
+    2026-08-20_(Thu)__09.14.02 __GROUP[ Norway ] ___2026-08-27_(Thu)__18.31.50_(n=7)
+    2026-08-14_(Fri)__13.40.23 __GROUP[ Kajaki z Marco ] ___17.47.04_(n=3)
 
-Both stamps and the `d` count are the tool's, rebuilt from the subtree on every
-run; the description after them is the only part a person owns -- and a group
-nobody has named carries `__TO_LABEL__` there until somebody does, or until its
-children agree on a name of their own (C16). Step 6 of
+Both stamps and the `n` count are the tool's, rebuilt from the subtree on every
+run; the description in the brackets is the only part a person owns -- and a
+group nobody has named carries `__TO_LABEL__` there until somebody does, or
+until its children agree on a name of their own (C16). Step 6 of
 `tools/restructure_archive.py` maintains them, adds the marker to a folder that
 has gained dated children and takes it off one that has lost its last. What it
 holds (C3) is only reported: moving media down into a child of its own is C4,
 which since v1.0 is a settled action of the fixing tool — under `--apply`, after
 a prompt — and not of step 6. A group may hold one `__GEOLOCATIONS` (C3a), for a
 track spanning more days than any single child, and that is the only taxonomy
-subfolder it may hold. `__CONTAINER__` was the v0.8 spelling; nothing ever wrote
-one, and step 6 converts any that a person typed.
+subfolder it may hold.
+
+Every earlier spelling is read and none is written again (C15a): the span welded
+to the start stamp with a `#`, the `____GROUP____` marker opening a ` - ` tail
+with the description after it, `(d=N)` for the count, and the `__CONTAINER__` of
+v0.8 that no tool ever wrote. The migration to the current shape is the rename
+itself -- step 6 rebuilds a group's name from its subtree anyway (C11), so an
+archive converts as it is worked on and a name in the old shape stays correct
+until then. The letter changed with the shape: `d` read as "days", and a
+Saturday split into four sub-events is not four days.
 
 The standard proposes more that no code writes yet:
 

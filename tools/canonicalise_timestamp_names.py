@@ -45,9 +45,11 @@ and the name goes on naming a photograph that is no longer in it. A label is no
 protection: a person's writing is the description, and the stamp in front of it
 is the tool's (C11). Two folders are never retimed:
 
-  * a **group**. Its prefix carries the span it covers, both ends are
-    recomputed together by whatever run changed the subtree (C11), and half a
-    span rewritten here would be a name saying two different things.
+  * a **group**. Its name carries the span it covers -- the start stamp
+    opening it, " ___end" closing it -- and both ends are recomputed together
+    by whatever run changed the subtree (C11), so half a span rewritten here
+    would be a name saying two different things. Recognised by its marker and
+    handed straight back, whole.
   * one whose earliest file is not a capture that day may hold -- outside the
     day itself and the small hours of the next (N7). One stray from another
     year would otherwise rewrite the name of a day that was right, so the
@@ -429,12 +431,12 @@ def canonical_event_folder_name(folder, name, media_files, settings,
     **checked and corrected**, not merely filled in when absent -- a folder
     stamped before an earlier pass moved its early shots into a sibling names a
     photograph that is no longer in it. ``grouping.with_corrected_time`` owns
-    the rule, including the two folders it must not retime: a group, whose
-    prefix carries a span that is maintained at both ends together (C11), and
-    one whose earliest file is not a file that day may hold (N7). The second is
-    appended to ``mistimed`` when a list is passed, and reported rather than
-    renamed -- one misfiled stray must not rewrite the name of a day that was
-    right.
+    the rule for the folder whose earliest file is not one that day may hold
+    (N7): it is appended to ``mistimed`` when a list is passed, and reported
+    rather than renamed -- one misfiled stray must not rewrite the name of a
+    day that was right. The other folder this pass must not retime -- a group,
+    whose two stamps are maintained together (C11) -- is refused outright,
+    before any of this runs.
 
     ``--keep-times`` turns the correction off, leaving the older behaviour: a
     prefix with no time gains one, a prefix with a time keeps it.
@@ -452,6 +454,18 @@ def canonical_event_folder_name(folder, name, media_files, settings,
       * anything else -- a month folder, a folder with no date -- is returned
         untouched.
     """
+    if grouping.carries_group_marker(name):
+        # A group's whole name -- both stamps, the count and the description --
+        # is section 3's, rebuilt from the subtree by step 6 of the
+        # restructurer (C11). Up to v1.0 this pass could not have touched one
+        # anyway: the span sat welded to the start stamp, so the prefix was not
+        # a bare dated prefix and ``with_corrected_time`` declined it. Since
+        # v1.1 the span closes the name instead and the prefix IS a bare one,
+        # which would let this pass retime one end of a pair that is only ever
+        # maintained together. So the refusal is stated here rather than
+        # falling out of a regex, and it is stated first.
+        return name
+
     tail = label = None
     base = grouping.strip_placeholder(name, settings.placeholder)
     if base is None:

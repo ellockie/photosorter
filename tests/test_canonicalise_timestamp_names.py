@@ -616,10 +616,23 @@ def test_a_stray_from_another_year_is_reported_and_renames_nothing(tmp_path,
     assert "1 mistimed" in out
 
 
-def test_a_group_keeps_the_span_in_its_prefix(tmp_path):
-    """C11: both ends move together, and never from a retiming pass."""
+@pytest.mark.parametrize("name", [
+    # v1.1: the start stamp is now an ordinary dated prefix, so nothing about
+    # its shape stops this pass retiming it. The marker does.
+    "2026-07-20_(Mon)__08.00.00 __GROUP[ Norway ] ___2026-07-21_(Tue)__20.00.00_(n=1)",
+    # Pre-v1.1, with the span welded to the prefix.
+    "2026-07-20_(Mon)__08.00.00#21__20.00.00 - ____GROUP____(d=1) - Norway",
+])
+def test_a_group_is_handed_straight_back_whichever_shape_it_is_in(tmp_path, name):
+    """C11: both ends move together, and never from a retiming pass.
+
+    The group's own start says 08.00.00 and its earliest file says 09.00.00,
+    so a pass that felt entitled to correct the time (N3) would rewrite one end
+    of a pair only step 6 maintains -- leaving a name claiming a span that
+    starts after nothing in particular.
+    """
     year = tmp_path / "2026"
-    group = year / "2026-07-20_(Mon)__08.00.00#21__20.00.00 - ____GROUP____(d=1) - Norway"
+    group = year / name
     _placeholder_folder(group, "2026-07-20_(Mon)__09.00.00 - day one",
                         [_stamped("2026-07-20_(Mon)", "09.00.00")])
 
@@ -717,8 +730,13 @@ def test_a_dry_run_still_explains_what_it_would_write(tmp_path, capsys):
 
 
 def test_every_letter_the_grammar_writes_has_a_meaning(tmp_path):
-    """A letter added to COUNT_LETTERS without a meaning would print nothing."""
-    assert set(grouping.COUNT_MEANINGS) == set(grouping.COUNT_LETTERS)
+    """A letter added to COUNT_LETTERS without a meaning would print nothing.
+
+    The legacy letters are in the legend too: a name still carrying "(d=4)" is
+    one a run may meet and explain, right up until it rewrites it as "(n=4)".
+    """
+    assert set(grouping.COUNT_MEANINGS) == set(
+        grouping.COUNT_LETTERS + grouping.LEGACY_COUNT_LETTERS)
 
 
 def test_a_second_sidecar_for_one_subject_is_counted_as_a_clash(tmp_path):

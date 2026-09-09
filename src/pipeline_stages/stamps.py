@@ -162,41 +162,76 @@ def apply_subsecond(name: str, subsecond: str | int | None) -> str:
     return stamp + name[match.end():]
 
 
-# The end of a group's span (C6-C9). Two shapes, and which one is written is
-# decided by one question -- does the span cross a day?
+# Where a group's span end sits, and what opens it (C6).
 #
-#   "#17.47.04"                    ends the day it starts: the time alone
-#   "#2026-08-16_(Sun)__19.02.44"  ends on another day: the whole canonical stamp
+# Up to v1.0 the end was welded to the start -- "…__09.31.29#2026-08-20…" --
+# which put the longest, most machine-looking half of the name where a reader's
+# eye lands first and pushed the one word a person cares about, the
+# description, off the end of the column. Since v1.1 the end closes the name
+# instead, opened by " ___":
+#
+#   2026-08-14_(Fri)__09.31.29 __GROUP[ Polska ] ___2026-08-20_(Thu)__11.06.58_(n=31)
+#
+# Three underscores, one more than the marker's two, so the two separators
+# cannot be misread for each other and the end is still visibly machinery. The
+# "#" opener is read forever and never written again (N5, C15a).
+RANGE_END_SEPARATOR = " ___"
+LEGACY_RANGE_END_SEPARATOR = "#"
+
+# The end itself. Two shapes, and which one is written is decided by one
+# question -- does the span cross a day?
+#
+#   " ___17.47.04"                    ends the day it starts: the time alone
+#   " ___2026-08-16_(Sun)__19.02.44"  ends on another day: the whole canonical stamp
 #
 # Either nothing about the date or all of it. A same-day group repeating its
-# own date said nothing the start had not already said two characters to the
-# left, and a cross-day one abbreviating it ("#16") made the reader carry the
-# start's year and month across the "#" to work out which day was meant. The
-# weekday comes with the full form for the same reason the start carries one:
-# a bare date is not a day anybody reads at a glance.
+# own date said nothing the start had not already said, and a cross-day one
+# abbreviating it ("#16") made the reader carry the start's year and month
+# across the separator to work out which day was meant. The weekday comes with
+# the full form for the same reason the start carries one: a bare date is not a
+# day anybody reads at a glance.
 #
 # Read-old/write-new (N5). Every earlier shape still parses and none is written
-# again: the abbreviated tails "#22" (same year and month) and "#09-11" (same
-# year), the full "#2027-01-03" with no weekday, and any of those with the time
-# missing, which is how a span written before v0.9 looks.
-# ``format_range_end`` is the only thing here that writes one.
+# again: the "#" opener wherever it sits, the abbreviated tails "#22" (same year
+# and month) and "#09-11" (same year), the full "#2027-01-03" with no weekday,
+# and any of those with the time missing, which is how a span written before
+# v0.9 looks. ``format_range_end`` is the only thing here that writes one.
 #
 # The time-only branch is tried FIRST, and that ordering is load-bearing:
 # "#17.47.04" offered to the date branch matches "#17" and leaves ".47.04"
 # behind as tail, silently reading a time as the 17th of the month.
-RANGE_END_PATTERN = (
-    rf"#(?:({TIME_PATTERN})"
+#
+# One body, three openers: the opener is the only thing that differs between a
+# span end read anywhere, one read welded to the prefix, and one read closing
+# the name, so it is the only thing spelled three times. The capture groups are
+# identical in all three, which is what lets ``resolve_range_end`` and
+# ``range_end_time`` read whichever a caller hands them.
+_RANGE_END_BODY_PATTERN = (
+    rf"(?:({TIME_PATTERN})"
     r"|(?:(?:(\d{4})-)?(\d{2})-)?(\d{2})"
     rf"(?:{DATE_TIME_SEPARATOR_PATTERN}({TIME_PATTERN}))?)"
 )
+RANGE_END_PATTERN = (
+    rf"(?:{re.escape(RANGE_END_SEPARATOR)}|{LEGACY_RANGE_END_SEPARATOR})"
+    rf"{_RANGE_END_BODY_PATTERN}"
+)
+# Welded to the prefix: the pre-v1.1 position, read and never written.
+_PREFIX_RANGE_END_PATTERN = (
+    rf"{LEGACY_RANGE_END_SEPARATOR}{_RANGE_END_BODY_PATTERN}")
+# Closing the name: the v1.1 position. The bracket that may follow it is
+# ``grouping_names``' grammar, not this module's, so it is matched loosely --
+# all that is needed here is to know the end is still the last thing but one.
+_CLOSING_RANGE_END_RE = re.compile(
+    rf"({re.escape(RANGE_END_SEPARATOR)}{_RANGE_END_BODY_PATTERN})"
+    r"(?:_?\([A-Za-z]+=\d+\))?$")
 
 # A dated folder's whole prefix: the date, the decorative weekday, the canonical
-# time when the folder carries one, and the span end when it covers more than a
-# day. Everything after it is the tail, whose grammar belongs to
-# ``grouping_names``, not here.
+# time when the folder carries one, and -- on a name written before v1.1 -- the
+# span end welded to it. Everything after it is the tail, whose grammar belongs
+# to ``grouping_names``, not here.
 DATED_FOLDER_RE = re.compile(
     rf"^({DATE_PATTERN})(?:[ _]+\([A-Za-z]{{3}}\))?(?:[ _]+({TIME_PATTERN}))?"
-    rf"(?:({RANGE_END_PATTERN}))?"
+    rf"(?:({_PREFIX_RANGE_END_PATTERN}))?"
 )
 
 
@@ -205,7 +240,7 @@ class DatedFolder(NamedTuple):
 
     date: str                 # YYYY-MM-DD, always the *start* of the span
     time: str | None          # HH.MM.SS, or None for a date-only prefix
-    range_end: str | None     # the raw "#..." span end, or None when it states none
+    range_end: str | None     # the raw span end with its opener, or None for no span
     tail: str                 # everything after the prefix, unparsed
 
 
@@ -221,12 +256,20 @@ def split_dated_folder(name: str) -> DatedFolder | None:
     match = DATED_FOLDER_RE.match(name)
     if not match:
         return None
-    return DatedFolder(match.group(1), match.group(2), match.group(3),
-                       name[match.end():])
+    tail = name[match.end():]
+    range_end = match.group(3)
+    if range_end is None:
+        # v1.1: the end closes the name rather than the prefix. Looked for only
+        # when the prefix carried none, so a legacy name is never read twice
+        # and a folder cannot end up claiming two different spans.
+        closing = _CLOSING_RANGE_END_RE.search(tail)
+        if closing is not None:
+            range_end = closing.group(1)
+    return DatedFolder(match.group(1), match.group(2), range_end, tail)
 
 
 def resolve_range_end(start_date: str, range_end: str | None) -> str | None:
-    """The ``YYYY-MM-DD`` a ``#`` span end names, or None when there is no span.
+    """The ``YYYY-MM-DD`` a span end names, or None when there is no span.
 
     A time-only end says the span closes the day it opened, so it resolves to
     ``start_date`` itself -- that is what makes writing the date there
@@ -234,7 +277,8 @@ def resolve_range_end(start_date: str, range_end: str | None) -> str | None:
 
     The abbreviated forms are still expanded against the start for the archive
     written before this: ``2026-08-20`` + ``#22`` -> ``2026-08-22``, ``#09-11``
-    -> ``2026-09-11``, ``#2027-01-03`` -> itself.
+    -> ``2026-09-11``, ``#2027-01-03`` -> itself. Either opener is accepted --
+    the position an end was written in says nothing about what it means.
     """
     if not range_end:
         return None
@@ -265,13 +309,14 @@ def range_end_time(range_end: str | None) -> str | None:
 
 
 def format_range_end(start_date: str, end: datetime.datetime) -> str:
-    """The ``#`` span end for a group starting on ``start_date`` (C6-C9).
+    """The span end for a group starting on ``start_date`` (C6-C9).
 
     The time alone when the span ends on the day it began, and the whole
     canonical stamp when it does not -- literally ``format_stamp``, so the two
     ends of a span are written in one grammar and a reader meets the same shape
-    either side of the ``#``.
+    at both ends of the name. Always opened by ``RANGE_END_SEPARATOR``; the
+    ``#`` of the older convention is read and never written again.
     """
     if f"{end:%Y-%m-%d}" == start_date:
-        return f"#{end:%H.%M.%S}"
-    return f"#{format_stamp(end)}"
+        return f"{RANGE_END_SEPARATOR}{end:%H.%M.%S}"
+    return f"{RANGE_END_SEPARATOR}{format_stamp(end)}"

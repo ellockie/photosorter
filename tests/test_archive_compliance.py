@@ -120,7 +120,10 @@ def test_c12_moves_group_to_month_of_stated_start(tmp_path, config):
     group.rename(wrong)
     assert run(str(root), "--steps", "8", "--apply", "--yes") == 0
     assert not wrong.exists()
-    assert list((root / "2026" / "07. July").glob("*Trip"))
+    # No glob for the name: "[" is a character class to fnmatch, and a
+    # group's description sits in brackets.
+    assert [path.name for path in (root / "2026" / "07. July").iterdir()
+            if "__GROUP[ Trip ]" in path.name]
     assert run(str(root), "--steps", "7") == 0
 
 
@@ -256,7 +259,7 @@ def test_c12_refusal_and_collision_preserve_both_trees(tmp_path, config, monkeyp
     write(group / "preserve.txt", b"existing")
     assert run(str(root), "--steps", "8", "--apply", "--yes") == 1
     assert (group / "preserve.txt").read_bytes() == b"existing"
-    assert list((root / "2026" / "08. August").glob("*Trip"))
+    assert list((root / "2026" / "08. August").glob("*Trip*"))
 
 
 def test_journal_failure_prevents_migration(tmp_path, config, monkeypatch):
@@ -556,7 +559,8 @@ def test_s7_parks_a_collision_loser_in_the_dated_folder_not_the_year(tmp_path, c
 def test_s7_a_group_never_holds_the_parking_folder(tmp_path, config):
     """C3: a group holds no files, so the walk climbs past it to the leaf."""
     root = make_archive(tmp_path)
-    group = root / "2026" / "07. July" / "2026-07-15_(Wed)__08.00.00 - ____GROUP____(d=2)"
+    group = (root / "2026" / "07. July"
+             / "2026-07-15_(Wed)__08.00.00 __GROUP[ Roldal ] ___12.00.00_(n=2)")
     event = group / "2026-07-15_(Wed)__12.00.00 - Roldal"
     write(event / BASE, b"photo")
 

@@ -9,7 +9,7 @@ the import graph alone, so they are enforced here:
    one implementation; ``core.file_md5``, ``companion_matching.default_checksum``
    and ``legacy_videos._default_checksum`` are names for it.
 
-2. **The leading-stamp grammar.** ``grouping_names`` spells out the same three
+2. **The stamp and span grammar.** ``grouping_names`` spells out the same
    fragments ``stamps`` defines, on purpose: it imports nothing from the project
    so a maintenance tool can load it by file path, and importing ``stamps``
    would pull the package ``__init__`` in behind it. That exception is accepted
@@ -98,8 +98,15 @@ def test_the_checksum_still_matches_hashlib(tmp_path):
 
 PATTERN_PAIRS = [
     ("_DATE_PATTERN", "DATE_PATTERN"),
+    ("_TIME_PATTERN", "TIME_PATTERN"),
     ("_DATE_TIME_SEPARATOR_PATTERN", "DATE_TIME_SEPARATOR_PATTERN"),
     ("_STAMP_CAPTURE_PATTERN", "STAMP_CAPTURE_PATTERN"),
+    # A group's name is built in ``grouping_names`` and its span end is
+    # ``stamps``' grammar, so the separator and the end's body are copied for
+    # the same reason the stamp fragments are -- and held to the same rule.
+    ("_RANGE_END_SEPARATOR", "RANGE_END_SEPARATOR"),
+    ("_LEGACY_RANGE_END_SEPARATOR", "LEGACY_RANGE_END_SEPARATOR"),
+    ("_RANGE_END_BODY_PATTERN", "_RANGE_END_BODY_PATTERN"),
 ]
 
 
@@ -121,6 +128,7 @@ def test_the_compiled_leading_stamp_regexes_are_equal():
     "2026-08-20_(Thu)__09.14.02 - Norway",
     "2026-08-20 (Thu) 09.14.02",
     "2026-08-20__09.14.02",
+    "2026-08-20_(Thu)__09.14.02 __GROUP[ Norway ] ___16.20.31_(n=3)",
     "2026-08-20_(Thu)__09.14.02#16.20.31 - ____GROUP____(d=3)",
     "not a folder",
     "08. August",

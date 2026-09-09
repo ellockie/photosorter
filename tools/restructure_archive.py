@@ -123,10 +123,10 @@ the audit markers from what is finally on disk.
 What step 6 does
 ----------------
 Section 3 of the standard: a dated folder holding dated child folders is a
-*group*, it says so in its tail -- "____GROUP____" -- and its prefix states
-both ends of the span it covers, start stamp and "#end", each read off the
-subtree. A folder that stopped holding dated children loses the marker and the
-span again. It runs after step 5 because the grouper (step 3) creates and
+*group*, it says so after its start stamp -- "__GROUP[ Polska ]" -- and the
+name states both ends of the span it covers, the start stamp opening it and
+" ___end" closing it, each read off the subtree. A folder that stopped holding
+dated children loses the marker and the span again. It runs after step 5 because the grouper (step 3) creates and
 destroys exactly those parent/child relationships, and after the second
 canonicalise pass because that is what settles the child names the span is
 computed from.
@@ -2385,10 +2385,11 @@ def step_reconcile(run, label):
 # Step 6 -- mark and time the groups
 # --------------------------------------------------------------------------
 #
-# Section 3: a dated folder holding dated children carries "____GROUP____" as
-# the first element of its tail (C1), one that holds none carries no marker
-# (C2), and a group states both ends of its span in its prefix (C6), both read
-# off the subtree and rewritten whenever it changes (C11).
+# Section 3: a dated folder holding dated children carries "__GROUP[ ... ]"
+# after its start stamp (C1), one that holds none carries no marker (C2), and a
+# group states both ends of its span -- the start opening the name and the end
+# closing it (C6) -- both read off the subtree and rewritten whenever it
+# changes (C11).
 #
 # What this step will NOT do, and why:
 #
@@ -2541,9 +2542,9 @@ def description_for_group(folder, children, config):
          its children agree on one or somebody types one in.
 
     The alternative to (3) is the bare marker this step used to leave --
-    ``- ____GROUP____(d=3)`` and nothing after it -- which says the same thing
-    by saying nothing, and reads in Explorer as a folder that is simply named
-    that way. A group waiting for a name should look like it is waiting.
+    ``__GROUP[]`` and nothing in it -- which says the same thing by saying
+    nothing, and reads in Explorer as a folder that is simply named that way. A
+    group waiting for a name should look like it is waiting.
     """
     kept = description_to_keep(folder.name, config)
     if kept is not None:
@@ -2666,13 +2667,17 @@ def group_target_name(folder, children, run, config, refused):
         )
 
     base += "__%02d.%02d.%02d" % (earliest.hour, earliest.minute, earliest.second)
-    base += stamps.format_range_end(
+    range_end = stamps.format_range_end(
         parsed.date, span_end_moment(subtree.last_day, latest)
     )
     # Last, so a folder this step refuses to name is never asked what it should
     # be called -- the children are read only for a group that is getting a name.
     description, source = description_for_group(folder, children, config)
-    return grouping.group_name(base, len(children), description), None, source
+    return (
+        grouping.group_name(base, len(children), description, range_end),
+        None,
+        source,
+    )
 
 
 def group_violations(folder, config):

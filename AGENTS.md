@@ -12,8 +12,10 @@ renames or scans archive folders. It defines:
 
 - the path `ROOT/<YYYY>/<NN>. <Month>/<dated folder>/…` and what may sit at each level
 - the dated-folder and media-file naming grammars, and the historical forms still read
-- `____GROUP____` marking, and the `#` date-time span, on any dated folder holding
-  dated children (§3; step 6 of `tools/restructure_archive.py` maintains both)
+- `__GROUP[ <description> ]` marking, and the ` ___` date-time span that closes
+  the name, on any dated folder holding dated children (§3; step 6 of
+  `tools/restructure_archive.py` maintains both, and converts every earlier
+  spelling it meets)
 - the **closed** set of `__`-prefixed subfolders allowed inside a dated folder
 - sidecar naming and pairing
 - **one definition per rule** (T8) — taxonomy, regexes and constants each live in
