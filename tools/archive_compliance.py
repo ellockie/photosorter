@@ -64,6 +64,12 @@ class Inspection:
         self.images, self.videos = self.grouping.extension_sets(self.config)
         self.issues = []
         self.events = []
+        # Reading a fraction now costs an ExifTool launch (see ``subsecond``),
+        # and one scan asks the same file several times: once when the pair is
+        # found, once per candidate partner, and again when the repair is
+        # planned. A run is a snapshot -- nothing else is writing to the
+        # archive while it walks -- so the answer is remembered.
+        self._subseconds = {}
 
     def issue(self, rule, path, reason):
         item = (rule, Path(path), reason)
@@ -324,12 +330,34 @@ class Inspection:
         return None
 
     def subsecond(self, media_path):
-        """The sub-second recorded for a filed media file, from its sidecar (X10).
+        """The sub-second recorded for a filed media file (F9a).
 
-        X1 names a sidecar after its subject's **full** name, and X10 puts it in
-        the ``__EXIF`` directly inside the folder holding the subject, so the
-        path is derived rather than searched for.
+        **Read from the file, not from its sidecar.** This is the pass that
+        undoes a mismarked pair, and the mark it is undoing was written by a
+        run that trusted a sidecar. An archive was found where a shot's
+        ``__EXIF`` entry held the fraction and shutter count of the *other*
+        exposure in that second, left behind when the file at that name
+        changed: F9a compared a fraction against itself and marked two genuine
+        exposures as a collision. A repair reading the same sidecar would read
+        the same wrong number and agree with the defect it was sent to fix.
+
+        The sidecar is the fallback for the one case it is safe in: the file's
+        own report carries no capture time, so it has said nothing about when
+        the shutter opened. X1 names a sidecar after its subject's **full**
+        name and X10 puts it in the ``__EXIF`` directly inside the folder
+        holding the subject, so that path is derived rather than searched for.
         """
+        key = self.tool.path_key(media_path)
+        if key not in self._subseconds:
+            self._subseconds[key] = self._read_subsecond(media_path)
+        return self._subseconds[key]
+
+    def _read_subsecond(self, media_path):
+        text = self.tool.exif_sidecars.media_exif_text(
+            self.tool.extended_path(media_path),
+            self.tool.exif_sidecars.exiftool_command(self.config, self.tool.REPO_ROOT))
+        if text is not None and self.tool.siblings.records_capture_time(text):
+            return self.tool.siblings.subsecond_from_exif_text(text)
         exif_folder = self.taxonomy.sidecar_subdir(media_path.parent, self.config)
         for extension in self.grouping.configured_extensions(
                 self.config, "sidecars", self.grouping.DEFAULT_SIDECAR_EXTENSIONS):
@@ -376,16 +404,71 @@ def mismarked_sibling(inspection, path):
     loser = inspection.taxonomy.split_collision_suffix(path.name)
     if loser is None:
         return None
-    partner = path.parent / loser.name
-    if not partner.is_file():
-        return None                    # the name it lost is not in this folder
-    subsecond, partner_subsecond = inspection.subsecond(path), inspection.subsecond(partner)
-    if not inspection.tool.siblings.are_siblings(partner_subsecond, subsecond):
-        return None
-    if inspection.tool.matching.default_checksum(inspection.tool.extended_path(path)) == \
-            inspection.tool.matching.default_checksum(inspection.tool.extended_path(partner)):
-        return None                    # identical bytes: the suffix was right
-    return partner, subsecond, partner_subsecond
+    for partner in _collision_partners(inspection, path, loser):
+        subsecond = inspection.subsecond(path)
+        partner_subsecond = inspection.subsecond(partner)
+        if not inspection.tool.siblings.are_siblings(partner_subsecond, subsecond):
+            continue
+        if inspection.tool.matching.default_checksum(inspection.tool.extended_path(path)) == \
+                inspection.tool.matching.default_checksum(inspection.tool.extended_path(partner)):
+            continue                   # identical bytes: the suffix was right
+        return partner, subsecond, partner_subsecond
+    return None
+
+
+def _collision_partners(inspection, path, loser):
+    """Every file that could be the other half of ``path``'s collision (F4).
+
+    Three shapes, because three versions of the pipeline wrote three:
+
+      * the **uncontested name** beside it -- one file kept the name and the
+        other was marked, which is what every version before F4c did;
+      * the uncontested name in the **event folder above**, when the marked
+        file was parked in a ``__DUPLICATES``. A pair split across two folders
+        is the shape that hid this defect longest: a repair that only looked in
+        its own folder found no partner and reported nothing to fix, so a
+        mismarked pair could sit in the archive indefinitely;
+      * another **marked member of the same family**, which is what F4c writes
+        now -- neither file holds the uncontested name, so the partner is the
+        one wearing a different checksum.
+    """
+    folders = [path.parent]
+    if path.parent.name.casefold() == inspection.parking.casefold():
+        folders.append(path.parent.parent)
+    found = []
+    for folder in folders:
+        named = folder / loser.name
+        if named.is_file():
+            found.append(named)
+        if not folder.is_dir():
+            continue
+        for name in sorted(_names_in(inspection, folder)):
+            twin = folder / name
+            if twin == path or not twin.is_file():
+                continue
+            parsed = inspection.taxonomy.split_collision_suffix(name)
+            if parsed is not None and parsed.name == loser.name:
+                found.append(twin)
+    return found
+
+
+def _names_in(inspection, folder):
+    try:
+        _dirs, files = inspection.entries(folder)
+    except OSError:
+        return []
+    return [path.name for path in files]
+
+
+def _event_folder_of(inspection, media):
+    """The dated folder ``media`` belongs at the top level of (S7).
+
+    Its own folder, unless it is sitting in a ``__DUPLICATES``, in which case
+    the event folder is the one that parking area is inside.
+    """
+    if media.parent.name.casefold() == inspection.parking.casefold():
+        return media.parent.parent
+    return media.parent
 
 
 def is_low_res(inspection, path):
@@ -421,7 +504,7 @@ def mismarked_low_res(inspection, path):
 def low_res_repair_plan(inspection, path):
     """Rename a false ``_LOWRES`` to what it actually is (F10).
 
-    ``_DIFFERS``: the two files claim one name and hold different bytes, which
+    ``_DIFF``: the two files claim one name and hold different bytes, which
     is all that can be said about them once resolution is ruled out. Which to
     keep stays a person's decision (F4) -- this only stops the name asserting
     something the pixels disprove. The checksum and index are carried across
@@ -485,6 +568,12 @@ def sibling_repair_plan(inspection, path):
     Both files move: the one carrying the false suffix, and the one it was
     named against, which takes its own fraction so the pair sorts in the order
     it was shot. Each sidecar follows its subject (X5), named per X1.
+
+    A member parked in ``__DUPLICATES`` comes **back up** to the event folder.
+    It was put there on the claim that it is a redundant copy of the file that
+    kept the name, and that claim is the very thing being withdrawn: two
+    exposures are two representatives (F5), and a representative lives at the
+    top level. Leaving it parked would fix its name and keep the wrong shelf.
     """
     found = mismarked_sibling(inspection, path)
     if found is None:
@@ -493,16 +582,18 @@ def sibling_repair_plan(inspection, path):
     loser = inspection.taxonomy.split_collision_suffix(path.name)
     moves = []
     for media, fraction in ((partner, partner_subsecond), (path, subsecond)):
+        home = _event_folder_of(inspection, media)
         wanted = inspection.tool.siblings.sibling_name(loser.name, fraction)
-        if wanted == media.name:
+        if wanted == media.name and home == media.parent:
             continue
-        moves.append((media, media.parent / wanted))
+        moves.append((media, home / wanted))
         exif_folder = inspection.taxonomy.sidecar_subdir(media.parent, inspection.config)
+        wanted_exif = inspection.taxonomy.sidecar_subdir(home, inspection.config)
         for extension in inspection.grouping.configured_extensions(
                 inspection.config, "sidecars", inspection.grouping.DEFAULT_SIDECAR_EXTENSIONS):
             sidecar = exif_folder / (media.name + extension)
             if sidecar.is_file():
-                moves.append((sidecar, exif_folder / (wanted + extension)))
+                moves.append((sidecar, wanted_exif / (wanted + extension)))
     return moves
 
 
@@ -580,6 +671,56 @@ def repair_siblings(inspection, failures):
                     failures.append((target, "%s rollback failed: %s" % (rule, rollback_error)))
             failures.append((path, str(error)))
             run.report("warn", str(error))
+            continue
+        if rule == "F9":
+            refresh_stale_sidecars(inspection, completed, failures)
+
+
+def refresh_stale_sidecars(inspection, completed, failures):
+    """Rewrite a sidecar that was found describing a different file (F9a-i, X3).
+
+    An F9 repair only happens when a fraction read from a file disagreed with
+    the mark on it, and the mark came from a run that read the **sidecar**. So
+    every pair repaired here is a pair where a sidecar was, or may have been,
+    describing the wrong file -- which is how the defect stayed invisible: the
+    name got fixed, the sidecar was carried along under the new name, and the
+    archive went on holding a record that contradicts the bytes beside it.
+
+    Only a sidecar that provably disagrees is rewritten, and it is rewritten
+    from the file it sits beside. One that agrees, or that cannot be read, is
+    left exactly as it is -- there is no version of this worth guessing at.
+    """
+    run = inspection.run
+    suffix = inspection.tool.exif_sidecars.SIDECAR_SUFFIX
+    if suffix not in inspection.tool.matching.sidecar_extensions(inspection.config):
+        return
+    exiftool = inspection.tool.exif_sidecars.exiftool_command(
+        inspection.config, inspection.tool.REPO_ROOT)
+    for _source, target in completed:
+        if not target.name.endswith(suffix):
+            continue
+        subject = target.parent.parent / target.name[:-len(suffix)]
+        if not subject.is_file():
+            continue
+        text = inspection.tool.exif_sidecars.media_exif_text(
+            inspection.tool.extended_path(subject), exiftool)
+        if text is None or not inspection.tool.siblings.records_capture_time(text):
+            continue
+        if inspection.tool.siblings.subsecond_from_exif_text(text) == \
+                inspection.tool.siblings.subsecond_of_sidecar(
+                    inspection.tool.extended_path(target)):
+            continue
+        try:
+            with open(inspection.tool.extended_path(target), "w",
+                      encoding="iso-8859-1") as output:
+                output.write(text)
+        except OSError as error:
+            failures.append((target, "could not rewrite stale sidecar: %s" % error))
+            continue
+        run.report("ok", "F9a-i rewrote a sidecar that described another file: %s"
+                   % target)
+        run.journal.write("stale_sidecar_rewritten",
+                          sidecar=str(target), subject=str(subject))
 
 
 def sibling_move_details(moves):

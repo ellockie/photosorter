@@ -2,6 +2,7 @@
 
 import json
 import types
+from pathlib import Path
 
 import pytest
 
@@ -380,6 +381,116 @@ def test_f9_apply_renames_both_shots_to_their_own_sub_seconds(tmp_path, config):
     assert run(str(root), "--steps", "7") == 0
 
 
+def parked_sibling_fixture(tmp_path, kept_subsecond="983", loser_subsecond="383"):
+    """The shape found in a live archive: the pair split across __DUPLICATES.
+
+    One exposure at the top level under the uncontested name, the other marked
+    and parked one folder down. A repair that only looks in its own folder
+    finds no partner for the parked file, reports nothing, and the pair sits
+    there indefinitely -- which is how this one survived several passes.
+    """
+    root = make_archive(tmp_path)
+    event = root / "2026" / "07. July" / "2026-07-15_(Wed)__12.00.00 - Roldal"
+    parked = event / "__DUPLICATES"
+    loser = BASE.replace(".jpg", "_DIFF_%s_1.jpg" % ("8f" * 16))
+    write(event / BASE, b"the first exposure")
+    write(event / "__EXIF" / (BASE + "._exif"), exif_sidecar(kept_subsecond))
+    write(parked / loser, b"a second exposure")
+    write(parked / "__EXIF" / (loser + "._exif"), exif_sidecar(loser_subsecond))
+    return root, event, parked / loser
+
+
+def test_f9_finds_a_mismarked_partner_parked_in_duplicates(tmp_path, config, capsys):
+    root, _event, parked = parked_sibling_fixture(tmp_path)
+    before = snapshot(root)
+
+    assert run(str(root), "--steps", "7") == 1
+
+    assert snapshot(root) == before, "a check writes nothing (T2)"
+    output = capsys.readouterr().out
+    assert "F9" in output and parked.name in output
+
+
+def test_f9_brings_a_parked_second_exposure_back_to_the_top_level(tmp_path, config):
+    """A representative does not live in a parking area (F5/S7).
+
+    The file was parked on the claim that it is a redundant copy of the one
+    that kept the name. Proving it is a second exposure withdraws that claim,
+    so fixing the name without moving the file would leave it on the wrong
+    shelf -- correctly named, and still filed as somebody's discard.
+    """
+    root, event, _parked = parked_sibling_fixture(tmp_path)
+
+    assert run(str(root), "--steps", "8", "--apply", "--yes") == 0
+
+    kept = event / "2026-07-15_(Wed)__12.00.00.983__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg"
+    arrived = event / "2026-07-15_(Wed)__12.00.00.383__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg"
+    assert kept.read_bytes() == b"the first exposure"
+    assert arrived.read_bytes() == b"a second exposure"
+    assert not (event / BASE).exists()
+    assert not list((event / "__DUPLICATES").glob("*.jpg"))
+    # Both sidecars are in the event folder's own __EXIF now, beside their
+    # subjects rather than in the parking area's (X10).
+    assert sorted(path.name for path in (event / "__EXIF").iterdir()) ==         [arrived.name + "._exif", kept.name + "._exif"]
+    assert run(str(root), "--steps", "7") == 0
+
+
+def test_f9_reads_the_fraction_from_the_file_when_a_sidecar_disagrees(
+        tmp_path, config, monkeypatch):
+    """The defect this repair exists to survive: a sidecar describing another file.
+
+    The top-level shot's ``__EXIF`` entry here carries the *parked* file's
+    fraction, which is exactly what the live archive was found holding. A
+    repair reading the sidecar would compare 383 against 383, agree the two are
+    one instant saved twice, and confirm the mark it was sent to remove.
+    """
+    root, event, parked = parked_sibling_fixture(
+        tmp_path, kept_subsecond="383", loser_subsecond="383")
+    truth = {event / BASE: "983", parked: "383"}
+    monkeypatch.setattr(
+        tool.compliance.Inspection, "_read_subsecond",
+        lambda _self, media: truth.get(Path(media)))
+
+    assert run(str(root), "--steps", "8", "--apply", "--yes") == 0
+
+    assert (event / "2026-07-15_(Wed)__12.00.00.983__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg").exists()
+    assert (event / "2026-07-15_(Wed)__12.00.00.383__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg").exists()
+
+
+def test_f9_rewrites_a_sidecar_that_described_another_file(tmp_path, config, monkeypatch):
+    """F9a-i: fixing the name is not fixing the record.
+
+    The repair happens precisely because a sidecar disagreed with the bytes
+    beside it. Carrying that sidecar along under the corrected name would leave
+    the archive still holding a record that contradicts its own subject -- so
+    the one that provably disagrees is rewritten from the file.
+    """
+    root, event, _parked = parked_sibling_fixture(
+        tmp_path, kept_subsecond="383", loser_subsecond="383")
+    # Keyed on the bytes, not the path: the files are renamed mid-repair, and
+    # what a file records does not change when it is renamed.
+    truth = {b"the first exposure": "983", b"a second exposure": "383"}
+
+    def fake_report(media, *_args, **_kwargs):
+        media = Path(str(media))
+        if not media.is_file() or media.name.endswith("._exif"):
+            return None
+        fraction = truth.get(media.read_bytes())
+        return exif_sidecar(fraction).decode("iso-8859-1") if fraction else None
+
+    monkeypatch.setattr(tool.exif_sidecars, "media_exif_text", fake_report)
+
+    assert run(str(root), "--steps", "8", "--apply", "--yes") == 0
+
+    kept_exif = (event / "__EXIF" /
+                 "2026-07-15_(Wed)__12.00.00.983__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg._exif")
+    assert "Sub Sec Time Original           : 983" in         kept_exif.read_text(encoding="iso-8859-1")
+    # The one that already agreed with its subject is left exactly as it was.
+    moved_exif = (event / "__EXIF" /
+                  "2026-07-15_(Wed)__12.00.00.383__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg._exif")
+    assert moved_exif.read_bytes() == exif_sidecar("383")
+
+
 def test_f9_leaves_a_genuine_duplicate_marked(tmp_path, config, capsys):
     """Identical bytes: the suffix was telling the truth, so it stands."""
     root, event = sibling_fixture(tmp_path, kept_subsecond="633",
@@ -495,7 +606,7 @@ def test_f10_reports_lowres_on_a_file_of_the_same_dimensions(tmp_path, config, c
 
 
 def test_f10_renames_a_false_lowres_to_what_it_actually_is(tmp_path, config):
-    """_DIFFERS: different bytes, one name, and resolution ruled out.
+    """_DIFF: different bytes, one name, and resolution ruled out.
 
     The checksum and index survive the rename, so the pair can still be
     matched up by eye (F4).
@@ -504,7 +615,7 @@ def test_f10_renames_a_false_lowres_to_what_it_actually_is(tmp_path, config):
 
     assert run(str(root), "--steps", "8", "--apply", "--yes") == 0
 
-    repaired = event / LOWRES.replace("_LOWRES_", "_DIFFERS_")
+    repaired = event / LOWRES.replace("_LOWRES_", "_DIFF_")
     assert repaired.read_bytes() == b"a lighter file entirely"
     assert not (event / LOWRES).exists()
     assert (event / "__EXIF" / (repaired.name + "._exif")).is_file()
@@ -534,7 +645,7 @@ def test_f10_prefers_the_sibling_reading_when_the_sub_seconds_differ(tmp_path, c
     stem = "2026-07-15_(Wed)__12.00.00.%s__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg"
     assert (event / (stem % "925")).read_bytes() == b"the full-resolution shot"
     assert (event / (stem % "325")).read_bytes() == b"a lighter file entirely"
-    assert not list(event.glob("*_LOWRES_*")) and not list(event.glob("*_DIFFERS_*"))
+    assert not list(event.glob("*_LOWRES_*")) and not list(event.glob("*_DIFF_*"))
 
 
 # --------------------------------------------------------------------------

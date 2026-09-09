@@ -141,6 +141,14 @@ function openPrompt(prompt) {
     addText(`Existing: ${prompt.payload.existing.path}`);
     addText(`Candidate: ${prompt.payload.candidate.path}`);
     addSelect("action", [
+      // First, and the answer given when the dialog is dismissed: both files
+      // marked _DIFF with their own checksums, side by side, nothing chosen
+      // (F4c). Declining to choose is a real answer here — it used to leave
+      // the file in the inbox, where nothing ever looked for it again.
+      ["mark_both", "Mark both, decide later"],
+      // Naming a winner is a judgement about pictures, which is why it is
+      // offered to a person and no longer made by the tool from file dates
+      // and sizes.
       ["rename_candidate", "Rename candidate"],
       ["keep_existing", "Keep existing"],
       ["keep_candidate", "Keep candidate"],

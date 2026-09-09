@@ -189,7 +189,16 @@ def test_collision_resolver_discards_exact_duplicate(tmp_path):
     assert result.reason == "identical-md5"
 
 
-def test_collision_resolver_older_larger_wins(tmp_path):
+def test_collision_resolver_never_picks_a_winner_by_age_and_size(tmp_path):
+    """F4c: older and larger is not the same as right.
+
+    This pair used to be settled by ranking it -- the older, larger file kept
+    the name -- which put one of two unexamined images at the top level wearing
+    the archive's canonical name for that shot. A modification time is when a
+    copy was written and a byte count is a compression setting; neither says
+    which image a person wanted. So the answer is MARK_BOTH, and the choice
+    stays with whoever can look at the two.
+    """
     existing = tmp_path / "A.jpg"
     candidate = tmp_path / "B.jpg"
     existing.write_text("larger-file", encoding="utf-8")
@@ -199,8 +208,10 @@ def test_collision_resolver_older_larger_wins(tmp_path):
 
     result = NameCollisionResolver(threshold=0.1).resolve(existing, candidate)
 
-    assert result.decision == CollisionDecision.RENAME_CANDIDATE
-    assert result.original == existing
+    assert result.decision == CollisionDecision.MARK_BOTH
+    assert result.reason == "different-bytes"
+    # Both files are named, and neither is called the original of the other.
+    assert {result.original, result.duplicate} == {existing, candidate}
 
 
 def test_collision_resolver_significantly_smaller_auto_renames(tmp_path):
@@ -392,12 +403,12 @@ def test_metadata_extraction_parses_legacy_exif_and_rename_matches_old_task(tmp_
     assert context.assets[0].sidecars["exif"] == renamed_exif
 
 
-def test_rename_collision_keeps_demoted_loser_asset_tracked(tmp_path):
-    # KEEP_CANDIDATE demotes the existing target to _DIFFERS_<md5>_0 -- the two
-    # files hold different bytes, so F4 forbids calling either a _DUPE (PS-10).
-    # When the demoted file belongs to a tracked asset, the asset (and its
-    # sidecars) must follow the rename, or folder sorting later skips it and
-    # the file is stranded in the inbox.
+def test_rename_collision_keeps_both_marked_assets_tracked(tmp_path):
+    # MARK_BOTH marks each file _DIFF_<own md5>_<n> -- the two hold different
+    # bytes, so F4 forbids calling either a _DUPE (PS-10), and F4c forbids
+    # letting either keep the uncontested name. When a marked file belongs to a
+    # tracked asset, the asset (and its sidecars) must follow the rename, or
+    # folder sorting later skips it and the file is stranded in the inbox.
     context = make_context(tmp_path)
     inbox = Path(context.config["paths"]["unsorted_folder"])
     inbox.mkdir(parents=True)
@@ -423,11 +434,13 @@ def test_rename_collision_keeps_demoted_loser_asset_tracked(tmp_path):
     winner_sidecar = inbox / "IMG_0002.jpg._exif"
     winner_sidecar.write_text("winner exif", encoding="utf-8")
 
-    # The resolver rules KEEP_CANDIDATE ("candidate-older-larger"): the winner
-    # must be at least as old and as large as the already-renamed loser.
+    # One is older and larger than the other, so the resolver can settle the
+    # pair without asking -- and what it settles is MARK_BOTH, not which of two
+    # unexamined images is the shot (F4c).
     os.utime(winner, (1_000_000_000, 1_000_000_000))
     os.utime(loser, (1_000_000_100, 1_000_000_100))
     loser_md5 = file_md5(loser)
+    winner_md5 = file_md5(winner)
 
     loser_asset = MediaAsset(loser, {"exif": loser_sidecar}, dict(metadata))
     winner_asset = MediaAsset(winner, {"exif": winner_sidecar}, dict(metadata))
@@ -435,17 +448,19 @@ def test_rename_collision_keeps_demoted_loser_asset_tracked(tmp_path):
 
     RenameAndSortStage().execute(context)
 
-    target_path = inbox / target_name
-    assert winner_asset.primary_path == target_path
-    assert target_path.read_text(encoding="utf-8") == "winner is bigger"
-    assert winner_asset.sidecars["exif"] == inbox / (target_name + "._exif")
-    assert winner_asset.sidecars["exif"].read_text(encoding="utf-8") == "winner exif"
-
-    demoted_path = inbox / f"{target_path.stem}_DIFFERS_{loser_md5}_0.jpg"
-    assert loser_asset.primary_path == demoted_path
-    assert demoted_path.read_text(encoding="utf-8") == "loser content..."
-    assert loser_asset.sidecars["exif"] == inbox / (demoted_path.name + "._exif")
-    assert loser_asset.sidecars["exif"].read_text(encoding="utf-8") == "loser exif"
+    stem = Path(target_name).stem
+    # Neither file holds the uncontested name; each wears its own checksum.
+    assert not (inbox / target_name).exists()
+    for asset, md5, content, exif in (
+        (loser_asset, loser_md5, "loser content...", "loser exif"),
+        (winner_asset, winner_md5, "winner is bigger", "winner exif"),
+    ):
+        expected = inbox / f"{stem}_DIFF_{md5}_1.jpg"
+        assert asset.primary_path == expected
+        assert expected.read_text(encoding="utf-8") == content
+        # The sidecar followed its subject onto the marked name (X5).
+        assert asset.sidecars["exif"] == inbox / (expected.name + "._exif")
+        assert asset.sidecars["exif"].read_text(encoding="utf-8") == exif
 
 
 def test_legacy_stages_move_old_exif_empty_and_legacy_unsorted(tmp_path):

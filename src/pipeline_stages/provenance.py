@@ -2,7 +2,10 @@ import json
 import re
 from pathlib import Path
 
-from src.core import dont_move_folder_name, file_md5, safe_delete
+from src.core import dont_move_folder_name, file_md5, project_root, safe_delete
+from src.pipeline_stages.exiftool_sidecars import exiftool_command, media_exif_text
+from src.pipeline_stages.siblings import records_capture_time, subsecond_from_exif_text
+from src.pipeline_stages.taxonomy import sidecar_subdir
 
 # Leading date or date-time part of a folder name, e.g.
 # "2024-01-15 Birthday", "2024-01-15_18.30 Party", "2024.01.15-Trip".
@@ -148,3 +151,60 @@ def sidecar_candidates(media_path: Path, config: dict) -> list[Path]:
             seen.add(candidate)
             unique.append(candidate)
     return unique
+
+
+def recorded_subsecond(media_path: Path, config: dict) -> str | None:
+    """The fraction of the second ``media_path`` records, or None (F9a).
+
+    **Asked of the file, not of its sidecar.** A ``._exif`` is a copy of what
+    the file said the last time metadata was extracted, and a copy can end up
+    describing a different file: an archive was found where a shot's sidecar
+    carried the fraction and shutter count of the *other* exposure in that
+    second, left behind when the file at that name changed. F9a then compared
+    a fraction against itself, concluded "one instant saved twice", and filed
+    two genuine exposures as a collision. Reading the bytes cannot be wrong
+    that way.
+
+    The sidecar is still the fallback, and only for the case it is safe in:
+    the file did not answer. "Did not answer" is not the same as "recorded no
+    fraction" -- a report that carries a capture time and no
+    ``SubSecTimeOriginal`` is a camera saying it wrote none, which is F9a's
+    answer and is not second-guessed against a cache of itself. A report with
+    no capture time in it at all has said nothing about when the shutter
+    opened: ExifTool could not read the file, or it is not the kind of file
+    that records one, and only then is a sidecar the better evidence.
+
+    One ExifTool call, made only when a collision is actually being settled.
+    """
+    media_path = Path(media_path)
+    text = media_exif_text(media_path, exiftool_command(config, project_root()))
+    if text is not None and records_capture_time(text):
+        return subsecond_from_exif_text(text)
+    for sidecar in subject_sidecars(media_path, config):
+        if sidecar.exists():
+            found = subsecond_from_exif_text(
+                _read_sidecar_text(sidecar))
+            if found:
+                return found
+    return None
+
+
+def subject_sidecars(media_path: Path, config: dict) -> list[Path]:
+    """Every place ``media_path``'s sidecar can be, nearest first (X1/X10).
+
+    Beside the file, which is where one sits in the inbox and beside a RAW
+    before placement, and then in the ``__EXIF`` of the folder holding it,
+    which is where one sits once the file is filed.
+    """
+    media_path = Path(media_path)
+    filed = sidecar_subdir(media_path.parent, config) / media_path.name
+    return (sidecar_candidates(media_path, config)
+            + sidecar_candidates(filed, config))
+
+
+def _read_sidecar_text(sidecar: Path) -> str:
+    try:
+        with open(sidecar, encoding="iso-8859-1") as handle:
+            return handle.read()
+    except OSError:
+        return ""

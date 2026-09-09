@@ -105,6 +105,19 @@ derived from arrival order or file times — V4's "a capture time is never
 invented" applies to the fraction exactly as to the second. A camera that
 recorded none leaves the name plain.
 
+**The fraction is read from the file, never from its sidecar** (F9a-i). A
+`._exif` is a copy of what the file said when metadata was last extracted, and
+a copy can end up describing a *different* file. An archive was found holding a
+shot whose `__EXIF` entry carried the fraction and shutter count of the **other**
+exposure taken in that second, left behind when the file at that name changed —
+so the pipeline compared 383 against 383, concluded "one instant saved twice",
+and marked two genuine exposures as a collision. The file itself said 983 the
+whole time. A collision is rare, so reading the bytes costs one ExifTool call
+only when one is actually being settled. The sidecar stays the fallback for the
+one case it is safe in: the file's own report carries no capture time at all,
+so it has said nothing — which is not the same as a camera stating it recorded
+no fraction, and that statement is final.
+
 Where **neither** camera recorded a sub-second, a burst and one photo saved
 twice are indistinguishable, so the pair is put to you as a name collision
 rather than guessed at. Answering **"Different shots"** numbers the arrival
@@ -112,7 +125,14 @@ rather than guessed at. Answering **"Different shots"** numbers the arrival
 (F9a, F9b).
 
 `tools/restructure_archive.py` step 8 repairs pairs an earlier version marked
-`_DUPE`, renaming both files and their sidecars. It reports under a dry run and
+`_DUPE`, renaming both files and their sidecars — including a pair **split
+across `__DUPLICATES`**, where one exposure sits at the top level and the other
+was parked one folder down. A repair that only looked in its own folder found
+no partner for the parked file and reported nothing, which is how such a pair
+could sit in an archive through several passes. A member proved to be a second
+exposure comes back **up** to the event folder: the claim that put it in the
+parking area is the very claim being withdrawn, and two exposures are two
+representatives (F5). It reports under a dry run and
 only writes under `--apply`, after **one confirmation per year** — not one per
 pair. Every pair is listed in full above the prompt; the question itself
 carries the counts, the year, and the first eight pairs. `--year ALL` runs each
@@ -1012,19 +1032,34 @@ The two files are compared by **MD5** rather than one being picked:
 |               |                                                                                                           |
 | ------------- | --------------------------------------------------------------------------------------------------------- |
 | **identical** | the incoming copy is redundant — parked as `<name>_DUPE_<md5>_<n>` (F4)                                   |
-| **different** | one is wrong and which is not knowable here — parked as `<name>_DIFFERS_<md5>_<n>` and counted separately |
+| **different** | one is wrong and which is not knowable here — **both** files marked `<name>_DIFF_<own md5>_<n>`, side by side (F4c) |
 
 `_DUPE` is a claim of byte-identity and is written **only** when the two files
-match (F4a). A byte-different loser is a `_DIFFERS` or a `_LOWRES`; two files
+match (F4a). A byte-different file is a `_DIFF` or a `_LOWRES`; two files
 that turn out to be two exposures are neither, and are settled by
 [F9](#two-shots-in-one-second) before any suffix is considered.
 
-Both land in the `__DUPLICATES` of the **dated folder the subject sits in** —
-never a group, and no longer the year (S7). A loser parked beside the file
-whose name it lost travels with its event when that event is moved, renamed or
-regrouped, and is reviewed alongside the shots it belongs to. A year-level
-`__DUPLICATES` left by an earlier version is still read and is never reported
-as malformed; nothing drains it automatically (S7b).
+**A `_DIFF` has no loser.** Both files wear the mark, each carrying its own
+checksum, and neither keeps the uncontested name — holding it is a claim to be
+*the* shot, and that claim is exactly what is unresolved. The pair stays at the
+event folder's top level, because a question about this event belongs where the
+event is looked at. What the tool used to do instead was rank the two by
+modification time and file size and let the winner keep the name; a
+modification time is when a copy was written, not when a shutter opened, and a
+smaller file is a differently compressed one, not a worse one. A person may
+still name a winner at the collision prompt — that is a judgement about
+pictures, which is the decision the marks exist to reserve.
+
+Only the **identical** case is parked, and it goes to the `__DUPLICATES` of the
+**dated folder the subject sits in** — never a group, and no longer the year
+(S7). A copy parked beside the file it duplicates travels with its event when
+that event is moved, renamed or regrouped, and is reviewed alongside the shots
+it belongs to. A year-level `__DUPLICATES` left by an earlier version is still
+read and is never reported as malformed; nothing drains it automatically (S7b).
+
+`_DIFFERS_<md5>_<n>` was the earlier spelling of `_DIFF`. It is still read
+everywhere a collision name is parsed — a repair pass cannot fix a name it
+cannot read — and is never written again (F4c-ii).
 
 Both land in `<year>\__DUPLICATES`, one per year tree, chosen from the _subject's_
 tree so a multi-year run does not pool them. **Nothing is overwritten and nothing

@@ -102,6 +102,29 @@ def subsecond_from_exif_text(text: str) -> str | None:
     return None
 
 
+# What tells "this file records no fraction" from "this file records nothing".
+# A camera that wrote a capture time and no sub-second has answered F9a: the
+# fraction is None, and that is the end of it. A file whose report holds no
+# capture time at all has not answered anything -- it is a text file, a
+# container ExifTool does not parse, a read that half-failed -- and treating
+# its silence as "no fraction" would quietly turn every such pair into a
+# collision. The two cases need different fallbacks, so they are told apart.
+CAPTURE_TIME_EXIF_FIELD = "Date/Time Original"
+
+
+def records_capture_time(text: str) -> bool:
+    """Does this ExifTool report carry a capture time at all?
+
+    The test for whether the report can be trusted to speak for the file's
+    fraction. See ``CAPTURE_TIME_EXIF_FIELD``.
+    """
+    for line in text.splitlines():
+        key, separator, _value = line.partition(": ")
+        if separator and key.strip() == CAPTURE_TIME_EXIF_FIELD:
+            return True
+    return False
+
+
 def subsecond_of_sidecar(path) -> str | None:
     """The fraction the sidecar at ``path`` records, or None if it says none.
 

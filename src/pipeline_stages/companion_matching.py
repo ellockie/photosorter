@@ -926,7 +926,7 @@ def place_companions(roots, config: dict, duplicates_for,
         ``duplicates_root`` as ``<name>_DUPE_<md5>_<n>`` (F4);
       * different -- one of them is wrong and which is not knowable here, so the
         incoming copy goes to the same place as
-        ``<name>_DIFFERS_<md5>_<n>`` and is counted separately. Nothing is
+        ``<name>_DIFF_<md5>_<n>`` and is counted separately. Nothing is
         overwritten and nothing is deleted (T1, T2); the file at the destination
         is left exactly as it was.
 
@@ -1179,7 +1179,7 @@ def migrate_legacy_containers(containers, config: dict, duplicates_for,
       * it does exist -- each file is **moved across** individually, and a name
         already taken is settled by checksum exactly as companion placement
         settles one: identical is parked as ``_DUPE_``, different as
-        ``_DIFFERS_``. Nothing is overwritten (T2) and nothing is deleted (T1).
+        ``_DIFF_``. Nothing is overwritten (T2) and nothing is deleted (T1).
 
     A container left **absolutely empty** -- no file anywhere beneath it, which
     is checked rather than assumed -- is then parked in the

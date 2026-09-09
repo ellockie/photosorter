@@ -92,6 +92,25 @@ def read_metadata_text(target, exiftool="exiftool", runner=None) -> str:
     return str(output)
 
 
+def media_exif_text(media, exiftool="exiftool", runner=None) -> str | None:
+    """One file's own ExifTool report, or None when it could not be read.
+
+    The distinction is the whole point of the return type. "Read it, and it
+    records no sub-second" and "could not read it at all" are different
+    answers: the first is F9a's "nothing to compare" and is final, the second
+    means the question has not been asked yet and a caller may still fall back
+    to whatever it has cached.
+
+    Broad on purpose about what counts as unreadable -- a missing ExifTool, an
+    unsupported file, a non-zero exit -- because none of those is an error a
+    name collision should die on.
+    """
+    try:
+        return read_metadata_text(media, exiftool, runner)
+    except Exception:
+        return None
+
+
 @dataclass
 class GenerationReport:
     """Sidecars produced by ExifTool and media it could not process."""

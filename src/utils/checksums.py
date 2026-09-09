@@ -13,7 +13,7 @@ and spells it ``utils.checksums``, and the pipeline, which spells it
 stay the dependency-free module its docstring promises.
 
 The digest is MD5 because that is what the archive already holds: F4's
-``_DUPE_<md5>`` and ``_DIFFERS_<md5>`` collision suffixes are written into
+``_DUPE_<md5>`` and ``_DIFF_<md5>`` collision suffixes are written into
 filenames on disk, and every hash in a run journal is one. The question asked
 is always "are these two files the same file", never "did someone tamper with
 this one", so the collision resistance MD5 has lost is not resistance this

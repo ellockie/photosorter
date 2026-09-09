@@ -13,6 +13,7 @@ from src.core import \
 from src.pipeline_stages.legacy import \
     legacy_filename
 from src.pipeline_stages.provenance import \
+    recorded_subsecond, \
     renamed_sidecar_path, \
     resolve_sidecar_target, \
     sidecar_candidates
@@ -23,15 +24,24 @@ from src.pipeline_stages.siblings import \
     family_counts, \
     next_ordinal_name, \
     occupant_names, \
-    sibling_name, \
-    subsecond_of_sidecar
+    sibling_name
+from src.pipeline_stages.taxonomy import \
+    collision_family, \
+    collision_name, \
+    wears_mark
 from src.utils.dimensions import dimensions_of_sidecar
 
 
 def unique_duplicate_path(path: Path, suffix: str, md5: str) -> Path:
+    """``path`` wearing an F4 mark, on the first index nothing else holds.
+
+    The grammar is ``taxonomy``'s, not this module's (T8): spelling
+    ``<suffix>_<md5>_<n>`` in two places is how the writer and the reader of a
+    collision name came to disagree about which suffixes exist.
+    """
     index = 1
     while True:
-        candidate = path.with_name(f"{path.stem}{suffix}_{md5}_{index}{path.suffix}")
+        candidate = path.with_name(collision_name(path.name, suffix, md5, index))
         if not candidate.exists():
             return candidate
         index += 1
@@ -147,15 +157,37 @@ class RenameAndSortStage(PipelineStage):
                     continue
                 # Every decision still standing here is a byte-difference:
                 # identical files were discarded above, and two exposures were
-                # settled as siblings. The loser is therefore a _DIFFERS, or a
-                # _LOWRES when it is the smaller rendering of the two -- never a
-                # _DUPE, which claims the two files are the same file (F4).
+                # settled as siblings. The mark is therefore a _DIFF, or a
+                # _LOWRES when one file is the smaller rendering of the two --
+                # never a _DUPE, which claims the two files are the same file
+                # (F4).
                 loser_suffix = (
                     resolver.low_res_suffix
                     if result.reason == "significantly-smaller"
                     else resolver.differing_suffix
                 )
-                if result.decision == CollisionDecision.KEEP_CANDIDATE:
+                if result.decision == CollisionDecision.MARK_BOTH:
+                    # Neither file is the shot (F4c). Both are marked, each
+                    # with its own checksum, and both stay where a
+                    # representative goes -- the folder holds a question, not
+                    # an answer with an exception standing beside it.
+                    contested = occupied.name
+                    existing_md5 = file_md5(occupied)
+                    if not wears_mark(occupied.name, loser_suffix, existing_md5):
+                        # An occupant that already says what it is stays as it
+                        # is: this is the third file to claim the name, joining
+                        # a pair somebody has yet to settle.
+                        demoted_path = unique_duplicate_path(
+                            occupied, loser_suffix, existing_md5)
+                        safe_rename(occupied, demoted_path)
+                        self._retarget_collision_loser(context, occupied, demoted_path)
+                    context.log(
+                        f"Two files claim {contested}, and their bytes differ: "
+                        f"both marked {loser_suffix} for you to settle"
+                    )
+                    target_path = unique_duplicate_path(
+                        target_path, loser_suffix, file_md5(source_path))
+                elif result.decision == CollisionDecision.KEEP_CANDIDATE:
                     # The incoming file wins its own name; the file already
                     # there is renamed away using F4's <suffix>_<md5>_<n>
                     # grammar, off its own name rather than the arrival's.
@@ -242,11 +274,25 @@ class RenameAndSortStage(PipelineStage):
         the same shot was called before F9c. Both are looked for, or a copy of
         a photo already in the archive would be given a name nothing there
         answers to and be filed all over again.
+
+        A **third** form has to be looked for as well: once a byte-different
+        pair has been settled, neither member holds the uncontested name any
+        more -- both wear ``_DIFF_<own md5>_<n>`` (F4c) -- so the name is free
+        and a third file would sail past a check that only asks whether it is
+        taken. Any member of that family answers for the shot; the first is
+        returned, and the resolver then compares checksums as it would against
+        any other occupant.
         """
         for candidate in occupant_names(new_name):
             path = source_path.with_name(candidate)
             if path.exists():
                 return path
+        folder = source_path.parent
+        names = sorted(path.name for path in folder.iterdir() if path.is_file())
+        for candidate in occupant_names(new_name):
+            family = collision_family(names, candidate)
+            if family:
+                return folder / family[0]
         return None
 
     def _settle_as_siblings(self, context: PipelineContext, asset, source_path: Path,
@@ -306,18 +352,16 @@ class RenameAndSortStage(PipelineStage):
         return None
 
     def _occupant_subsecond(self, context: PipelineContext, occupant: Path) -> str | None:
-        """The fraction recorded for the file already holding the name.
+        """The fraction recorded for the file already holding the name (F9a).
 
-        Read from its sidecar rather than from ``context.assets``: the occupant
+        Read from the file rather than from ``context.assets``: the occupant
         may be a file that was in the inbox before this run began, and so have
-        no asset carrying its metadata.
+        no asset carrying its metadata. Read from the **file** rather than from
+        its sidecar for the reason ``provenance.recorded_subsecond`` sets out --
+        a sidecar can be describing a different file, and this is the one
+        comparison in the pipeline that a wrong fraction silently inverts.
         """
-        for sidecar in sidecar_candidates(occupant, context.config):
-            if sidecar.exists():
-                found = subsecond_of_sidecar(sidecar)
-                if found:
-                    return found
-        return None
+        return recorded_subsecond(occupant, context.config)
 
     def _rename_occupant(self, context: PipelineContext, occupant: Path,
                          new_name: str) -> None:
@@ -341,6 +385,11 @@ class RenameAndSortStage(PipelineStage):
     # The dashboard's name-collision buttons, mapped onto the same decisions the
     # resolver reaches on its own. "keep_existing" and "rename_candidate" are two
     # phrasings of one outcome: the incoming file keeps the loser's _DUPE grammar.
+    #
+    # Naming a winner is still offered here, and only here. F4c takes it away
+    # from the *tool*, which was ranking two images by file date and size; a
+    # person looking at both is making a judgement about pictures, which is
+    # exactly the decision the marks exist to reserve for them.
     _PROMPT_DECISIONS = {
         "keep_existing": CollisionDecision.RENAME_CANDIDATE,
         "rename_candidate": CollisionDecision.RENAME_CANDIDATE,
@@ -349,6 +398,9 @@ class RenameAndSortStage(PipelineStage):
         # "these are two different shots" -- the answer F9a cannot reach on its
         # own when no camera recorded a sub-second (siblings.are_siblings).
         "siblings": CollisionDecision.SIBLINGS,
+        # "I am not deciding this now" -- the same outcome the resolver reaches
+        # unaided, spelled out so the dashboard can offer it.
+        "mark_both": CollisionDecision.MARK_BOTH,
     }
 
     def _resolve_by_prompt(self, context: PipelineContext, result: CollisionResult,
@@ -356,8 +408,12 @@ class RenameAndSortStage(PipelineStage):
         """Turn an answered collision prompt into a decision, or None to skip.
 
         Blocks until the answer arrives. Outside the UI there is nobody to ask,
-        so the historical behaviour — leave the file alone and report it — is the
-        fallback, chosen explicitly rather than by timing out.
+        and an unanswered collision settles as ``MARK_BOTH`` — both files
+        marked with their own checksums, side by side, waiting for whoever can
+        answer it (F4c). That replaces the historical fallback of leaving the
+        file alone, which stranded it in the inbox: a file nobody chose is
+        still a file that has to be somewhere, and "somewhere" was the one
+        place the archive never looks.
         """
         context.log(f"Name collision needs your decision: {source_path.name}")
         answer = context.await_prompt(result.prompt, auto_answer={"action": "skip"})
@@ -367,8 +423,9 @@ class RenameAndSortStage(PipelineStage):
             raise PipelinePaused(f"Run cancelled at name collision: {source_path.name}")
         decision = self._PROMPT_DECISIONS.get(action)
         if decision is None:
-            context.log(f"  left in place, no decision made: {source_path.name}")
-            return None
+            context.log(
+                f"  no decision made, so both files are marked: {source_path.name}")
+            decision = CollisionDecision.MARK_BOTH
         return CollisionResult(
             decision=decision,
             original=result.original,

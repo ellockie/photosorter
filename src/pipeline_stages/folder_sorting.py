@@ -14,6 +14,7 @@ from src.pipeline_stages.geolocation import \
     location_info, \
     write_location_stamp
 from src.pipeline_stages.provenance import \
+    recorded_subsecond, \
     renamed_sidecar_path, \
     resolve_sidecar_target, \
     rewrite_sidecar_path_fields, \
@@ -22,16 +23,18 @@ from src.pipeline_stages.siblings import \
     SUBSECOND_METADATA_KEY, \
     are_siblings, \
     occupant_names, \
-    sibling_name, \
-    subsecond_of_sidecar
+    sibling_name
 from src.pipeline_stages.taxonomy import \
     DIFFERING_SUFFIX, \
     DUPLICATE_SUFFIX, \
     LOW_RES_SUFFIX, \
+    collision_family, \
+    collision_name, \
     split_collision_suffix, \
     apply_representative_suffixes, \
     sidecar_subdir, \
-    taxonomy_subdir
+    taxonomy_subdir, \
+    wears_mark
 
 
 def _captured_at(asset) -> datetime.datetime | None:
@@ -53,14 +56,21 @@ def _unique_target(folder: Path, file_name: str, source: Path,
     """A free name for ``source`` in ``folder``, marked for why it is not the wanted one.
 
     ``_DUPE`` only where the bytes match the file that keeps the name;
-    otherwise ``_DIFFERS``, which is what F4 calls a loser that is not a copy.
-    The distinction is the point: a checksum on a file called a duplicate is a
-    claim about the *other* file, and it is only true when the two match.
+    otherwise ``_DIFF``, which is what F4 calls a file that claimed a name and
+    is not a copy of what already held it. The distinction is the point: a
+    checksum on a file called a duplicate is a claim about the *other* file,
+    and it is only true when the two match.
 
     ``winner`` names that other file where it is not simply whatever holds
     ``file_name`` right now — which is the case when the loser being renamed is
     itself the file sitting there, and comparing it against the name it already
     holds would be comparing it with itself.
+
+    This is the **last** resort, not the collision rule. A name collision a
+    stage knows about is settled by ``_settle_existing_occupant`` before this
+    is called; what reaches here is a name unexpectedly taken by something the
+    run did not compare — a leftover, a re-run, a second asset writing into the
+    same folder — and the answer to that is still a name nothing else holds.
     """
     target = folder / file_name
     index = 1
@@ -68,7 +78,7 @@ def _unique_target(folder: Path, file_name: str, source: Path,
         md5 = file_md5(source)
         rival_md5 = file_md5(winner if winner is not None else target)
         suffix = DUPLICATE_SUFFIX if rival_md5 == md5 else DIFFERING_SUFFIX
-        target = folder / f"{Path(file_name).stem}{suffix}_{md5}_{index}{Path(file_name).suffix}"
+        target = folder / collision_name(file_name, suffix, md5, index)
         index += 1
     return target
 
@@ -85,21 +95,17 @@ def is_low_res(file_name: str) -> bool:
 
 
 def _sidecar_subsecond(media_path: Path, config: dict) -> str | None:
-    """The fraction recorded for a file already on disk, from its sidecar."""
-    for sidecar in sidecar_candidates(media_path, config):
-        if sidecar.exists():
-            found = subsecond_of_sidecar(sidecar)
-            if found:
-                return found
-    # A file already filed keeps its sidecar in the __EXIF beside it (X10),
-    # not next to itself, so that is the second place to look.
-    for sidecar in sidecar_candidates(
-            sidecar_subdir(media_path.parent, config) / media_path.name, config):
-        if sidecar.exists():
-            found = subsecond_of_sidecar(sidecar)
-            if found:
-                return found
-    return None
+    """The fraction recorded for a file already on disk (F9a).
+
+    Read from the file itself. It used to be read from the sidecar beside it,
+    or from the one in its ``__EXIF``, and an archive was found where that
+    sidecar described the *other* exposure taken in the same second — left
+    behind when the file at that name changed. F9a then compared a fraction
+    against itself, concluded "one instant saved twice", and marked two genuine
+    exposures as a collision. See ``provenance.recorded_subsecond``, which
+    keeps the sidecar as the fallback for the one case it is safe in.
+    """
+    return recorded_subsecond(media_path, config)
 
 
 def _place_extracted_sidecar(asset, sidecar: Path | None, subject: Path, config: dict) -> None:
@@ -125,50 +131,84 @@ def _place_extracted_sidecar(asset, sidecar: Path | None, subject: Path, config:
 
 
 def _settle_existing_occupant(context: PipelineContext, folder: Path, file_name: str,
-                              current_path: Path, asset=None) -> str:
-    """Clear ``file_name`` in ``folder`` for ``current_path``, and say what it is called.
+                              current_path: Path, asset=None) -> tuple[Path, str]:
+    """Clear ``file_name`` in ``folder`` for ``current_path``, and say where it goes.
 
-    Two files can want one name here for two unrelated reasons, and they are
-    not settled the same way:
+    Returns the folder and the name the arriving file should take, because the
+    three outcomes below do not all put it in the same place.
+
+    Three files can want one name here for three unrelated reasons, and they
+    are not settled the same way:
 
       * **two exposures inside one second** (F9) — no collision at all. Neither
         file is a loser: both are representatives, and each takes the fraction
         its own camera recorded, so the pair sorts in the order it was shot.
         The file already filed is renamed too, for the reason set out in
         ``rename_and_sort._settle_as_siblings``.
-      * **anything else** — a stale leftover, or a genuine same-name collision.
-        The occupant is flagged with its own hash rather than left standing
-        unmarked, and its sidecars are dragged along so none is orphaned under
-        a stale name (X5).
+      * **byte-identical to what is already filed** (F4) — the arrival adds
+        nothing that is not already in the archive. It is marked ``_DUPE`` with
+        the checksum that proves the claim and parked in the event folder's
+        ``__DUPLICATES`` (S7). It is not deleted (T1) and the file already
+        filed is not touched: there is nothing in question about it.
+      * **different bytes, and F9 cannot say they are two exposures** (F4c) —
+        one of the two is wrong and nothing here can say which. **Both** are
+        marked ``_DIFF`` with their own checksums, and **both** stay at the top
+        level where a representative goes. Neither keeps the uncontested name,
+        because keeping it is a claim to be the shot, and that claim is exactly
+        what is unresolved. The occupant's sidecars are dragged along so none
+        is orphaned under a stale name (X5).
+
+    ``__DUPLICATES`` therefore holds one kind of thing: a file proved to be a
+    byte-identical copy of another. A pair whose bytes differ is a question
+    about the event, and it is asked where the event is looked at.
     """
     # The generated name carries the camera's sub-second (F9c); a shot filed
     # before it did is under the fraction-less form of the same name, and that
     # is the same collision. Looking only for the exact name would file a copy
-    # of an already-archived photo a second time.
-    existing = None
-    for candidate in occupant_names(file_name):
-        if (folder / candidate).exists():
-            existing = folder / candidate
-            break
+    # of an already-archived photo a second time. A pair already settled as
+    # _DIFF holds neither form, so the family is looked for as well (F4c) --
+    # otherwise the third copy of a contested shot sails into the name the
+    # pair vacated.
+    existing = _occupant_in(folder, file_name)
     if existing is None or existing == current_path:
-        return file_name
+        return folder, file_name
 
     sibling = _sibling_names(context, existing, current_path, asset)
     if sibling is not None:
         occupant_name, arrival_name = sibling
         if occupant_name == existing.name:
-            return arrival_name         # only the arrival needs a new name
+            return folder, arrival_name  # only the arrival needs a new name
         demoted = folder / occupant_name
+    elif file_md5(existing) == file_md5(current_path):
+        # Proved identical, so the claim ``_DUPE`` makes is true and the file
+        # already filed is not in question. Only the arrival moves (S7).
+        parked = taxonomy_subdir(folder, context.config, "duplicates")
+        parked.mkdir(parents=True, exist_ok=True)
+        context.log(
+            f"{current_path.name} is byte-identical to {existing.name}, "
+            f"parked in {parked.name}"
+        )
+        return parked, _free_mark(
+            parked, existing.name, DUPLICATE_SUFFIX, file_md5(current_path))
     else:
-        # Built from the occupant's **own** name, which is not always the
-        # arrival's: an older file is under the fraction-less form of it
-        # (F9c), and naming the demotion off `file_name` would rename the
-        # occupant onto the very name the arrival is about to take.
-        #
-        # The comparison is against `current_path` -- not against the name the
-        # occupant already holds, which is the occupant itself.
-        demoted = _unique_target(folder, existing.name, existing, winner=current_path)
-        arrival_name = file_name
+        # Neither file is the shot (F4c). The occupant's mark is built from its
+        # **own** name, which is not always the arrival's -- an older file is
+        # under the fraction-less form of it (F9c) -- and carries its own
+        # checksum, never the arrival's.
+        arrival_name = _free_mark(
+            folder, existing.name, DIFFERING_SUFFIX, file_md5(current_path))
+        existing_md5 = file_md5(existing)
+        if wears_mark(existing.name, DIFFERING_SUFFIX, existing_md5):
+            # Already says what it is: this is a third file joining a pair
+            # nobody has settled yet, and renaming the occupant again would
+            # only renumber it.
+            return folder, arrival_name
+        demoted = folder / _free_mark(
+            folder, existing.name, DIFFERING_SUFFIX, existing_md5)
+        context.log(
+            f"Two files claim {existing.name}, and their bytes differ: "
+            f"both marked {DIFFERING_SUFFIX} for you to settle"
+        )
     old_name = existing.name
     safe_move(existing, demoted)
     for tracked in context.assets:
@@ -187,12 +227,41 @@ def _settle_existing_occupant(context: PipelineContext, folder: Path, file_name:
             if sidecar_target != sidecar_path:
                 safe_move(sidecar_path, sidecar_target)
                 tracked.sidecars[name] = sidecar_target
-        return arrival_name
+        return folder, arrival_name
     # The occupant belongs to no asset in this run — it was already in the
     # archive. Its sidecar is in the __EXIF beside it (X10) and still has to
     # follow the rename, or it is orphaned under a name nothing answers to.
     _move_untracked_sidecars(existing, demoted, context.config)
-    return arrival_name
+    return folder, arrival_name
+
+
+def _occupant_in(folder: Path, file_name: str) -> Path | None:
+    """The file in ``folder`` already answering for this shot's name, or None.
+
+    Three forms answer: the name as generated, its fraction-less form (F9c),
+    and any member of a ``_DIFF``/``_DUPE``/``_LOWRES`` family made from
+    either (F4c) — a settled pair holds neither plain form, so a folder that
+    looks empty of this shot may already hold two copies of it.
+    """
+    for candidate in occupant_names(file_name):
+        if (folder / candidate).exists():
+            return folder / candidate
+    if not folder.is_dir():
+        return None
+    names = sorted(path.name for path in folder.iterdir() if path.is_file())
+    for candidate in occupant_names(file_name):
+        family = collision_family(names, candidate)
+        if family:
+            return folder / family[0]
+    return None
+
+
+def _free_mark(folder: Path, file_name: str, suffix: str, md5: str) -> str:
+    """``file_name`` marked ``suffix``/``md5``, on the first index ``folder`` has free."""
+    index = 1
+    while (folder / collision_name(file_name, suffix, md5, index)).exists():
+        index += 1
+    return collision_name(file_name, suffix, md5, index)
 
 
 def _move_untracked_sidecars(old_path: Path, new_path: Path, config: dict) -> None:
@@ -337,7 +406,10 @@ class FolderSortingStage(PipelineStage):
 
             primary_folder.mkdir(parents=True, exist_ok=True)
             old_primary_name = asset.primary_path.name
-            primary_name = _settle_existing_occupant(
+            # Settling can move the arrival as well as rename it: a byte-
+            # identical copy is parked in __DUPLICATES (S7), so the folder
+            # comes back from here rather than being fixed above.
+            primary_folder, primary_name = _settle_existing_occupant(
                 context, primary_folder, primary_name, asset.primary_path, asset)
             primary_target = _unique_target(primary_folder, primary_name, asset.primary_path)
             safe_move(asset.primary_path, primary_target)

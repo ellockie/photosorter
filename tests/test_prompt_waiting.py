@@ -176,13 +176,15 @@ def test_collision_prompt_answer_renames_the_file_instead_of_skipping_it(tmp_pat
     thread.join()
 
     assert answered, "the stage never blocked on the collision prompt"
-    # keep_candidate: the newcomer takes the contested name, the sitting file
-    # is demoted. The two hold different bytes, so it is a _DIFFERS and never a
+    # keep_candidate: a person looked at the two and said which is the shot, so
+    # the newcomer takes the contested name and the sitting file is marked.
+    # Naming a winner is a judgement F4c takes away from the tool and leaves
+    # here. The two hold different bytes, so the mark is _DIFF and never a
     # _DUPE, which would claim they are the same file (F4, PS-10).
     assert context.counters["renamed_assets"] == 1
     assert context.assets[0].primary_path.parent == inbox
-    assert "_DIFFERS_" not in context.assets[0].primary_path.name
-    assert any("_DIFFERS_" in path.name for path in inbox.iterdir())
+    assert "_DIFF" not in context.assets[0].primary_path.name
+    assert any("_DIFF_" in path.name for path in inbox.iterdir())
     assert not any("_DUPE_" in path.name for path in inbox.iterdir())
 
 
@@ -207,12 +209,20 @@ def test_collision_prompt_answer_can_call_the_pair_two_different_shots(tmp_path)
         "2026-05-14_(Thu)__10.30.00__f2.8__T1_250__L50.0__I100__6D_2.jpg",
     ]
     assert context.assets[0].primary_path.name == names[1]
-    assert not any("_DUPE_" in name or "_DIFFERS_" in name for name in names)
+    assert not any("_DUPE_" in name or "_DIFF" in name for name in names)
 
 
-def test_collision_prompt_answer_can_leave_the_file_alone(tmp_path):
+def test_an_unanswered_collision_marks_both_files_rather_than_stranding_one(tmp_path):
+    """"Skip" is not an outcome the archive can hold (F4c).
+
+    Leaving the file exactly where it was meant leaving it in the inbox, under
+    whatever name it arrived with, in the one place the archive never looks --
+    so the answer nobody gave became a file nobody found. Declining to choose
+    now means what it says: both files are marked with their own checksums and
+    both are filed, and the choice is still there to be made.
+    """
     context = _collision_context(tmp_path)
-    original = context.assets[0].primary_path
+    inbox = Path(context.config["paths"]["unsorted_folder"])
     answered = []
     thread = answer_after(context, answered, {"action": "skip"}, 0)
 
@@ -220,8 +230,11 @@ def test_collision_prompt_answer_can_leave_the_file_alone(tmp_path):
     thread.join()
 
     assert answered
-    assert context.counters["rename_skipped_assets"] == 1
-    assert original.exists(), "skipping must leave the file exactly where it was"
+    assert context.counters["renamed_assets"] == 1
+    marked = sorted(path.name for path in inbox.iterdir() if path.suffix == ".jpg")
+    assert len(marked) == 2
+    assert all("_DIFF_" in name for name in marked)
+    assert context.assets[0].primary_path.name in marked
 
 
 def test_cancelling_at_a_collision_stops_the_run(tmp_path):

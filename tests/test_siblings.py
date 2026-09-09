@@ -39,6 +39,7 @@ from src.pipeline_stages.siblings import \
     strip_ordinal, \
     subsecond_from_exif_text, \
     with_ordinal
+from src.pipeline_stages.taxonomy import split_collision_suffix
 from src.pipeline_stages.stamps import \
     apply_subsecond, \
     leading_stamp_key, \
@@ -242,7 +243,7 @@ def test_two_shots_in_one_second_are_both_kept_and_both_fractioned(tmp_path):
         "2026-08-21_(Fri)__20.43.52.633__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg",
     ]
     assert not [path for path in inbox.iterdir()
-                if "_DUPE_" in path.name or "_DIFFERS_" in path.name]
+                if "_DUPE_" in path.name or "_DIFF" in path.name]
     assert context.counters["renamed_assets"] == 2
     # Sorted order is capture order: .433 was taken before .633.
     assert names[0] < names[1]
@@ -279,8 +280,10 @@ def test_a_true_duplicate_in_the_same_second_is_still_a_duplicate(tmp_path):
 def test_one_shot_saved_twice_never_becomes_a_sibling(tmp_path):
     """Same fraction, different bytes: a rendering, and F4's question.
 
-    The loser is a ``_DIFFERS`` -- the two files are provably not the same
-    file, which is the only thing ``_DUPE`` is allowed to claim.
+    **Both** files are marked ``_DIFF`` (F4c) -- they are provably not the same
+    file, which is the only thing ``_DUPE`` is allowed to claim, and nothing
+    here can say which of the two the archive wanted. Neither keeps the
+    uncontested name, because holding it is a claim to be the shot.
     """
     config = build_config(tmp_path)
     inbox = Path(config["paths"]["unsorted_folder"])
@@ -290,6 +293,7 @@ def test_one_shot_saved_twice_never_becomes_a_sibling(tmp_path):
     second, second_sidecar = _inbox_shot(inbox, "IMG_0002.jpg", "y" * 880, "633")
     os.utime(first, (1_000_000, 1_000_000))
     os.utime(second, (2_000_000, 2_000_000))
+    both_md5 = {file_md5(first), file_md5(second)}
 
     context = PipelineContext(config=config)
     context.assets = [
@@ -300,8 +304,13 @@ def test_one_shot_saved_twice_never_becomes_a_sibling(tmp_path):
     RenameAndSortStage().execute(context)
 
     names = [path.name for path in inbox.iterdir() if path.suffix == ".jpg"]
-    assert any("_DIFFERS_" in name for name in names)
+    assert len(names) == 2
+    assert all("_DIFF_" in name for name in names), \
+        "neither file keeps the uncontested name (F4c)"
     assert not any("_DUPE_" in name for name in names)
+    # Each carries its **own** checksum: a hash in one name is evidence about
+    # that file, never about the other one.
+    assert {split_collision_suffix(name).md5 for name in names} == both_md5
 
 
 def test_a_sibling_arriving_at_a_folder_already_holding_one_is_not_demoted(tmp_path):
@@ -336,7 +345,7 @@ def test_a_sibling_arriving_at_a_folder_already_holding_one_is_not_demoted(tmp_p
         "2026-08-21_(Fri)__20.43.52.433__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg",
         "2026-08-21_(Fri)__20.43.52.633__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg",
     ]
-    assert not any("_DUPE_" in one or "_DIFFERS_" in one for one in top_level)
+    assert not any("_DUPE_" in one or "_DIFF" in one for one in top_level)
     # The file that was already there kept its content and took its own
     # fraction; its sidecar followed it out of the old name (X5).
     assert (event_folder / top_level[1]).read_text(encoding="utf-8") == "already filed"
@@ -344,11 +353,13 @@ def test_a_sibling_arriving_at_a_folder_already_holding_one_is_not_demoted(tmp_p
         [one + "._exif" for one in top_level]
 
 
-def test_the_demoted_loser_still_carries_its_own_checksum(tmp_path):
-    """A ``_DIFFERS`` names the loser's hash, exactly as ``_DUPE`` did.
+def test_each_marked_file_carries_its_own_checksum(tmp_path):
+    """A ``_DIFF`` names its own file's hash, exactly as ``_DUPE`` did.
 
     Only the claim changes, not the grammar: F4's ``<suffix>_<md5>_<n>`` is
-    what lets a person match the pair up again by eye.
+    what lets a person match the pair up again by eye. Both members are
+    numbered ``_1`` -- their checksums already tell them apart, and a ``_2``
+    would read as an ordinal putting one of them second (F9b).
     """
     config = build_config(tmp_path)
     inbox = Path(config["paths"]["unsorted_folder"])
@@ -368,9 +379,11 @@ def test_the_demoted_loser_still_carries_its_own_checksum(tmp_path):
 
     RenameAndSortStage().execute(context)
 
-    loser = next(path for path in inbox.iterdir() if "_DIFFERS_" in path.name)
-    assert second_md5 in loser.name
-    assert loser.name.endswith("_1.jpg")
+    marked = sorted(path.name for path in inbox.iterdir()
+                    if path.suffix == ".jpg" and "_DIFF_" in path.name)
+    assert len(marked) == 2
+    assert any(second_md5 in name for name in marked)
+    assert all(name.endswith("_1.jpg") for name in marked)
 
 
 # --------------------------------------------------------------------------
@@ -405,7 +418,7 @@ def test_two_shots_in_one_second_never_collide_at_all(tmp_path):
         "2026-08-21_(Fri)__20.43.52.633__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg",
     ]
     assert not any(mark in name for name in names
-                   for mark in ("_DUPE_", "_DIFFERS_", "_LOWRES_"))
+                   for mark in ("_DUPE_", "_DIFF", "_LOWRES_"))
 
 
 def test_a_reingested_copy_still_meets_its_fraction_less_twin(tmp_path):
@@ -458,7 +471,7 @@ def test_an_older_twin_that_differs_is_renamed_to_carry_its_own_fraction(tmp_pat
         "2026-08-21_(Fri)__20.43.52.325__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg",
         "2026-08-21_(Fri)__20.43.52.925__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg",
     ]
-    assert not any("_DIFFERS_" in name or "_DUPE_" in name for name in names)
+    assert not any("_DIFF" in name or "_DUPE_" in name for name in names)
     # The renamed file kept its sidecar (X5).
     for name in names:
         assert (inbox / (name + "._exif")).is_file()
@@ -496,7 +509,7 @@ def test_folder_sorting_also_meets_the_fraction_less_twin(tmp_path):
         "2026-08-21_(Fri)__20.43.52.925__f2.4__T1_50__L69.0.eq__I100__SG23U.jpg",
     ]
     assert (event_folder / top_level[1]).read_text(encoding="utf-8") == "filed before fractions"
-    assert not any("_DUPE_" in one or "_DIFFERS_" in one for one in top_level)
+    assert not any("_DUPE_" in one or "_DIFF" in one for one in top_level)
     assert sorted(path.name for path in exif_folder.iterdir()) == \
         [one + "._exif" for one in top_level]
 
@@ -544,4 +557,160 @@ def test_a_third_shot_joins_two_already_fractioned_siblings(tmp_path):
 
     names = sorted(path.name for path in inbox.iterdir() if path.suffix == ".jpg")
     assert names == [stem % "325", stem % "700", stem % "925"]
-    assert not any("_DUPE_" in name or "_DIFFERS_" in name for name in names)
+    assert not any("_DUPE_" in name or "_DIFF" in name for name in names)
+
+
+# --------------------------------------------------------------------------
+# F9a -- the fraction is a fact about the file, not about its sidecar
+# --------------------------------------------------------------------------
+
+def test_the_fraction_is_read_from_the_file_not_from_its_sidecar(tmp_path, monkeypatch):
+    """The defect that started this: a sidecar describing a different file.
+
+    An archive was found holding a shot whose ``__EXIF`` entry carried the
+    fraction and shutter count of the *other* exposure taken in that second --
+    left behind when the file at that name changed. Every collision decision
+    read the occupant's fraction from there, so F9a compared 383 against 383,
+    concluded "one instant saved twice", and marked two genuine exposures as a
+    collision. The file itself said 983 the whole time.
+    """
+    from src.pipeline_stages import provenance
+
+    config = build_config(tmp_path)
+    folder = tmp_path / "event"
+    (folder / "__EXIF").mkdir(parents=True)
+    media = folder / "shot.jpg"
+    media.write_text("pixels", encoding="utf-8")
+    (folder / "__EXIF" / "shot.jpg._exif").write_text(
+        exif_text("383"), encoding="iso-8859-1")
+
+    monkeypatch.setattr(provenance, "media_exif_text",
+                        lambda *_args, **_kwargs: exif_text("983"))
+    assert provenance.recorded_subsecond(media, config) == "983"
+
+
+def test_a_camera_that_recorded_no_fraction_is_not_second_guessed(tmp_path, monkeypatch):
+    """"Recorded none" is an answer; "said nothing" is not (F9a).
+
+    A report carrying a capture time and no ``SubSecTimeOriginal`` is a camera
+    stating it wrote no fraction, and that is final. A report with no capture
+    time in it at all has not been asked -- ExifTool could not read the file --
+    and only then is the cached sidecar the better evidence.
+    """
+    from src.pipeline_stages import provenance
+
+    config = build_config(tmp_path)
+    folder = tmp_path / "event"
+    (folder / "__EXIF").mkdir(parents=True)
+    media = folder / "shot.jpg"
+    media.write_text("pixels", encoding="utf-8")
+    (folder / "__EXIF" / "shot.jpg._exif").write_text(
+        exif_text("383"), encoding="iso-8859-1")
+
+    monkeypatch.setattr(provenance, "media_exif_text",
+                        lambda *_args, **_kwargs: exif_text(None))
+    assert provenance.recorded_subsecond(media, config) is None, \
+        "the camera answered: it wrote no fraction"
+
+    monkeypatch.setattr(provenance, "media_exif_text",
+                        lambda *_args, **_kwargs: "File Type : TXT\n")
+    assert provenance.recorded_subsecond(media, config) == "383", \
+        "the file said nothing about capture, so the sidecar is what there is"
+
+
+# --------------------------------------------------------------------------
+# F4c -- __DUPLICATES holds copies; a contested pair stays with its event
+# --------------------------------------------------------------------------
+
+def test_a_byte_identical_arrival_is_parked_and_the_filed_shot_is_untouched(tmp_path):
+    """F4/S7: ``_DUPE`` is a claim that can be proved, so it is acted on.
+
+    Nothing is deleted (T1) and the file already filed is not renamed: there is
+    nothing in question about it. Only the redundant copy moves.
+    """
+    config = build_config(tmp_path)
+    inbox = Path(config["paths"]["unsorted_folder"])
+    inbox.mkdir(parents=True)
+    captured = datetime.datetime(2026, 8, 21, 20, 43, 52)
+    name = legacy_filename(_metadata(None), ".jpg", config)
+
+    event_folder = final_event_folder(captured, config)
+    (event_folder / "__EXIF").mkdir(parents=True)
+    filed = event_folder / name
+    filed.write_text("the very same bytes", encoding="utf-8")
+
+    arriving, sidecar = _inbox_shot(inbox, name, "the very same bytes", None)
+    context = PipelineContext(config=config)
+    context.assets = [MediaAsset(arriving, {"exif": sidecar}, _metadata(None))]
+
+    FolderSortingStage().execute(context)
+
+    assert filed.read_text(encoding="utf-8") == "the very same bytes"
+    assert [path.name for path in event_folder.iterdir() if path.is_file()] == [name]
+    parked = sorted(path.name for path in (event_folder / "__DUPLICATES").iterdir()
+                    if path.is_file())
+    assert len(parked) == 1 and "_DUPE_" in parked[0]
+    assert context.assets[0].primary_path == event_folder / "__DUPLICATES" / parked[0]
+    # X10: the copy's sidecar goes to the __EXIF of the folder now holding it.
+    assert (event_folder / "__DUPLICATES" / "__EXIF" / (parked[0] + "._exif")).exists()
+
+
+def test_a_third_copy_joins_a_marked_pair_instead_of_taking_the_free_name(tmp_path):
+    """F4c's consequence: the uncontested name is free, and must stay free.
+
+    Once both members of a contested pair are marked, nothing holds the plain
+    name — so a check that only asks "is this name taken?" would file a third
+    copy under a name the pair has already vacated, and the folder would show
+    one confident representative beside two files marked as questions.
+    """
+    config = build_config(tmp_path)
+    inbox = Path(config["paths"]["unsorted_folder"])
+    inbox.mkdir(parents=True)
+    captured = datetime.datetime(2026, 8, 21, 20, 43, 52)
+    name = legacy_filename(_metadata(None), ".jpg", config)
+    stem = Path(name).stem
+
+    event_folder = final_event_folder(captured, config)
+    (event_folder / "__EXIF").mkdir(parents=True)
+    for content in ("first version", "second version"):
+        marked = event_folder / f"{stem}_DIFF_{_md5_of(content)}_1.jpg"
+        marked.write_text(content, encoding="utf-8")
+
+    arriving, sidecar = _inbox_shot(inbox, name, "third version", None)
+    context = PipelineContext(config=config)
+    context.assets = [MediaAsset(arriving, {"exif": sidecar}, _metadata(None))]
+
+    FolderSortingStage().execute(context)
+
+    names = sorted(path.name for path in event_folder.iterdir() if path.is_file())
+    assert len(names) == 3
+    assert all("_DIFF_" in one for one in names)
+    assert not (event_folder / name).exists()
+
+
+def _md5_of(text: str) -> str:
+    import hashlib
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
+
+
+# --------------------------------------------------------------------------
+# F4 -- the retired spelling is still read
+# --------------------------------------------------------------------------
+
+def test_the_old_differs_spelling_is_still_parsed_but_never_written():
+    from src.pipeline_stages.taxonomy import \
+        DIFFERING_SUFFIX, \
+        LEGACY_DIFFERING_SUFFIX, \
+        collision_family, \
+        differing_name, \
+        is_differing_suffix
+
+    md5 = "a" * 32
+    assert differing_name("shot", md5, 1, ".jpg") == f"shot_DIFF_{md5}_1.jpg"
+    old = f"shot_DIFFERS_{md5}_1.jpg"
+    parsed = split_collision_suffix(old)
+    assert parsed.name == "shot.jpg" and parsed.suffix == LEGACY_DIFFERING_SUFFIX
+    assert is_differing_suffix(parsed.suffix) and is_differing_suffix(DIFFERING_SUFFIX)
+    # An archive holding the old spelling is still recognised as a family, so
+    # a repair pass and an arriving third copy both find it.
+    assert collision_family([old, "shot.jpg"], "shot.jpg") == [old]

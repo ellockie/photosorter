@@ -177,7 +177,7 @@ def test_a_differing_sidecar_is_parked_and_flagged(tmp_path):
     assert report.parked_duplicate == 0
     # Neither file is lost and neither is overwritten (T1, T2).
     assert existing.read_bytes() == b"a completely different sidecar"
-    assert parked(day) == [f"{RAW}_DIFFERS_{digest(b'exif')}_1._exif"]
+    assert parked(day) == [f"{RAW}_DIFF_{digest(b'exif')}_1._exif"]
     assert any("DIFFERENT bytes" in line for line in logs)
 
 

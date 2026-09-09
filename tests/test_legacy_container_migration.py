@@ -149,7 +149,7 @@ def test_a_differing_file_is_parked_and_flagged(tmp_path):
     # Neither is overwritten and neither is lost (T1, T2).
     assert (day / "__EXIF" / f"{JPG}._exif").read_bytes() == b"the one already there"
     assert parked_duplicates(year) == [
-        f"{JPG}_DIFFERS_{digest(b'a different one')}_1._exif"]
+        f"{JPG}_DIFF_{digest(b'a different one')}_1._exif"]
     assert any("DIFFERENT from" in line for line in logs)
 
 

@@ -6,6 +6,7 @@ import pytest
 from src.core import PipelineContext, PipelineMode, file_md5
 from src.pipeline_stages.default import build_default_orchestrator
 from src.pipeline_stages.folder_sorting import FolderSortingStage
+from src.pipeline_stages.taxonomy import split_collision_suffix
 from src.pipeline_stages.legacy import final_event_folder
 from src.core import MediaAsset
 
@@ -143,6 +144,7 @@ def test_e2e_fixture_matrix_full_default_dag(tmp_path, monkeypatch, no_legacy_up
     (inbox / "test6.jpg").write_text("night-photo-content" * 10, encoding="utf-8")
     import os
     os.utime(inbox / "test1.jpg", (1_000_000, 1_000_000))
+    test1_md5 = file_md5(inbox / "test1.jpg")
     test4_md5 = file_md5(inbox / "test4.jpg")
     test5_md5 = file_md5(inbox / "test5.jpg")
 
@@ -156,9 +158,15 @@ def test_e2e_fixture_matrix_full_default_dag(tmp_path, monkeypatch, no_legacy_up
 
     japan_folder = root / "2026" / "04. April" / "2026-04-12_(Sun) - Japan"
     expected_stem = "2026-04-12_(Sun)__18.00.00__Japan__f4.0__T1_250__L28.0__I100__NE71"
-    representative = japan_folder / f"{expected_stem}.jpg"
-    assert representative.exists(), sorted(p.name for p in japan_folder.iterdir()) if japan_folder.exists() else "missing folder"
-    assert (japan_folder / "__EXIF" / f"{expected_stem}.jpg._exif").exists()
+    # test1 and test4 both generate this name and hold different bytes, so
+    # neither is the representative: both are marked (F4c), and the folder
+    # holds the question rather than an answer to it.
+    assert not (japan_folder / f"{expected_stem}.jpg").exists()
+    for md5 in (test1_md5, test4_md5):
+        marked = japan_folder / f"{expected_stem}_DIFF_{md5}_1.jpg"
+        assert marked.exists(),             sorted(p.name for p in japan_folder.iterdir()) if japan_folder.exists() else "missing folder"
+        # Each keeps its own sidecar, named after it (X1/X10).
+        assert (japan_folder / "__EXIF" / f"{marked.name}._exif").exists()
     # Derived geolocation projection from the location timeline.
     assert (japan_folder / "__GEOLOCATIONS" / "_location.json").exists()
 
@@ -171,15 +179,19 @@ def test_e2e_fixture_matrix_full_default_dag(tmp_path, monkeypatch, no_legacy_up
     assert (may_folder / "__RAW" / "__EXIF" / f"{raw_name}._exif").exists()
     assert not (may_folder / "__EXIF" / f"{raw_name}._exif").exists()
 
-    # test3 was an exact duplicate of test1: merged away with a safety exception.
-    # test4 only shares test1's name -- its bytes differ, so it is a _DIFFERS,
-    # not a _DUPE. Nothing byte-identical survives to carry a _DUPE at all.
+    # test3 was an exact duplicate of test1: merged away with a safety
+    # exception. test4 only shares test1's name -- their bytes differ, so both
+    # are _DIFF and neither is a _DUPE. Nothing byte-identical survives to
+    # carry a _DUPE at all, and nothing is parked: __DUPLICATES holds byte-
+    # identical copies, and there are none.
     all_jpgs = list(root.rglob("*.jpg"))
     assert not [p for p in all_jpgs if "_DUPE_" in p.name]
-    differs = [p for p in all_jpgs if "_DIFFERS_" in p.name]
-    assert len(differs) == 1
-    assert test4_md5 in differs[0].name
-    assert differs[0].parent == japan_folder
+    assert not list(root.rglob("__DUPLICATES"))
+    differs = sorted(p for p in all_jpgs if "_DIFF_" in p.name)
+    assert len(differs) == 2
+    assert {test1_md5, test4_md5} == {
+        split_collision_suffix(p.name).md5 for p in differs}
+    assert all(p.parent == japan_folder for p in differs)
 
     # test5 is a real downscale -- 1024x683 against 5472x3648 -- so it earns
     # _LOWRES, and being a derivative it goes in __RESIZED rather than beside
@@ -230,13 +242,14 @@ def test_e2e_labeled_folder_stays_separate_from_loose_files(tmp_path, monkeypatc
     assert (labeled / "__GEOLOCATIONS" / "track.gpx").exists()
 
 
-def test_folder_sorting_demotes_existing_occupant_on_name_collision(tmp_path):
+def test_folder_sorting_marks_both_files_on_a_name_collision(tmp_path):
     # Two different assets land on the same event folder + file name (e.g. two
     # distinct shots that both got named "shot.jpg" upstream). The asset moved
     # in first must not be left silently occupying the plain name once a
-    # second, different file wants it too. Their bytes differ and no camera
-    # here recorded a sub-second, so this is F4's _DIFFERS_<md5> and not a
-    # sibling pair (F9a) -- and the first asset's sidecar follows its rename.
+    # second, different file wants it too -- and neither may take it (F4c).
+    # Their bytes differ and no camera here recorded a sub-second, so this is
+    # F4's _DIFF_<md5> on **both**, not a sibling pair (F9a) -- and each
+    # asset's sidecar follows its rename.
     config = build_config(tmp_path)
     inbox = Path(config["paths"]["inbox_folder"])
     inbox.mkdir(parents=True)
@@ -262,20 +275,29 @@ def test_folder_sorting_demotes_existing_occupant_on_name_collision(tmp_path):
     second_asset.metadata.update(shared)
 
     first_md5 = file_md5(first)
+    second_md5 = file_md5(second)
 
     context = PipelineContext(config=config)
     context.assets = [first_asset, second_asset]
     FolderSortingStage().execute(context)
 
     event_folder = final_event_folder(captured, config)
-    assert (event_folder / "shot.jpg").exists()
-    assert second_asset.primary_path == event_folder / "shot.jpg"
+    # Nobody holds the uncontested name, and nothing is in __DUPLICATES: that
+    # folder is for a file proved to be a byte-identical copy, and these two
+    # are proved to be anything but.
+    assert not (event_folder / "shot.jpg").exists()
+    assert not (event_folder / "__DUPLICATES").exists()
 
-    demoted = event_folder / f"shot_DIFFERS_{first_md5}_1.jpg"
-    assert demoted.exists()
-    assert demoted.read_text(encoding="utf-8") == "first-content"
-    assert first_asset.primary_path == demoted
-    assert first_asset.sidecars["exif"] == event_folder / "__EXIF" / (demoted.name + "._exif")
+    marked_first = event_folder / f"shot_DIFF_{first_md5}_1.jpg"
+    marked_second = event_folder / f"shot_DIFF_{second_md5}_1.jpg"
+    assert marked_first.read_text(encoding="utf-8") == "first-content"
+    assert marked_second.read_text(encoding="utf-8") == "second-content-different"
+    assert first_asset.primary_path == marked_first
+    assert second_asset.primary_path == marked_second
+    # Both sit at the top level, where a representative goes: the pair is a
+    # question about this event, and it is asked where the event is looked at.
+    assert sorted(path.name for path in event_folder.iterdir() if path.is_file()) ==         sorted([marked_first.name, marked_second.name])
+    assert first_asset.sidecars["exif"] ==         event_folder / "__EXIF" / (marked_first.name + "._exif")
     assert first_asset.sidecars["exif"].read_text(encoding="utf-8") == "first exif"
 
 

@@ -60,6 +60,14 @@ class CollisionDecision(str, Enum):
     # settles the provable case before the resolver is asked, and a person
     # answering the collision prompt settles the case EXIF cannot prove.
     SIBLINGS = "siblings"
+    # Two files, different bytes, and no evidence that either is the shot
+    # (F4c). Neither keeps the uncontested name: both are renamed
+    # <name>_DIFF_<own md5>_<n> and both stay where a representative goes, so
+    # the folder shows a question rather than an answer plus an exception to
+    # it. KEEP_CANDIDATE and RENAME_CANDIDATE survive only as answers a
+    # *person* gives at the prompt, where naming a winner is a judgement
+    # rather than a guess about file dates and sizes.
+    MARK_BOTH = "mark_both"
 
 
 class PipelineMode(str, Enum):
@@ -179,7 +187,7 @@ def default_config() -> dict:
             "significantly_smaller_ratio": DEFAULT_COLLISION_THRESHOLD,
             "duplicate_suffix": "_DUPE",
             "low_res_suffix": "_LOWRES",
-            "differing_suffix": "_DIFFERS",
+            "differing_suffix": "_DIFF",
         },
         # A capture at or before this time belongs to the previous day's folder
         # (ARCHIVE_STANDARD.md N7) -- a night that runs past midnight is one
@@ -1649,7 +1657,7 @@ class NameCollisionResolver:
     difference is decided. ``_DUPE`` is a claim of **byte-identity** — the loser
     adds nothing, and the checksum in its name is the proof. A file whose bytes
     differ is never a duplicate however alike the two look, so it takes
-    ``_DIFFERS`` (a question for a person) or ``_LOWRES`` (a smaller rendering
+    ``_DIFF`` (a question for a person) or ``_LOWRES`` (a smaller rendering
     of the same shot).
 
     Naming a byte-different loser ``_DUPE`` was PS-10: two exposures a second
@@ -1657,12 +1665,18 @@ class NameCollisionResolver:
     nothing about the other. Whether such a pair is two exposures at all is not
     decided here — ``pipeline_stages.siblings`` answers that (F9), before a
     collision that turns out to be no collision ever reaches this class.
+
+    **A byte-different pair has no loser** (F4c). The file dates and sizes
+    this class used to rank such a pair by say nothing about which of two
+    images somebody wanted, so the answer is ``MARK_BOTH``: both files
+    marked, neither holding the uncontested name. The only ranking left is
+    the one a person makes at the prompt.
     """
 
     def __init__(self, threshold: float = DEFAULT_COLLISION_THRESHOLD,
                  duplicate_suffix: str = "_DUPE",
                  low_res_suffix: str = "_LOWRES",
-                 differing_suffix: str = "_DIFFERS"):
+                 differing_suffix: str = "_DIFF"):
         self.threshold = threshold
         self.duplicate_suffix = duplicate_suffix
         self.low_res_suffix = low_res_suffix
@@ -1675,7 +1689,7 @@ class NameCollisionResolver:
             threshold=collision.get("significantly_smaller_ratio", DEFAULT_COLLISION_THRESHOLD),
             duplicate_suffix=collision.get("duplicate_suffix", "_DUPE"),
             low_res_suffix=collision.get("low_res_suffix", "_LOWRES"),
-            differing_suffix=collision.get("differing_suffix", "_DIFFERS"),
+            differing_suffix=collision.get("differing_suffix", "_DIFF"),
         )
 
     def resolve(self, existing: str | Path, candidate: str | Path,
@@ -1738,26 +1752,36 @@ class NameCollisionResolver:
                 reason="significantly-smaller",
             )
 
-        # Past the identical-MD5 branch above, the two files provably differ.
-        # Whichever loses the name is therefore a ``_DIFFERS``, never a
-        # ``_DUPE``: it holds bytes the winner does not, and only a person can
-        # say which was wanted (F4).
-        if existing_stat.st_mtime <= candidate_stat.st_mtime and existing_stat.st_size >= candidate_stat.st_size:
+        # Past the identical-MD5 branch above, the two files provably differ,
+        # and F9 has already ruled out the one case where that is not a defect.
+        # So this is F4's question -- and it is a question about *both* files.
+        #
+        # These two orderings used to answer it: the older, larger file kept
+        # the name and the other became a ``_DIFFERS``. The ranking was
+        # invented. A modification time is when a copy was written, not when a
+        # shutter opened, and a smaller file is a differently compressed one,
+        # not a worse one -- neither says which image a person meant to keep.
+        # Ranking on them put one of two unexamined images at the top level
+        # wearing the archive's canonical name for that shot, which is an
+        # answer the archive cannot support (V4).
+        #
+        # The orderings are kept as the test for "is this decidable without a
+        # person?", because that is all they were ever evidence of -- but what
+        # they now decide is that the pair is settled automatically rather than
+        # which member wins. ``MARK_BOTH`` says the true thing: two files claim
+        # this name, here is the checksum of each, and a person chooses. They
+        # stay side by side where a representative goes; ``__DUPLICATES`` is
+        # for a file proved to be a byte-identical copy of another, and nothing
+        # here is proved.
+        if (existing_stat.st_mtime <= candidate_stat.st_mtime
+                and existing_stat.st_size >= candidate_stat.st_size) or (
+                candidate_stat.st_mtime <= existing_stat.st_mtime
+                and candidate_stat.st_size >= existing_stat.st_size):
             return CollisionResult(
-                decision=CollisionDecision.RENAME_CANDIDATE,
+                decision=CollisionDecision.MARK_BOTH,
                 original=existing,
                 duplicate=candidate,
-                target_path=self._duplicate_path(candidate, self.differing_suffix),
-                reason="existing-older-larger",
-            )
-
-        if candidate_stat.st_mtime <= existing_stat.st_mtime and candidate_stat.st_size >= existing_stat.st_size:
-            return CollisionResult(
-                decision=CollisionDecision.KEEP_CANDIDATE,
-                original=candidate,
-                duplicate=existing,
-                target_path=self._duplicate_path(existing, self.differing_suffix),
-                reason="candidate-older-larger",
+                reason="different-bytes",
             )
 
         prompt = None
