@@ -13,6 +13,7 @@ The last one matters most for safety-validation, which re-reads the whole
 archive and, before this, said nothing at all for the entire time.
 """
 
+import os
 import time
 from pathlib import Path
 
@@ -25,10 +26,13 @@ from src.core import \
     PipelineOrchestrator, \
     PipelineStage, \
     SafetyValidationStage, \
-    default_config
+    default_config, \
+    file_md5
 from src.pipeline_stages import build_default_stages
 from src.pipeline_stages.default import build_default_orchestrator
 from src.pipeline_stages.initialization import InitializationStage
+from src.pipeline_stages.legacy_unsorted_migration import LegacyUnsortedMigrationStage
+from src.pipeline_stages.upload_harvest import UploadHarvestStage
 from src.utils.progress import \
     StageProgress, \
     format_bytes, \
@@ -363,6 +367,105 @@ def test_initialization_counts_files_not_snapshot_entries(tmp_path):
     assert any("byte-identical" in note for note in context.stage_notes["initialization"])
 
 
+def test_the_snapshot_records_which_folders_the_files_came_from(tmp_path):
+    context, unsorted, _ready = make_archive(tmp_path)
+    (unsorted / "LOOSE.jpg").write_text("loose", encoding="utf-8")
+    trip = unsorted / "Japan 2026"
+    nested = trip / "Kyoto"
+    nested.mkdir(parents=True)
+    (trip / "A.jpg").write_text("a", encoding="utf-8")
+    (trip / "B.jpg").write_text("b", encoding="utf-8")
+    (nested / "C.jpg").write_text("c", encoding="utf-8")
+
+    tally = context.snapshot_inputs([unsorted])
+
+    by_path = {entry["path"]: entry for entry in tally["folders"]}
+    assert set(by_path) == {unsorted, trip, nested}
+    assert by_path[unsorted]["files"] == 1
+    assert by_path[trip]["files"] == 2
+    assert by_path[nested]["files"] == 1
+    assert all(entry["bytes"] > 0 for entry in tally["folders"])
+    # The root each folder was reached under travels with it, so the caller
+    # can show a relative path without re-deriving which root that was.
+    assert {entry["root"] for entry in tally["folders"]} == {unsorted}
+
+
+def test_folders_are_listed_in_path_order_so_siblings_stay_together(tmp_path):
+    context, unsorted, _ready = make_archive(tmp_path)
+    for name in ("Zebra", "Alpha", "Middle"):
+        (unsorted / name).mkdir()
+        (unsorted / name / "X.jpg").write_text(name, encoding="utf-8")
+
+    tally = context.snapshot_inputs([unsorted])
+
+    listed = [entry["path"].name for entry in tally["folders"]]
+    assert listed == sorted(listed, key=str.lower)
+
+
+def test_initialization_names_the_folders_the_intake_came_from(tmp_path):
+    context, unsorted, _ready = make_archive(tmp_path)
+    (unsorted / "LOOSE.jpg").write_text("loose", encoding="utf-8")
+    trip = unsorted / "Japan 2026"
+    trip.mkdir()
+    (trip / "A.jpg").write_text("a", encoding="utf-8")
+
+    InitializationStage().execute(context)
+
+    log = "\n".join(context.logs)
+    assert "Files came from 2 folder(s):" in log
+    # A subfolder is shown relative to the inbox: the absolute prefix is the
+    # same on every line and the part that differs is the part worth reading.
+    assert "Japan 2026  -- 1 file(s)" in log
+    # Files sitting loose in the inbox are labelled, not shown as ".".
+    assert "(inbox root)  -- 1 file(s)" in log
+    assert context.counters["input_folders"] == 2
+    assert context.stage_stats["initialization"]["folders"] == 2
+
+
+def test_initialization_flags_subfolders_as_future_origin_labels(tmp_path):
+    context, unsorted, _ready = make_archive(tmp_path)
+    for name in ("Wedding", "Japan 2026"):
+        (unsorted / name).mkdir()
+        (unsorted / name / "A.jpg").write_text(name, encoding="utf-8")
+
+    InitializationStage().execute(context)
+
+    notes = context.stage_notes["initialization"]
+    assert any("2 subfolder(s)" in note and "origin labels" in note for note in notes)
+
+
+def test_a_flat_inbox_reports_one_folder_and_no_subfolder_note(tmp_path):
+    context, unsorted, _ready = make_archive(tmp_path)
+    (unsorted / "A.jpg").write_text("a", encoding="utf-8")
+
+    InitializationStage().execute(context)
+
+    assert context.counters["input_folders"] == 1
+    assert not any(
+        "origin labels" in note
+        for note in context.stage_notes.get("initialization", [])
+    )
+    # Everything sat in the folder the stage already named, so there is no
+    # breakdown to print -- neither in the headline nor as a list.
+    assert not any(line.startswith("Files came from") for line in context.logs)
+    assert not any(", from 1 folder(s)" in line for line in context.logs)
+
+
+def test_the_folder_list_is_capped_so_it_cannot_bury_the_run_log(tmp_path):
+    context, unsorted, _ready = make_archive(tmp_path)
+    cap = InitializationStage.MAX_FOLDERS_LISTED
+    for index in range(cap + 5):
+        folder = unsorted / f"Import {index:03d}"
+        folder.mkdir()
+        (folder / "A.jpg").write_text(str(index), encoding="utf-8")
+
+    InitializationStage().execute(context)
+
+    listed = [line for line in context.logs if line.startswith("  Import ")]
+    assert len(listed) == cap
+    assert any("and 5 more folder(s)" in line for line in context.logs)
+
+
 def test_snapshot_inputs_reports_progress_when_given_a_stage(tmp_path):
     context, unsorted, _ready = make_archive(tmp_path)
     for index in range(4):
@@ -376,6 +479,297 @@ def test_snapshot_inputs_reports_progress_when_given_a_stage(tmp_path):
     record = context.stage_progress["initialization"]
     assert record["finished"] is True
     assert record["done"] == 4
+
+
+# --------------------------------------------------------------------------
+# Media that arrives after the opening snapshot
+# --------------------------------------------------------------------------
+# The snapshot is taken against the INBOX before any stage runs, so anything a
+# later stage carries in was invisible to the safety check and a loss of it
+# went undetected. These pin the two stages that carry files in, and -- just
+# as important -- the two places that must NOT be watched, because a file that
+# never reaches an output root would be reported lost at the end of every run.
+
+def harvest_archive(tmp_path):
+    """An archive with a Camera Uploads folder and a legacy unsorted folder."""
+    context, unsorted, ready = make_archive(tmp_path)
+    uploads = tmp_path / "Camera Uploads"
+    legacy = tmp_path / "____UNSORTED"
+    uploads.mkdir()
+    legacy.mkdir()
+    context.config["paths"]["camera_uploads"] = str(uploads)
+    context.config["paths"]["ingest"] = {"camera_uploads": str(uploads)}
+    context.config["paths"]["legacy_unsorted_folder"] = str(legacy)
+    return context, unsorted, ready, uploads, legacy
+
+
+def test_harvested_camera_uploads_come_under_the_safety_check(tmp_path):
+    context, unsorted, _ready, uploads, _legacy = harvest_archive(tmp_path)
+    (uploads / "FROM_PHONE.jpg").write_text("a phone photo", encoding="utf-8")
+    InitializationStage().execute(context)
+    assert context.input_snapshot == {}     # nothing was in the inbox
+
+    UploadHarvestStage().execute(context)
+
+    assert file_md5(unsorted / "FROM_PHONE.jpg") in context.input_snapshot
+    assert context.counters["input_files_added_later"] == 1
+    assert context.counters["input_checksums"] == 1
+    assert context.stage_stats["upload-harvest"]["watched"] == 1
+
+
+def test_losing_a_harvested_file_is_now_detected(tmp_path):
+    """The whole point: before this, this deletion passed validation."""
+    context, unsorted, _ready, uploads, _legacy = harvest_archive(tmp_path)
+    (uploads / "FROM_PHONE.jpg").write_text("a phone photo", encoding="utf-8")
+    InitializationStage().execute(context)
+    UploadHarvestStage().execute(context)
+    (unsorted / "FROM_PHONE.jpg").unlink()
+
+    with pytest.raises(CatastrophicSafetyError):
+        SafetyValidationStage().execute(context)
+
+
+def test_other_images_under_camera_uploads_are_never_watched(tmp_path):
+    """They are moved *within* Camera Uploads, which is not an output root.
+
+    Snapshotting Camera Uploads wholesale would report every screenshot as
+    lost and fail every run -- which is why the snapshot is extended by the
+    stage that moves files into the INBOX, not by scanning the source.
+    """
+    context, _unsorted, _ready, uploads, _legacy = harvest_archive(tmp_path)
+    other = uploads / "_Other images"
+    other.mkdir()
+    screenshot = other / "SCREENSHOT.jpg"
+    screenshot.write_text("a screenshot", encoding="utf-8")
+    InitializationStage().execute(context)
+
+    UploadHarvestStage().execute(context)
+
+    assert file_md5(screenshot) not in context.input_snapshot
+    assert context.counters.get("input_files_added_later", 0) == 0
+
+
+def test_a_file_left_behind_by_a_collision_prompt_is_not_watched(tmp_path):
+    """Registering a file that never arrived would have the safety check hunt
+    at the end for something the run never took.
+
+    The clash is built to be genuinely undecidable: the resolver settles a
+    collision only when one side is both older *and* at least as large, so an
+    incoming file that is newer *and* larger falls through to a prompt, and
+    the harvest stops with the file still in Camera Uploads.
+    """
+    context, unsorted, _ready, uploads, _legacy = harvest_archive(tmp_path)
+    occupant = unsorted / "CLASH.jpg"
+    occupant.write_text("the one already here", encoding="utf-8")
+    left_behind = uploads / "CLASH.jpg"
+    left_behind.write_text("a different photo, and a longer one" * 4, encoding="utf-8")
+    os.utime(occupant, (1_600_000_000, 1_600_000_000))      # older, smaller
+    os.utime(left_behind, (1_700_000_000, 1_700_000_000))   # newer, larger
+    InitializationStage().execute(context)
+
+    UploadHarvestStage().execute(context)
+
+    assert left_behind.exists(), "precondition: the collision stopped the move"
+    assert any(p.prompt_type == "name_collision" for p in context.prompt_queue)
+    assert file_md5(left_behind) not in context.input_snapshot
+    assert context.counters.get("input_files_added_later", 0) == 0
+
+
+def test_legacy_migration_brings_loose_files_and_whole_folders_under_watch(tmp_path):
+    context, unsorted, _ready, _uploads, legacy = harvest_archive(tmp_path)
+    (legacy / "LOOSE.jpg").write_text("a loose legacy file", encoding="utf-8")
+    trip = legacy / "Holiday 2019"
+    trip.mkdir()
+    (trip / "NESTED.jpg").write_text("inside a migrated folder", encoding="utf-8")
+    InitializationStage().execute(context)
+
+    LegacyUnsortedMigrationStage().execute(context)
+
+    assert file_md5(unsorted / "LOOSE.jpg") in context.input_snapshot
+    # A whole folder moves in one go, so the walk has to reach inside it.
+    assert file_md5(unsorted / "Holiday 2019" / "NESTED.jpg") in context.input_snapshot
+    assert context.counters["input_files_added_later"] == 2
+
+
+def test_extending_the_snapshot_keeps_what_was_already_in_it(tmp_path):
+    """`snapshot_inputs` replaces the snapshot wholesale, so a second call
+    would have discarded the opening one."""
+    context, unsorted, _ready, uploads, _legacy = harvest_archive(tmp_path)
+    (unsorted / "ALREADY_HERE.jpg").write_text("in the inbox first", encoding="utf-8")
+    (uploads / "ARRIVES_LATER.jpg").write_text("harvested after", encoding="utf-8")
+    InitializationStage().execute(context)
+    first = dict(context.input_snapshot)
+    assert len(first) == 1
+
+    UploadHarvestStage().execute(context)
+
+    assert set(first) <= set(context.input_snapshot)
+    assert len(context.input_snapshot) == 2
+
+
+def test_an_arrival_identical_to_a_watched_file_is_counted_not_double_watched(tmp_path):
+    context, unsorted, _ready, uploads, _legacy = harvest_archive(tmp_path)
+    (unsorted / "ORIGINAL.jpg").write_text("identical bytes", encoding="utf-8")
+    (uploads / "COPY.jpg").write_text("identical bytes", encoding="utf-8")
+    InitializationStage().execute(context)
+
+    UploadHarvestStage().execute(context)
+
+    # One checksum covers both, which is why files and checksums differ.
+    assert len(context.input_snapshot) == 1
+    assert context.counters["input_files_added_later"] == 1
+    assert context.stage_stats["upload-harvest"]["watched"] == 1
+
+
+def test_arrivals_inside_dont_move_are_still_excluded(tmp_path):
+    context, unsorted, _ready, _uploads, legacy = harvest_archive(tmp_path)
+    protected = unsorted / "__DONT_MOVE"
+    protected.mkdir()
+    (legacy / "LOOSE.jpg").write_text("a legacy file", encoding="utf-8")
+    InitializationStage().execute(context)
+    LegacyUnsortedMigrationStage().execute(context)
+    # Something already parked in __DONT_MOVE must stay out of the snapshot
+    # even though the migration extended it.
+    (protected / "KEEP.jpg").write_text("precious", encoding="utf-8")
+
+    added = context.extend_snapshot([protected])
+
+    assert added["files"] == 0
+    assert file_md5(protected / "KEEP.jpg") not in context.input_snapshot
+
+
+# --------------------------------------------------------------------------
+# __DONT_MOVE: outside the pipeline, and outside its accounting
+# --------------------------------------------------------------------------
+
+def protected_archive(tmp_path):
+    context, unsorted, ready = make_archive(tmp_path)
+    protected = unsorted / "__DONT_MOVE"
+    protected.mkdir()
+    return context, unsorted, ready, protected
+
+
+def test_dont_move_is_not_counted_as_intake(tmp_path):
+    context, unsorted, _ready, protected = protected_archive(tmp_path)
+    (unsorted / "REAL.jpg").write_text("real", encoding="utf-8")
+    (protected / "KEEP.jpg").write_text("precious", encoding="utf-8")
+
+    InitializationStage().execute(context)
+
+    assert context.counters["input_files"] == 1
+    assert context.counters["input_protected_skipped"] == 1
+    assert len(context.input_snapshot) == 1
+    # And the exclusion is stated, so the intake count is never mistaken for
+    # "every media file under the inbox".
+    assert any("excluded from the intake" in note
+               for note in context.stage_notes["initialization"])
+
+
+def test_a_dont_move_copy_cannot_stand_in_for_a_lost_input(tmp_path):
+    """The false pass this exclusion closes.
+
+    While `__DONT_MOVE` was scanned as output, a file parked there that
+    happened to be byte-identical to an ingested one satisfied that input's
+    checksum — so losing the real file looked like success.
+    """
+    context, unsorted, _ready, protected = protected_archive(tmp_path)
+    (unsorted / "REAL.jpg").write_text("identical bytes", encoding="utf-8")
+    (protected / "COPY.jpg").write_text("identical bytes", encoding="utf-8")
+    InitializationStage().execute(context)
+    (unsorted / "REAL.jpg").unlink()
+
+    with pytest.raises(CatastrophicSafetyError):
+        SafetyValidationStage().execute(context)
+
+
+def test_a_zero_byte_file_parked_in_dont_move_does_not_fail_the_run(tmp_path):
+    """It is there because the user put it there; the pipeline never sees it."""
+    context, unsorted, ready, protected = protected_archive(tmp_path)
+    (unsorted / "REAL.jpg").write_text("real", encoding="utf-8")
+    (protected / "EMPTY.jpg").write_bytes(b"")
+    InitializationStage().execute(context)
+    (unsorted / "REAL.jpg").rename(ready / "REAL.jpg")
+
+    SafetyValidationStage().execute(context)  # must not raise
+
+
+def test_dont_move_is_watched_by_count_and_size_not_by_checksum(tmp_path):
+    context, unsorted, _ready, protected = protected_archive(tmp_path)
+    (protected / "A.jpg").write_text("aa", encoding="utf-8")
+    (protected / "B.jpg").write_text("bbbb", encoding="utf-8")
+
+    measured = context.snapshot_protected_folders()
+
+    entry = measured[str(protected)]
+    assert entry == {"files": 2, "bytes": 6, "exists": True}
+    assert context.verify_protected_folders() == []
+
+
+def test_tampering_with_dont_move_is_reported_but_does_not_end_the_run(tmp_path):
+    """Loud, but not fatal.
+
+    A change there is far more likely to be the user editing their own staging
+    area mid-run than a pipeline bug, and ending a twenty-minute run over files
+    the pipeline was not handling would be the wrong trade.
+    """
+    context, unsorted, ready, protected = protected_archive(tmp_path)
+    (unsorted / "REAL.jpg").write_text("real", encoding="utf-8")
+    (protected / "A.jpg").write_text("a", encoding="utf-8")
+    (protected / "B.jpg").write_text("b", encoding="utf-8")
+    InitializationStage().execute(context)
+    (unsorted / "REAL.jpg").rename(ready / "REAL.jpg")
+    (protected / "B.jpg").unlink()
+
+    SafetyValidationStage().execute(context)  # reported, not raised
+
+    assert context.counters["protected_folders_changed"] == 1
+    assert any("1 file(s) fewer" in note
+               for note in context.stage_notes["safety-validation"])
+    assert any("CHANGED during the run" in line for line in context.logs)
+
+
+def test_the_protected_check_still_runs_when_validation_fails(tmp_path):
+    """A failing run is exactly when it matters whether the folder was
+    disturbed too — a raise must not take that answer with it."""
+    context, unsorted, _ready, protected = protected_archive(tmp_path)
+    (unsorted / "REAL.jpg").write_text("real", encoding="utf-8")
+    (protected / "A.jpg").write_text("a", encoding="utf-8")
+    InitializationStage().execute(context)
+    (unsorted / "REAL.jpg").unlink()
+    (protected / "A.jpg").unlink()
+
+    with pytest.raises(CatastrophicSafetyError):
+        SafetyValidationStage().execute(context)
+
+    assert context.counters["protected_folders_changed"] == 1
+
+
+def test_only_a_top_level_dont_move_is_protected(tmp_path):
+    """The spec scopes the exclusion to the top level of the intake folder.
+
+    A folder of that name nested deeper is an ordinary import folder, and
+    treating it as protected would silently drop real photos from the count.
+    """
+    context, unsorted, _ready, _protected = protected_archive(tmp_path)
+    nested = unsorted / "Japan 2026" / "__DONT_MOVE"
+    nested.mkdir(parents=True)
+    (nested / "PHOTO.jpg").write_text("an ordinary photo", encoding="utf-8")
+
+    InitializationStage().execute(context)
+
+    assert context.counters["input_files"] == 1
+    assert context.counters.get("input_protected_skipped", 0) == 0
+
+
+def test_the_dont_move_name_has_one_definition(tmp_path):
+    """`provenance.dont_move_folder` delegates to core rather than repeating
+    the default (T8)."""
+    from src.core import dont_move_folder_name
+    from src.pipeline_stages.provenance import dont_move_folder
+
+    config = {"provenance": {"dont_move_folder": "__KEEP_OUT"}}
+    assert dont_move_folder(config) == dont_move_folder_name(config) == "__KEEP_OUT"
+    assert dont_move_folder({}) == "__DONT_MOVE"
 
 
 # --------------------------------------------------------------------------

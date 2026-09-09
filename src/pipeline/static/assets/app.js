@@ -553,9 +553,11 @@ function renderStageLog(parent, line) {
 
 const SUMMARY_GROUPS = [
   ["Came in", [
-    ["input_files", "files in the inbox"],
-    ["input_checksums", "of them distinct by content"],
+    ["input_files", "files in the inbox at the start"],
+    ["input_files_added_later", "carried in later by harvest/migration"],
+    ["input_checksums", "distinct checksums now watched"],
     ["input_bytes", "bytes to process"],
+    ["input_folders", "folders they arrived in"],
     ["legacy_unsorted_migrated", "migrated from legacy unsorted"],
     ["uploaded_files_moved", "harvested from Camera Uploads"],
     ["folder_intake_files", "flattened out of subfolders"],

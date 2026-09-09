@@ -405,6 +405,57 @@ so each file is now hashed once instead of two or three times; and a run that
 ingested nothing skips the hashing entirely, since there are no checksums to
 match. The zero-byte walk still happens in that case.
 
+### What the safety check does and does not cover
+
+`__DONT_MOVE` is excluded from **both** sides of the check — it is not counted
+as intake and it is not scanned as output. Excluding it from only one side
+would be worse than either: while it was scanned as output, a file parked there
+that happened to be byte-identical to an ingested one satisfied that input's
+checksum, so losing the real file looked like success. A deliberately-kept
+zero-byte file in there also used to fail the run.
+
+Its integrity is still watched, by count and total bytes taken before any stage
+runs and re-measured at the end — a stat-only check, not a checksum, since the
+pipeline is forbidden to read what is in there. A change is reported loudly (log
+line, stage note, `protected_folders_changed` counter) but does **not** end the
+run: the pipeline never touches that folder, so a change is far more likely to
+be you editing your own staging area mid-run than a pipeline bug. Only a
+top-level `__DONT_MOVE` is protected; one nested deeper is an ordinary import
+folder.
+
+**Every intake source is covered.** The opening snapshot only sees the INBOX as
+it stood before stage 1, so the two stages that carry media in afterwards
+extend it as they go, via `PipelineContext.extend_snapshot`:
+
+| Source | Enters at | Covered by the safety check |
+|---|---|---|
+| `INBOX` (loose files and subfolders) | before stage 1 | yes — opening snapshot |
+| legacy `____TO_SORT\____UNSORTED` | stage 2, `legacy-unsorted-migration` | yes — snapshot extended |
+| Dropbox `Camera Uploads` | stage 5, `upload-harvest` | yes — snapshot extended |
+| `INBOX\__DONT_MOVE` | never processed | watched by count/size |
+| `Camera Uploads\_Other images`, `_Other files` | stages 3–4 | no, by design |
+
+`extend_snapshot` **merges** — `snapshot_inputs` replaces the snapshot
+wholesale, so a second call to it would have discarded the opening one. It
+accepts files or whole directories, since the legacy migration moves folders in
+one go, and it honours the `__DONT_MOVE` exclusion like everything else.
+
+Two deliberate non-coverages, both of which would otherwise fail every run:
+
+- **`_Other images` / `_Other files`.** Stages 3–4 move screenshots and
+  non-camera files *within* Camera Uploads, which is not an output root. This
+  is why the snapshot is extended by the stage that moves a file into the
+  INBOX rather than by scanning the source folder wholesale — the latter would
+  report every screenshot as lost.
+- **A file left behind by a collision prompt.** It is still in Camera Uploads,
+  so registering it would have the safety check hunt at the end for something
+  the run never took. Only files that actually landed are registered.
+
+Arrivals are hashed where they now sit, so the single move that brought them in
+is not itself covered; every later move is, exactly as for files that started
+in the INBOX. The `Came in` summary separates the two: *files in the inbox at
+the start* and *carried in later by harvest/migration*.
+
 ### Where the time went
 
 The orchestrator times every stage — from a `finally`, so a stage that died is

@@ -479,6 +479,69 @@ def normalize_suffix(suffix: str) -> str:
     return suffix.lower()
 
 
+def dont_move_folder_name(config: dict) -> str:
+    """The name of the folder the pipeline must never touch.
+
+    One definition (T8); ``pipeline_stages.provenance.dont_move_folder``
+    delegates here. It lives in core because core is what has to honour it
+    first -- the safety snapshot runs before any stage does.
+    """
+    return config.get("provenance", {}).get("dont_move_folder", "__DONT_MOVE")
+
+
+def protected_intake_folders(config: dict) -> list[Path]:
+    """The `__DONT_MOVE` folders, one per intake root.
+
+    The spec is explicit: the pipeline never reads, moves, renames or deletes
+    anything inside these, and the exclusion applies at the **top level of the
+    intake folder only** -- a `__DONT_MOVE` nested deeper is an ordinary
+    folder and is processed like any other.
+    """
+    name = dont_move_folder_name(config)
+    paths = config.get("paths", {})
+    folders: list[Path] = []
+    for key in ("unsorted_folder", "inbox_folder", "legacy_unsorted_folder"):
+        root = paths.get(key)
+        if not root:
+            continue
+        candidate = Path(root) / name
+        if candidate not in folders:
+            folders.append(candidate)
+    return folders
+
+
+def is_protected(path: Path, protected: list[Path]) -> bool:
+    """Is ``path`` inside one of the protected folders?
+
+    A pure path comparison -- no filesystem access, and case-insensitive on
+    Windows, where `is_relative_to` follows the platform's own rules.
+    """
+    return any(path.is_relative_to(folder) for folder in protected)
+
+
+def measure_folder(folder: Path) -> dict:
+    """File count and total bytes for a folder tree, without reading content.
+
+    The cheap half of a safety check. Checksumming a protected folder would
+    mean reading files the pipeline is forbidden to read, and would cost the
+    same as hashing the archive; a stat-only tally still catches the failure
+    that matters -- the pipeline having deleted or truncated something in
+    there -- for a rounding error's worth of time.
+    """
+    files, total = 0, 0
+    if not folder.exists():
+        return {"files": 0, "bytes": 0, "exists": False}
+    for path in folder.rglob("*"):
+        try:
+            if not path.is_file():
+                continue
+            total += path.stat().st_size
+        except OSError:
+            continue
+        files += 1
+    return {"files": files, "bytes": total, "exists": True}
+
+
 # Re-exported, not defined: ``src.utils.checksums`` is the one implementation
 # (T8), and every ``from src.core import file_md5`` in the pipeline keeps
 # reading it from here.
@@ -669,6 +732,12 @@ class PipelineContext:
     # which is a chronological transcript nobody scrolls back through.
     stage_notes: dict[str, list[str]] = field(default_factory=dict)
     input_snapshot: dict[str, SafetySnapshotEntry] = field(default_factory=dict)
+    # File count and total bytes of each `__DONT_MOVE` folder, taken before
+    # any stage runs. Not checksums: the pipeline is forbidden to read what is
+    # in there, so its integrity is watched by size and count alone -- enough
+    # to catch the pipeline having deleted or truncated something, for none of
+    # the cost of hashing it.
+    protected_snapshot: dict[str, dict] = field(default_factory=dict)
     safety_exceptions: dict[str, str] = field(default_factory=dict)
     prompt_queue: deque[PromptRequest] = field(default_factory=deque)
     prompt_answers: dict[str, dict] = field(default_factory=dict)
@@ -771,6 +840,12 @@ class PipelineContext:
         media_extensions = self.media_extensions()
         chunk_size = self.config.get("safety", {}).get("hash_chunk_size", 1024 * 1024)
         snapshot = {}
+        # `__DONT_MOVE` is not intake. The pipeline is forbidden to read it, it
+        # never becomes an asset, and hashing it would both violate that and
+        # let a file parked in there stand in for a genuinely lost input --
+        # the two would collide on MD5 and the safety check would pass. It is
+        # watched separately and much more cheaply; see `measure_folder`.
+        protected = protected_intake_folders(self.config)
 
         # Walk first, hash second. Two passes over the tree costs one cheap
         # directory listing and buys a real total, so the progress bar is a
@@ -781,12 +856,16 @@ class PipelineContext:
         # what tells a stray import apart from the one you meant to run — and
         # these same folder names become origin labels in folder-intake.
         folders: dict[Path, dict] = {}
+        protected_skipped = 0
         for root in roots:
             root_path = Path(root)
             if not root_path.exists():
                 continue
             for path in root_path.rglob("*"):
                 if not path.is_file() or normalize_suffix(path.suffix) not in media_extensions:
+                    continue
+                if is_protected(path, protected):
+                    protected_skipped += 1
                     continue
                 try:
                     stat = path.stat()
@@ -834,10 +913,136 @@ class PipelineContext:
             "bytes": total_bytes,
             "unique": len(snapshot),
             "duplicates": duplicates,
+            "protected_skipped": protected_skipped,
+            # Path order rather than count order: siblings stay together, so
+            # the list reads as the tree it describes.
+            "folders": [
+                {
+                    "path": path,
+                    "root": info["root"],
+                    "files": info["files"],
+                    "bytes": info["bytes"],
+                }
+                for path, info in sorted(folders.items(), key=lambda item: str(item[0]).lower())
+            ],
         }
         if reporter:
             reporter.finish()
         return tally
+
+    def extend_snapshot(self, paths, stage_id: str | None = None) -> dict:
+        """Bring media that arrived after the opening snapshot under the safety net.
+
+        The opening snapshot is taken against the INBOX before any stage runs,
+        so anything a later stage carries in — harvested from Camera Uploads,
+        migrated from the legacy unsorted folder — was invisible to it, and a
+        loss of those files went undetected. This is how such a stage says
+        "these are mine now, watch them too".
+
+        ``paths`` may name files or whole directories; a directory is walked,
+        because the legacy migration moves entire folders in one go.
+
+        Merges rather than replaces — `snapshot_inputs` overwrites the whole
+        snapshot, so calling it a second time would discard the first.
+
+        Files are hashed where they now sit, which means the single move that
+        brought them here is not itself covered; every later move is, exactly
+        as for files that started in the INBOX. Call this *after* the move has
+        succeeded: registering a file that never actually arrived would have
+        the safety check hunt at the end for something that was never taken.
+        """
+        media_extensions = self.media_extensions()
+        chunk_size = self.config.get("safety", {}).get("hash_chunk_size", 1024 * 1024)
+        protected = protected_intake_folders(self.config)
+
+        candidates: list[tuple[Path, os.stat_result]] = []
+        seen: set[Path] = set()
+        for entry in paths:
+            path = Path(entry)
+            found = sorted(path.rglob("*")) if path.is_dir() else [path]
+            for item in found:
+                if not item.is_file() or normalize_suffix(item.suffix) not in media_extensions:
+                    continue
+                if is_protected(item, protected):
+                    continue
+                try:
+                    resolved = item.resolve()
+                    stat = item.stat()
+                except OSError:
+                    continue
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                candidates.append((item, stat))
+
+        if not candidates:
+            return {"files": 0, "bytes": 0, "new_checksums": 0, "already_known": 0}
+
+        total_bytes = sum(stat.st_size for _path, stat in candidates)
+        reporter = None
+        if stage_id:
+            reporter = self.progress(
+                stage_id,
+                "Checksumming arrivals",
+                total=len(candidates),
+                total_bytes=total_bytes,
+            )
+
+        new_checksums, already_known = 0, 0
+        for path, stat in candidates:
+            md5 = file_md5(path, chunk_size)
+            with self.lock:
+                if md5 in self.input_snapshot:
+                    already_known += 1
+                else:
+                    new_checksums += 1
+                self.input_snapshot[md5] = SafetySnapshotEntry(
+                    original_path=path,
+                    size=stat.st_size,
+                    modified_at=stat.st_mtime,
+                    md5=md5,
+                )
+            if reporter:
+                reporter.advance(size_bytes=stat.st_size)
+
+        # Kept here rather than in each caller so the two numbers cannot drift
+        # apart: every arrival is counted once, by the code that records it.
+        self.counters["input_files_added_later"] += len(candidates)
+        self.counters["input_bytes"] += total_bytes
+        self.counters["input_checksums"] = len(self.input_snapshot)
+        if reporter:
+            reporter.finish()
+        return {
+            "files": len(candidates),
+            "bytes": total_bytes,
+            "new_checksums": new_checksums,
+            "already_known": already_known,
+        }
+
+    def snapshot_protected_folders(self) -> dict[str, dict]:
+        """Measure the `__DONT_MOVE` folders so a later pass can prove the
+        pipeline left them alone. Stat only -- never their content."""
+        measured = {
+            str(folder): measure_folder(folder)
+            for folder in protected_intake_folders(self.config)
+        }
+        with self.lock:
+            self.protected_snapshot = measured
+        return measured
+
+    def verify_protected_folders(self) -> list[dict]:
+        """Re-measure and return one entry per folder that changed.
+
+        A change is reported, never repaired and never guessed at: the two
+        explanations -- a pipeline bug, or the user editing their own staging
+        folder mid-run -- look identical from here.
+        """
+        changed = []
+        for folder_name, before in self.protected_snapshot.items():
+            after = measure_folder(Path(folder_name))
+            if after["files"] != before["files"] or after["bytes"] != before["bytes"]:
+                changed.append({"folder": folder_name, "before": before, "after": after})
+        return changed
 
     def register_safety_exception(self, md5: str, reason: str) -> None:
         with self.lock:
@@ -1262,6 +1467,11 @@ class SafetyValidationStage(PipelineStage):
         context.counters["safety_bytes_read"] = total_bytes
         context.counters["safety_inputs_matched"] = matched
 
+        # Before the raise, not after: a run that is already failing is
+        # exactly when it matters whether the protected folder was disturbed
+        # too, and a raise here would take that answer with it.
+        self._verify_protected(context)
+
         if zero_byte_files or missing:
             # Log the specific offenders so the dashboard shows what actually
             # failed, not just a count. Cap the lists to avoid flooding the UI.
@@ -1292,6 +1502,51 @@ class SafetyValidationStage(PipelineStage):
             )
         return context
 
+    def _verify_protected(self, context: PipelineContext) -> None:
+        """Confirm the pipeline left the `__DONT_MOVE` folders exactly as it
+        found them.
+
+        Reported, not raised. The pipeline never touches these folders, so a
+        change is far more likely to be the user editing their own staging
+        area while a long run was going than a pipeline bug -- and ending a
+        twenty-minute run over files the pipeline was not handling would be
+        the wrong trade. It is loud in the log and on the stage's node, and
+        the counter is there for anything that wants to escalate it.
+        """
+        if not context.protected_snapshot:
+            return
+        changed = context.verify_protected_folders()
+        if not changed:
+            watched = sum(
+                entry["files"] for entry in context.protected_snapshot.values()
+            )
+            if watched:
+                context.log(
+                    f"{format_count(watched)} file(s) in "
+                    f"{dont_move_folder_name(context.config)} are as they were, untouched."
+                )
+            return
+
+        context.counters["protected_folders_changed"] = len(changed)
+        for entry in changed:
+            before, after = entry["before"], entry["after"]
+            context.log(
+                f"  ! {entry['folder']} CHANGED during the run: "
+                f"{format_count(before['files'])} -> {format_count(after['files'])} file(s), "
+                f"{format_bytes(before['bytes'])} -> {format_bytes(after['bytes'])}"
+            )
+        lost = sum(
+            max(0, entry["before"]["files"] - entry["after"]["files"])
+            for entry in changed
+        )
+        note = (
+            f"{dont_move_folder_name(context.config)} changed during the run"
+            + (f" -- {format_count(lost)} file(s) fewer than at the start"
+               if lost else " (nothing lost; files were added or grew)")
+        )
+        context.log(f"  ! {note}. The pipeline is not supposed to touch it.")
+        context.add_stage_note(self.stage_id, note)
+
     def _scan(self, context: PipelineContext, output_roots: list[Path]):
         """List what has to be hashed, per root, before hashing any of it.
 
@@ -1304,6 +1559,12 @@ class SafetyValidationStage(PipelineStage):
         candidates: list[tuple[Path, int]] = []
         zero_byte_files: list[Path] = []
         per_root = []
+        # Excluded on both sides or on neither. Scanning `__DONT_MOVE` for
+        # output would let a file parked there satisfy a lost input's checksum
+        # -- a false pass, which is worse than the false failure it looks like
+        # it is avoiding -- and would fail the run over a zero-byte file the
+        # user deliberately keeps there. Its integrity is checked separately.
+        protected = protected_intake_folders(context.config)
         # The output roots nest: READY and INBOX live *inside* root_folder in
         # the default layout, so walking all three visits those files two or
         # three times. Hashing them twice reads the same bytes twice and
@@ -1319,6 +1580,8 @@ class SafetyValidationStage(PipelineStage):
             root_count, root_bytes = 0, 0
             for path in root.rglob("*"):
                 if not path.is_file() or normalize_suffix(path.suffix) not in media_extensions:
+                    continue
+                if is_protected(path, protected):
                     continue
                 try:
                     resolved = path.resolve()

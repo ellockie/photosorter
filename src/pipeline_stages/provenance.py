@@ -2,7 +2,7 @@ import json
 import re
 from pathlib import Path
 
-from src.core import file_md5, safe_delete
+from src.core import dont_move_folder_name, file_md5, safe_delete
 
 # Leading date or date-time part of a folder name, e.g.
 # "2024-01-15 Birthday", "2024-01-15_18.30 Party", "2024.01.15-Trip".
@@ -19,7 +19,8 @@ def provenance_settings(config: dict) -> dict:
 
 
 def dont_move_folder(config: dict) -> str:
-    return provenance_settings(config).get("dont_move_folder", "__DONT_MOVE")
+    # Defined in core, which has to honour it before any stage runs (T8).
+    return dont_move_folder_name(config)
 
 
 def geodata_extensions(config: dict) -> set[str]:

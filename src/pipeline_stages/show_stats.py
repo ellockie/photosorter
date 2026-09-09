@@ -25,8 +25,10 @@ from src.utils.progress import \
 SUMMARY_GROUPS = (
     ("Came in", (
         ("input_files", "files in the inbox at the start"),
-        ("input_checksums", "of them distinct by content"),
+        ("input_files_added_later", "carried in later by harvest/migration"),
+        ("input_checksums", "distinct checksums now watched"),
         ("input_bytes", "bytes to process"),
+        ("input_folders", "folders they arrived in"),
         ("legacy_unsorted_migrated", "migrated from the legacy unsorted folder"),
         ("uploaded_files_moved", "harvested from Camera Uploads"),
         ("folder_intake_files", "flattened out of inbox subfolders"),

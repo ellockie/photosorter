@@ -72,6 +72,8 @@ photosorter — Python 3.13 photo processing pipeline: rename, sort, and organis
 | Stage progress + ETA | `src/utils/progress.py` | Leaf module: `StageProgress` — the one definition of how a long stage reports where it is (bar, rate, ETA) to both the dashboard and the log. Built via `context.progress(...)` |
 | What a stage is for | `PipelineStage.description` in `src/core.py` | One sentence per stage, shown in the dashboard and logged on entry. `tests/test_stage_insights.py` fails if a stage ships without one |
 | Where a run's time went | `PipelineOrchestrator._close_run` | Times every stage from a `finally` (so a failed one is timed too) and ranks the slowest five |
+| `__DONT_MOVE` exclusion | `dont_move_folder_name` / `protected_intake_folders` / `is_protected` in `src/core.py` | One definition (T8); `provenance.dont_move_folder` delegates here. Excluded from BOTH the input snapshot and the safety output scan — excluding it from one side only lets a file parked there satisfy a lost input's checksum. Watched instead by `measure_folder` (stat only, never its content) |
+| Media arriving mid-run | `PipelineContext.extend_snapshot` in `src/core.py` | Merges into the safety snapshot (`snapshot_inputs` REPLACES it). Called by `upload-harvest` and `legacy-unsorted-migration` after a move succeeds, with only what actually landed — a file left behind by a collision prompt is still in Camera Uploads, which is not an output root |
 | Tests | `tests/test_organise_date_folders.py` | Pytest, 6 cases |
 
 ## ISSUE TRACKING
