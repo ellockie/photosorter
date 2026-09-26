@@ -1,4 +1,8 @@
 project:
   name: "photosorter"
-  python_version: "3.13.3"
-  entrypoint: "run-project.sh"
+  python_version: "3.13.3"   # not used by the runner: Poetry picks the interpreter
+  # Same launch as _photosorter.bat: poetry run python src/main.py --cli
+  # (use "--ui" for the dashboard, like _photosorter_ui.bat).
+  entrypoint: "src/main.py"
+  default_args: "--cli"
+  use_poetry: true
