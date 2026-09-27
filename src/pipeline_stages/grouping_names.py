@@ -167,6 +167,12 @@ DEFAULT_PREVIEW_EXTENSIONS = (".THM.jpg", ".PREVIEW.jpg", ".thm", ".lrv")
 # revisable as engines improve.
 DEFAULT_OCR_EXTENSIONS = (".OCR.txt",)
 
+# Matches config.json extensions.extracted_videos. The video a motion photo
+# carries, once extracted, is a companion of the still (X16) and lives in
+# "__VIDEOS_EXTRACTED". Compound for the reason X6a gives: ".mp4" alone would
+# make it media, a representative, and a second shot of the same moment.
+DEFAULT_EXTRACTED_VIDEO_EXTENSIONS = (".MOTION.mp4",)
+
 # The letters of the count bracket, in the order they are written, matching
 # ARCHIVE_STANDARD.md 2. "n" (nested dated children) is the one letter a group
 # carries, and the only one it may (C14).
@@ -361,6 +367,7 @@ COMPANION_EXTENSION_KEYS = (
     ("sidecars", DEFAULT_SIDECAR_EXTENSIONS),
     ("previews", DEFAULT_PREVIEW_EXTENSIONS),
     ("ocr", DEFAULT_OCR_EXTENSIONS),
+    ("extracted_videos", DEFAULT_EXTRACTED_VIDEO_EXTENSIONS),
 )
 
 
@@ -433,6 +440,18 @@ def ocr_extensions(config: dict) -> set[str]:
     if "ocr" not in extensions:
         return {value.lower() for value in DEFAULT_OCR_EXTENSIONS}
     return {value.lower() for value in extensions["ocr"]}
+
+
+def extracted_video_extensions(config: dict) -> set[str]:
+    """Extracted-video suffixes (``.MOTION.mp4``), lower-cased, from config.
+
+    A video lifted out of a motion photo is a companion of that still (X16):
+    it travels with it, lives in ``__VIDEOS_EXTRACTED``, and is never media.
+    """
+    extensions = config.get("extensions", {})
+    if "extracted_videos" not in extensions:
+        return {value.lower() for value in DEFAULT_EXTRACTED_VIDEO_EXTENSIONS}
+    return {value.lower() for value in extensions["extracted_videos"]}
 
 
 def companion_subject_name(name: str, extensions) -> str | None:
@@ -516,7 +535,8 @@ def select_media(paths, image_exts: set[str], video_exts: set[str],
     is for: a generated one is a real JPEG by extension (X6a) and would be
     counted as an image, offered to a grouper GUI, and eligible to be picked as
     a representative for the very shot it is a thumbnail of. X7 says a preview
-    is never media; this is where that is enforced.
+    is never media; this is where that is enforced. A video extracted from a
+    motion photo (X16) falls out on the same terms.
 
     ``preview_exts`` defaults to the module's own list rather than being
     required, so a caller with no config in hand still excludes the forms every
@@ -525,12 +545,26 @@ def select_media(paths, image_exts: set[str], video_exts: set[str],
     preview_exts = _preview_set(preview_exts)
     selected = []
     for path in paths:
-        if is_preview(Path(path).name, preview_exts):
+        if _is_companion_not_media(Path(path).name, preview_exts):
             continue
         suffix = Path(path).suffix.lower()
         if suffix in video_exts or suffix in image_exts:
             selected.append(path)
     return selected
+
+
+def _is_companion_not_media(name: str, preview_exts: set[str]) -> bool:
+    """A preview (X7) or an extracted video (X16): a real JPEG or MP4 by its
+    last extension, and a companion by its whole tail -- never a shot.
+
+    Extracted videos are matched on the module's own list: no caller of the
+    two functions below passes one, and every config in this project writes
+    the same suffix.
+    """
+    return (is_preview(name, preview_exts)
+            or companion_subject_name(
+                name, {value.lower() for value in DEFAULT_EXTRACTED_VIDEO_EXTENSIONS})
+            is not None)
 
 
 def _preview_set(preview_exts) -> set[str]:
@@ -552,7 +586,7 @@ def count_media(paths, image_exts: set[str], video_exts: set[str],
     images = 0
     videos = 0
     for path in paths:
-        if is_preview(Path(path).name, preview_exts):
+        if _is_companion_not_media(Path(path).name, preview_exts):
             continue
         suffix = Path(path).suffix.lower()
         if suffix in video_exts:

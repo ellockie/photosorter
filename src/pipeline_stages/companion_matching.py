@@ -62,6 +62,7 @@ from src.pipeline_stages.grouping_names import \
     ORPHANS_FOLDER, \
     extension_sets, \
     companion_extension_spellings, \
+    extracted_video_extensions, \
     ocr_extensions, \
     preview_extensions, \
     sidecar_extensions, \
@@ -505,15 +506,15 @@ def _prune_empty_taxonomy_dirs(tax_dirs: list[Path], reporter: _Reporter) -> Non
 # archive?" and "is this name ambiguous?". A sidecar stranded in the wrong event
 # folder entirely is only findable once every subject in the tree is known.
 
-# The two kinds of companion that live one level below their subject, each with
-# the taxonomy key naming the folder it goes in. Both follow X10-X13; they are
-# separated only because they land in different folders.
-# The three kinds of companion and the taxonomy key each is filed under.
-# One tuple, walked in order, so adding a kind is adding a line here rather
-# than a branch in the placement engine (X10/X13/X15).
+# The kinds of companion that live one level below their subject, and the
+# taxonomy key naming the folder each goes in. All follow X10-X13; they are
+# separated only because they land in different folders. One tuple, walked in
+# order, so adding a kind is adding a line here rather than a branch in the
+# placement engine (X10/X13/X15/X16).
 COMPANION_KINDS = (("exif", sidecar_extensions),
                    ("previews", preview_extensions),
-                   ("ocr", ocr_extensions))
+                   ("ocr", ocr_extensions),
+                   ("videos_extracted", extracted_video_extensions))
 
 
 # MD5 of a file, read in chunks -- the plain version, for a caller with no

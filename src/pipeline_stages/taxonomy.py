@@ -113,8 +113,9 @@ def legacy_container_names(config: dict) -> set[str]:
 # own. A sidecar lives in one of these directly inside the folder holding its
 # subject (standard X10), so unlike every other taxonomy folder these may nest
 # one level inside another -- "__RAW\__EXIF\" is the RAW's sidecar, and is legal
-# where "__RAW\__EDITED\" is not (S2, X11, X12).
-SIDECAR_KEYS = ("exif", "previews", "ocr")
+# where "__RAW\__EDITED\" is not (S2, X11, X12). "__VIDEOS_EXTRACTED" holds
+# the video lifted out of a motion photo, a companion of that still (X16).
+SIDECAR_KEYS = ("exif", "previews", "ocr", "videos_extracted")
 
 # These folders are only ever created/recognized by the pipeline; their
 # contents are curated by hand and must never be populated automatically.
@@ -122,7 +123,7 @@ MANUALLY_CURATED_KEYS = ("to_share", "shared", "people", "panoramas", "stereo_3d
                          "other", "processed")
 
 # Defined in the taxonomy but intentionally not generated yet.
-FUTURE_KEYS = ("hashes", "videos_extracted", "videos_to_rename")
+FUTURE_KEYS = ("hashes", "videos_to_rename")
 
 
 def taxonomy_folder(config: dict, key: str) -> str:

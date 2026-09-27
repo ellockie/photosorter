@@ -2,10 +2,12 @@
 setlocal
 cd /d "%~dp0"
 
-rem Restructure an existing photo archive: canonicalise names, group every
-rem "__TO_SPLIT__" folder in the GUI, canonicalise again, then check and fix
-rem compliance with ARCHIVE_STANDARD.md (those last two not implemented yet -
-rem the standard is still a v0.1 draft).
+rem Restructure an existing photo archive: canonicalise names, reunite
+rem companions, group every "__TO_SPLIT__" folder in the GUI, canonicalise
+rem again, mark the groups, then check and fix compliance with
+rem ARCHIVE_STANDARD.md. Motion photos whose video has not been extracted
+rem into "__VIDEOS_EXTRACTED" are listed (and extracted under --apply) by
+rem steps 2 and 4, and reported as X16 by step 7.
 rem
 rem Nothing is changed without --apply. With no arguments this is a dry run
 rem over the configured archive root's current year. "--year ALL" runs every

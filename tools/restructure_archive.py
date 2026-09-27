@@ -138,7 +138,7 @@ migrations belong to step 8, which displays and confirms them before writing.
 
 What reconciliation does
 ------------------------
-Six passes, in this order and no other:
+Seven passes, in this order and no other:
 
   * ``hoist_parking_areas`` -- every nested parking area is merged into the
     one of its own name directly below its month folder: an
@@ -172,11 +172,17 @@ Six passes, in this order and no other:
   * ``generate_missing_raw_sidecars`` -- after tolerant matching has removed
     the false positives, every genuinely uncovered RAW is passed to ExifTool.
     Its canonical X1 sidecar is placed in the RAW folder's ``__EXIF`` (X14).
+  * ``extract_missing_embedded_videos`` -- every motion photo whose video has
+    not been lifted out yet is found (sniffed, then confirmed by ExifTool
+    reading the file) and, under ``--apply``, extracted to
+    ``__VIDEOS_EXTRACTED\<still's full name>.MOTION.mp4`` beside it (X16). A
+    dry run lists each one. The still is never rewritten.
 
 The order is the dependency order. Parking and legacy names are normalized
 first. Reconciliation moves subjects; placement then settles every sidecar it
 can read, including historical names. Only then is a RAW called genuinely
-missing and given a newly extracted sidecar.
+missing and given a newly extracted sidecar, and a motion photo called
+unextracted -- an extraction placement has just brought home is not missing.
 
 **A sidecar is looked for anywhere in the target**, at any depth and across
 year trees -- placement indexes every tree of the run at once before it moves
@@ -465,6 +471,9 @@ taxonomy = importlib.import_module("src.pipeline_stages.taxonomy")
 parking = importlib.import_module("src.pipeline_stages.parking")
 # Dependency-free ExifTool command helpers used for missing RAW sidecars (X14).
 exif_sidecars = importlib.import_module("src.pipeline_stages.exiftool_sidecars")
+# Finding motion photos and extracting the video they carry (X16) -- the same
+# module the pipeline's embedded-video-extraction stage runs (T8).
+embedded_videos = importlib.import_module("src.pipeline_stages.embedded_videos")
 # The read-old/write-new migration for the legacy video container (S5/V1/V8).
 legacy_videos = importlib.import_module("src.pipeline_stages.legacy_videos")
 # Two shots inside one second, and what tells them from one shot saved twice
@@ -1849,6 +1858,92 @@ def generate_missing_raw_sidecars(run, placement, config, move):
     return len(completed), errors
 
 
+def extract_missing_embedded_videos(run, config):
+    """Extract the video every motion photo still keeps to itself (X16).
+
+    Runs last, once placement has settled every companion: an extraction
+    stranded in the wrong folder has been moved to its still by then, so only
+    a still with none anywhere is called missing. Where a dry run has only
+    *planned* those moves, a still with an extraction anywhere in the tree is
+    passed over for the same reason.
+
+    Returns ``(extracted or to extract, failures)``. A dry run reads -- it
+    sniffs files and asks ExifTool -- and writes nothing.
+    """
+    if not embedded_videos.extraction_enabled(config):
+        return 0, 0
+    # Silent: placement has just walked the same trees and reported whatever
+    # this walk would meet on the way.
+    survey = matching.survey_trees(run.trees, config)
+    extracted_anywhere = {
+        subject.casefold()
+        for _path, _folder, key, subject, _extension in survey.companions
+        if key == embedded_videos.EXTRACTED_VIDEOS_KEY
+    }
+    stills = [
+        Path(folder) / name
+        for name, folder in survey.media
+        if name.casefold() not in extracted_anywhere
+    ]
+    exiftool = exif_sidecars.exiftool_command(config, REPO_ROOT)
+    pending = embedded_videos.find_pending(stills, config, exiftool)
+    run.report(
+        "dim",
+        "Motion photos: %d still(s) without an extraction checked, %d read by "
+        "ExifTool, %d already extracted"
+        % (pending.examined, pending.probed, pending.already_extracted),
+    )
+    if not pending.pending:
+        return 0, 0
+
+    run.report(
+        "bold",
+        "\nMotion photos: %d carry a video not yet extracted" % len(pending.pending),
+    )
+    if not run.apply:
+        for subject in pending.pending:
+            run.report("dim", "  %s" % subject)
+            run.report(
+                "dim", "    -> %s" % embedded_videos.extracted_video_path(subject, config)
+            )
+        run.planned_extractions.extend(pending.pending)
+        run.report(
+            "ok",
+            "  %d video(s) to extract with ExifTool under --apply."
+            % len(pending.pending),
+        )
+        return len(pending.pending), 0
+
+    def exiftool_log(message):  # ExifTool's own words
+        run.report("warn", "  %s" % message, speaker=False)
+
+    result = embedded_videos.extract(pending.pending, config, exiftool, exiftool_log)
+    for subject, target in result.created:
+        run.journal.write("embedded_video_extracted", still=str(subject), video=str(target))
+        run.report("dim", "  + %s" % target)
+    failures = 0
+    for subject in result.missing:
+        failures += 1
+        run.flag(RECONCILE_ERRORS, subject, "embedded video could not be extracted (X16)")
+        run.report(FAILED, "  ! no video extracted from %s" % subject)
+    for subject, target in result.not_video:
+        failures += 1
+        run.journal.write("embedded_video_extracted", still=str(subject), video=str(target))
+        run.flag(RECONCILE_ERRORS, target, "extraction does not open as a video (X16)")
+        run.report(FAILED, "  ! %s does not open as a video" % target)
+    failures += result.errors
+    run.report(
+        "bold",
+        "Extracted %d/%d embedded video(s)%s."
+        % (
+            len(result.created),
+            len(pending.pending),
+            " with %d error(s)" % failures if failures else "",
+        ),
+    )
+    return len(result.created), failures
+
+
 def find_parking_areas(run):
     """Every parking area in the target (H4), safely and deepest first."""
     found, refused = [], []
@@ -2107,7 +2202,7 @@ def duplicates_folder(folder, run, config):
 def step_reconcile(run, label):
     """Migrate the legacy containers, reunite companions, place every one of them.
 
-    Six passes, in this order and no other:
+    Seven passes, in this order and no other:
 
     1. Nested ``__EMPTY_SUBFOLDERS`` areas are hoisted and merged into the one
        directly below their month folder (H2/H6). Parked folders are excluded
@@ -2129,6 +2224,8 @@ def step_reconcile(run, label):
        a companion carries its subject's full name (X1).
     6. Generate a canonical sidecar from every RAW genuinely still uncovered
        after historical stem/case matching, using ExifTool (X14).
+    7. Extract the video of every motion photo that has none filed beside it
+       yet, into ``__VIDEOS_EXTRACTED`` (X16). A dry run reports them.
 
     The order is the dependency order. Parking is normalized first, then
     legacy migration gives every later pass one set of folder names.
@@ -2143,6 +2240,7 @@ def step_reconcile(run, label):
     run.planned_removals = []
     run.planned_generations = []
     run.planned_video_sidecars = []
+    run.planned_extractions = []
     parking_report = hoist_nested_parking(run, move)
     folders = dated_folders(run)
     if not folders and not parking_report.misplaced:
@@ -2264,6 +2362,9 @@ def step_reconcile(run, label):
         run, placement, config, move
     )
 
+    # 7 -- last, so a stranded extraction has already been moved to its still.
+    extracted_videos, extraction_errors = extract_missing_embedded_videos(run, config)
+
     # Only genuinely uncovered media remain here. Historical stem-form and
     # case-variant sidecars were resolved above; RAWs successfully generated
     # here have also been removed from the audit.
@@ -2337,6 +2438,7 @@ def step_reconcile(run, label):
         or run.planned_removals
         or run.planned_generations
         or run.planned_video_sidecars
+        or run.planned_extractions
     ):
         if run.planned_removals:
             pending = "%d path(s) to move and %d empty parking shell(s) to remove" % (
@@ -2350,6 +2452,10 @@ def step_reconcile(run, label):
         if run.planned_video_sidecars:
             pending += "; %d video sidecar(s) to generate" % len(
                 run.planned_video_sidecars
+            )
+        if run.planned_extractions:
+            pending += "; %d embedded video(s) to extract" % len(
+                run.planned_extractions
             )
         run.report("ok", "\n%s. Nothing was changed. Re-run with --apply." % pending)
 
@@ -2371,6 +2477,8 @@ def step_reconcile(run, label):
         media=placement.media,
         media_without_sidecar=placement.media_without_sidecar,
         raw_sidecars_generated=generated_raw_sidecars,
+        embedded_videos_extracted=extracted_videos if run.apply else 0,
+        embedded_videos_pending=0 if run.apply else extracted_videos,
         legacy_video_folders=video_migration.folders,
         legacy_videos_moved_up=video_migration.moved_up,
         legacy_videos_named_from_metadata=(video_migration.named_from_metadata),
@@ -2389,6 +2497,7 @@ def step_reconcile(run, label):
             + parking_report.errors
             + video_migration.errors
             + generation_errors
+            + extraction_errors
         ),
     )
 
@@ -2401,13 +2510,14 @@ def step_reconcile(run, label):
         or video_migration.left
     ):
         return 1
-    if generation_errors:
+    if generation_errors or extraction_errors:
         return 1
     if not run.apply and (
         run.planned
         or run.planned_removals
         or run.planned_generations
         or run.planned_video_sidecars
+        or run.planned_extractions
     ):
         return 1
     return 0
@@ -3395,6 +3505,7 @@ class Run:
         self.planned = []
         self.planned_removals = []
         self.planned_generations = []
+        self.planned_extractions = []
         # And where a dry run's canonicalise step collects the empty folders it
         # would park -- kept apart from ``planned`` so the reconcile step's
         # "N file(s) to move" still counts only files (H4).

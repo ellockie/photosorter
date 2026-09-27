@@ -242,6 +242,11 @@ def default_config() -> dict:
         "companion_reconciliation": {
             "enabled": False,
         },
+        # Lift the video a motion photo carries into __VIDEOS_EXTRACTED beside
+        # it (ARCHIVE_STANDARD.md X16). The still itself is never rewritten.
+        "embedded_video_extraction": {
+            "enabled": True,
+        },
         # Archive restructuring repairs genuinely missing RAW metadata after
         # tolerant historical-name matching (ARCHIVE_STANDARD.md X14).
         "raw_sidecar_generation": {

@@ -1,6 +1,6 @@
 # SRC — Application Source
 
-> **Target archive layout is defined by `../ARCHIVE_STANDARD.md`** (v1.4,
+> **Target archive layout is defined by `../ARCHIVE_STANDARD.md`** (v1.5,
 > settled; §3 enforced, the rest specified but not built). Any change to a stage that creates, moves, renames
 > or scans archive folders must be read against it — especially §3
 > (`___GROUP_[ ... ]` marking and the `___` span), §4 (the closed set of `__`

@@ -5,6 +5,7 @@ from src.pipeline_stages.convert_crws import ConvertCrwsStage
 from src.pipeline_stages.display_extra_messages import DisplayExtraMessagesStage
 from src.pipeline_stages.exiftool_batch import ExiftoolBatchStage
 from src.pipeline_stages.extracted_sidecars import ExtractedSidecarsStage
+from src.pipeline_stages.embedded_video_extraction import EmbeddedVideoExtractionStage
 from src.pipeline_stages.empty_file_quarantine import EmptyFileQuarantineStage
 from src.pipeline_stages.folder_sorting import FolderSortingStage
 from src.pipeline_stages.grouping_review import GroupingReviewStage
@@ -41,6 +42,7 @@ __all__ = [
     "RawStagedConversionStage",
     "ExtractedSidecarsStage",
     "FolderSortingStage",
+    "EmbeddedVideoExtractionStage",
     "ScreenshotGroupingStage",
     "GroupingReviewStage",
     "CompanionReconciliationStage",

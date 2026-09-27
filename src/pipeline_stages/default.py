@@ -8,6 +8,7 @@ from src.pipeline_stages.classify_other_images import ClassifyOtherImagesStage
 from src.pipeline_stages.companion_reconciliation import CompanionReconciliationStage
 from src.pipeline_stages.folder_intake import FolderIntakeStage
 from src.pipeline_stages.display_extra_messages import DisplayExtraMessagesStage
+from src.pipeline_stages.embedded_video_extraction import EmbeddedVideoExtractionStage
 from src.pipeline_stages.empty_file_quarantine import EmptyFileQuarantineStage
 from src.pipeline_stages.extracted_sidecars import ExtractedSidecarsStage
 from src.pipeline_stages.folder_sorting import FolderSortingStage
@@ -51,6 +52,10 @@ def build_default_stages() -> list[PipelineStage]:
         ExtractedSidecarsStage(),
         MoveResultsStage(),
         FolderSortingStage(),
+        # After folder sorting has given each still its final name and place,
+        # before the grouper moves any: the extraction is named after the
+        # still (X1), and reconciliation then carries it like any companion.
+        EmbeddedVideoExtractionStage(),
         ScreenshotGroupingStage(),
         GroupingReviewStage(),
         CompanionReconciliationStage(),

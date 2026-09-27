@@ -1,6 +1,6 @@
 # Photo & Video Archive Standard
 
-**v1.4 — settled. Partially enforced by the restructure tool.**
+**v1.5 — settled. Partially enforced by the restructure tool.**
 
 The target structure of the photo + video archive on disk. It exists to (a) drive
 the redesign of the **already-archived** material and (b) serve as the contract
@@ -365,13 +365,13 @@ Inside a dated folder, exactly these are permitted. All optional.
 | `__RAW_EXTRACTED_JPGS` | JPEGs extracted from a RAW for a shot that already has a camera JPEG | tool |
 | `__RESIZED` | Downscaled derivatives for web, social, email | tool |
 | `__SHARED` | Already shared | hand |
-| `__VIDEOS_EXTRACTED` | Video extracted out of other media | tool |
+| `__VIDEOS_EXTRACTED` | The video a motion photo carries, lifted out of it — `shot.jpg.MOTION.mp4`. A companion of the still, not a representative. See X16 | tool |
 | `__VIDEOS_TO_RENAME` | Videos that could not be dated — tagged `__TO_RENAME__` (V8) | tool |
 
 | ID | Rule |
 | --- | --- |
 | S1 | The set is **closed**. Any other subfolder is a violation — except a dated child folder (§3), which is structure, not a violation. |
-| S2 | Subfolders MUST NOT nest inside each other, with one exception: a folder holding media may hold its subjects' sidecar folders, `__EXIF`, `__PREVIEWS` and `__OCR` (X10–X15). So `__RAW\__EXIF\` is legal and `__RAW\__EDITED\` is not. |
+| S2 | Subfolders MUST NOT nest inside each other, with one exception: a folder holding media may hold its subjects' sidecar folders, `__EXIF`, `__PREVIEWS`, `__OCR` and `__VIDEOS_EXTRACTED` (X10–X16). So `__RAW\__EXIF\` is legal and `__RAW\__EDITED\` is not. |
 | S3 | Folders marked *hand* are recognised and preserved but MUST NEVER be populated automatically. |
 | S4 | A tool MUST read these names from §8, not restate them as literals. |
 | S5 | **No video folder in the ordinary case.** A datable video is a representative at the top level (V1). `__VIDEOS` and `__EXTRACTED_VIDEOS` were an earlier arrangement: they are **read** — recognised case-insensitively as taxonomy folders so an existing Windows archive is not reported as malformed and its companions can still be reunited — and **never written**, the same read-old/write-new rule N5 applies to timestamps. The restructure migration drains `__VIDEOS` per V12; `__EXTRACTED_VIDEOS` remains only recognised. |
@@ -764,6 +764,9 @@ wherever that file has ended up. X10–X13 spell out what follows from that.
 | X13 | `__PREVIEWS` follows X10–X12 exactly: previews sit beside their subject's `__EXIF`, one level below the subject (`__VIDEOS_TO_RENAME\__PREVIEWS\`). |
 | X14 | After X1/X1a reconciliation, a restructuring run MUST generate a sidecar for every RAW still lacking one, using the RAW's own metadata through the configured ExifTool. It writes the canonical X1 name and places it per X10. Generation obeys T2/T3: dry run reports it, and an existing destination is never overwritten. A RAW ExifTool cannot read is left unchanged and reported. |
 | X15 | **Recognised text is a sidecar** and lives in **`__OCR`**, by X10's rule exactly — one level below its subject, in the folder that holds it. It follows X1 (`shot.png.OCR.txt`), travels with its subject (X5), and counts into `s`, never into `i`/`v` or `e`. It is not filed in `__EXIF`: that folder holds what a *camera* recorded, where OCR text is a later reading of the picture, regenerable and revisable as engines improve. Keeping the two apart means a stale `__OCR` can be discarded wholesale without touching a single piece of capture metadata. |
+| X16 | **A video extracted from a motion photo is a companion of the still** and lives in **`__VIDEOS_EXTRACTED`**, by X10's rule exactly — one level below its subject, in the folder that holds it. It follows X1 with a compound suffix, `shot.jpg.MOTION.mp4`, for X6a's reason: `.mp4` alone would make it media. It travels with its still (X5), counts into `s`, never into `i`/`v` or `e`, is never a representative, and carries no `._exif` of its own — what the camera recorded about the moment is the still's sidecar. |
+| X16a | **A still carrying an embedded video MUST have its extraction.** The embedded copy is left where the phone put it: the still is never rewritten, and extraction only adds a file, never over one already there (T2). A dry run reports each still missing one; `--apply` extracts it. |
+| X16b | **Presence is read from the file, never from its sidecar** (F9a-i's reason): a `._exif` written by an older ExifTool may not know the tag. Samsung's `EmbeddedVideoFile` is extracted first — it is the bare MP4 — then Google's `MotionPhotoVideo`, then, for the older Google `MicroVideo` format, the bytes its `MicroVideoOffset` points at, and only when they open as an MP4. An extraction that does not open as an MP4 is kept (T1) and reported. |
 
 **X10 reaches further than videos — universal, and applied.** The rule governs
 `__RAW` too: a RAW original lives in `__RAW`, so its sidecar is in
@@ -814,6 +817,16 @@ uses their X10 location to distinguish a same-stem JPEG from its RAW, and
 renames the sidecar onto X1. The reconciliation passes in
 `tools/restructure_archive.py` then generate any genuinely missing RAW
 sidecars through ExifTool and place them in the RAW folder's own `__EXIF`.
+
+**Motion-photo extraction (X16) — v1.5, implemented.** `embedded_videos.py`
+finds and extracts, and two callers run it: the `embedded-video-extraction`
+pipeline stage, right after folder sorting has given each still its final name
+and place, and pass 7 of reconciliation in `tools/restructure_archive.py`,
+after placement has brought any stranded extraction home. Step 7 reports a
+still that is missing one as X16. The travelling needs nothing new:
+`__VIDEOS_EXTRACTED` is one more companion kind, so `reconcile_folder` and
+`place_companions` carry the extraction after its still, and step 8's renames
+carry every companion kind, not only `._exif`.
 
 **`__OCR` and generated previews — v0.13, migration in Screenshot Grouper.**
 X6a and X15 were added for the tool that actually writes these files: the
@@ -997,7 +1010,7 @@ against a single path component.
 
 ```yaml
 standard: photo-archive
-version: 1.4
+version: 1.5
 status: settled
 
 path:
@@ -1194,7 +1207,7 @@ subfolders:
   year_level_allowed: ["__DUPLICATES", "__LOGS"]   # S7/P6 - collision losers; run journals (0.3)
   year_level_migrates_to_event_level: false   # S7 - the two answer different questions
   may_nest: false
-  may_nest_exception: ["__EXIF", "__PREVIEWS", "__OCR"]   # S2 / X11: sidecar folders, one level
+  may_nest_exception: ["__EXIF", "__PREVIEWS", "__OCR", "__VIDEOS_EXTRACTED"]   # S2 / X11: sidecar folders, one level
   tool_written:
     - "__DUPLICATES"
     - "__EDITED"
@@ -1347,6 +1360,20 @@ sidecars:
     counts_as: s                      # never i/v, never e
     may_be_representative: false
     separate_from_exif: true          # __EXIF is what a camera recorded
+  extracted_videos:                   # X16
+    subfolder: "__VIDEOS_EXTRACTED"
+    extensions: [".MOTION.mp4"]
+    naming: "<full media filename><extracted video extension>"
+    match_by: longest_trailing_extension       # X6a: ".mp4" alone would read as media
+    counts_as: s                      # never i/v, never e
+    may_be_representative: false
+    own_sidecar: false                # the still's ._exif describes the moment
+    required_when: still_carries_embedded_video   # X16a
+    source_rewritten: false           # the embedded copy stays in the still
+    presence_read_from: media_file_not_sidecar    # X16b
+    tags_in_order: ["EmbeddedVideoFile", "MotionPhotoVideo", "MicroVideoOffset"]
+    overwrite: false
+    dry_run_reports_only: true
   orphaned:                           # X4 - the subject is nowhere in the archive
     action: park_in_orphans           # H9; see parking_areas.orphans
     delete: never                     # X3 - the last record that it existed
@@ -1366,6 +1393,7 @@ extensions:
   videos:       [".mp4", ".mov", ".avi"]
   previews:     [".THM.jpg", ".PREVIEW.jpg", ".thm", ".lrv"]   # sidecars, not media — X6/X6a
   ocr:          [".OCR.txt"]          # sidecars, not media — X15
+  extracted_videos: [".MOTION.mp4"]   # companions, not media — X16
   geodata:      [".gpx"]
 
 tool_obligations:
@@ -1405,6 +1433,30 @@ decision that was still pending. A rule that turns out to be wrong is amended in
 the open, with the reasoning kept the way the *Settled* notes in §0.1 and §4
 keep theirs: a rule whose argument has been deleted is one that gets re-argued
 from scratch in a year.
+
+### v1.5 — a motion photo's video is extracted
+
+One new rule, X16, and `__VIDEOS_EXTRACTED` moved from reserved to written.
+
+A motion photo keeps a few seconds of video inside the still, after the JPEG's
+end-of-image marker, where nothing but the phone's own gallery plays it back.
+Left there, the clip is as good as lost. It is now lifted out, and filed as
+a **companion** of the still rather than as a video in its own right: named
+after the still (X1), sitting one level below
+it (X10), never counted as media. That is what makes an extraction travel when
+its still is regrouped, renamed or moved into `__RESIZED` — the engine that
+already carries sidecars, previews and OCR text carries it too — and what keeps
+it from being offered as a second representative of the same moment.
+
+Why not the top level, as V1 does for a video: V1's video *is* the shot. An
+extracted motion clip is part of a shot whose representative is the still,
+and two representatives for one moment is exactly what F5 exists to prevent.
+
+`__EXTRACTED_VIDEOS` stays what S5 made it — read, never written. The name the
+standard reserved is the one written.
+
+The migration is pass 7 of reconciliation: every existing motion photo has its
+video extracted under `--apply`. Nothing already on disk is renamed.
 
 ### v1.4 — a group's start follows its earliest day
 

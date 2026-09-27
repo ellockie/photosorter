@@ -708,6 +708,25 @@ def test_f9c_strips_a_sub_second_from_a_shot_with_no_sibling(tmp_path, config):
     assert run(str(root), "--steps", "7") == 0
 
 
+def test_a_rename_carries_every_companion_kind_not_only_the_sidecar(tmp_path, config):
+    """X5: the preview, the OCR text and the extracted motion clip are named
+    after the shot too, and a rename that left them behind would orphan them."""
+    root = make_archive(tmp_path)
+    event = root / "2026" / "07. July" / "2026-07-15_(Wed)__12.00.00 - Roldal"
+    write(event / FRACTIONED, b"the only shot in that second")
+    write(event / "__EXIF" / (FRACTIONED + "._exif"), sized_sidecar(4000, 3000, "633"))
+    write(event / "__PREVIEWS" / (FRACTIONED + ".THM.jpg"), b"thumb")
+    write(event / "__OCR" / (FRACTIONED + ".OCR.txt"), b"text")
+    write(event / "__VIDEOS_EXTRACTED" / (FRACTIONED + ".MOTION.mp4"), b"clip")
+
+    assert run(str(root), "--steps", "8", "--apply", "--yes") == 0
+
+    assert (event / "__PREVIEWS" / (BASE + ".THM.jpg")).read_bytes() == b"thumb"
+    assert (event / "__OCR" / (BASE + ".OCR.txt")).read_bytes() == b"text"
+    assert (event / "__VIDEOS_EXTRACTED" / (BASE + ".MOTION.mp4")).read_bytes() == b"clip"
+    assert not (event / "__VIDEOS_EXTRACTED" / (FRACTIONED + ".MOTION.mp4")).exists()
+
+
 def test_f9c_keeps_the_fraction_where_a_sibling_shares_the_second(tmp_path, config):
     """Two in the second: both fractions stay, and the scan is clean."""
     root = make_archive(tmp_path)

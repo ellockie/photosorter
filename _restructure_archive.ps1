@@ -1,14 +1,21 @@
 <#
 .SYNOPSIS
-Restructure an existing photo archive: canonicalise names, group every
-"__TO_SPLIT__" folder in the GUI, canonicalise again, then check and fix
-compliance with ARCHIVE_STANDARD.md (those last two not implemented yet -
-the standard is still a v0.1 draft).
+Restructure an existing photo archive: canonicalise names, reunite companions,
+group every "__TO_SPLIT__" folder in the GUI, canonicalise again, mark the
+groups, then check and fix compliance with ARCHIVE_STANDARD.md.
 
 .DESCRIPTION
 The PowerShell twin of _restructure_archive.bat. Same tool, same arguments,
 same exit codes - every switch is passed straight through to
 tools\restructure_archive.py, so its --help is the reference.
+
+Motion photos (ARCHIVE_STANDARD.md X16) are validated on every run: steps 2
+and 4 list each still whose embedded video has not been extracted into the
+"__VIDEOS_EXTRACTED" beside it, and extract it under --apply; step 7 reports
+any still missing one as X16. The still itself is never rewritten.
+
+    .\_restructure_archive.ps1 --steps 7            # validate only
+    .\_restructure_archive.ps1 --steps 2 --apply    # extract what is missing
 
 Nothing is changed without --apply. With no arguments this is a dry run over
 the configured archive root's current year. "--year ALL" runs every year the

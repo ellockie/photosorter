@@ -64,6 +64,10 @@ class Inspection:
         self.images, self.videos = self.grouping.extension_sets(self.config)
         self.issues = []
         self.events = []
+        # Stills that could carry an embedded video, gathered on the walk and
+        # asked about together at the end (X16): one ExifTool run, not one per
+        # file.
+        self.carriers = []
         # Reading a fraction now costs an ExifTool launch (see ``subsecond``),
         # and one scan asks the same file several times: once when the pair is
         # found, once per candidate partner, and again when the repair is
@@ -161,7 +165,25 @@ class Inspection:
             wanted = leaf_target(self, folder, files)
             if wanted != folder:
                 self.issue("N3/N10", folder, "expected name: " + wanted.name)
+        self.unextracted_videos()
         return self
+
+    def unextracted_videos(self):
+        """X16: a motion photo with no extraction beside it is reported.
+
+        Read from the files themselves (sniffed, then confirmed by ExifTool),
+        never from their sidecars. Step 2 extracts what this finds under
+        ``--apply``, so a clean applied run reports none.
+        """
+        videos = self.tool.embedded_videos
+        if not self.carriers or not videos.extraction_enabled(self.config):
+            return
+        pending = videos.find_pending(
+            self.carriers, self.config,
+            self.tool.exif_sidecars.exiftool_command(self.config, self.tool.REPO_ROOT))
+        folder = self.taxonomy.taxonomy_folder(self.config, videos.EXTRACTED_VIDEOS_KEY)
+        for path in pending.pending:
+            self.issue("X16", path, "embedded video not extracted into " + folder)
 
     def structure(self, folder, kind, tree):
         dirs, files = self.entries(folder)
@@ -268,6 +290,8 @@ class Inspection:
             if top:
                 self.issue("F7", path, "non-representative file at event top level")
             return
+        if self.tool.embedded_videos.is_carrier(path, self.config):
+            self.carriers.append(path)
         tagged = path.name.startswith(self.tool.legacy_videos.TO_RENAME_PREFIX)
         waiting = path.parent.name.casefold() == self.taxonomy.taxonomy_folder(self.config, "videos_to_rename").casefold()
         if tagged or waiting:
@@ -501,6 +525,27 @@ def mismarked_low_res(inspection, path):
     return partner
 
 
+def companion_moves(inspection, media, target):
+    """X5: every companion of ``media`` follows it to ``target``, renamed per X1.
+
+    Every kind, not just ``._exif``: a preview, an OCR text and an extracted
+    motion-photo video (X16) are named after their subject just as a sidecar
+    is, and a rename that left them behind would orphan each of them. Each
+    goes to its own folder directly inside the one ``target`` lands in (X10).
+    """
+    moves = []
+    spellings = inspection.grouping.companion_extension_spellings(inspection.config)
+    for key, extensions in inspection.kinds:
+        source = inspection.taxonomy.sidecar_subdir(media.parent, inspection.config, key)
+        destination = inspection.taxonomy.sidecar_subdir(target.parent, inspection.config, key)
+        for extension in sorted(extensions):
+            spelled = spellings.get(extension, extension)
+            companion = source / (media.name + spelled)
+            if companion.is_file():
+                moves.append((companion, destination / (target.name + spelled)))
+    return moves
+
+
 def low_res_repair_plan(inspection, path):
     """Rename a false ``_LOWRES`` to what it actually is (F10).
 
@@ -518,12 +563,7 @@ def low_res_repair_plan(inspection, path):
     if wanted == path.name:
         return []
     moves = [(path, path.parent / wanted)]
-    exif_folder = inspection.taxonomy.sidecar_subdir(path.parent, inspection.config)
-    for extension in inspection.grouping.configured_extensions(
-            inspection.config, "sidecars", inspection.grouping.DEFAULT_SIDECAR_EXTENSIONS):
-        sidecar = exif_folder / (path.name + extension)
-        if sidecar.is_file():
-            moves.append((sidecar, exif_folder / (wanted + extension)))
+    moves.extend(companion_moves(inspection, path, path.parent / wanted))
     return moves
 
 
@@ -533,15 +573,9 @@ def resized_repair_plan(inspection, path):
         return []
     resized = inspection.taxonomy.taxonomy_subdir(path.parent, inspection.config, "resized")
     moves = [(path, resized / path.name)]
-    exif_folder = inspection.taxonomy.sidecar_subdir(path.parent, inspection.config)
-    resized_exif = inspection.taxonomy.sidecar_subdir(resized, inspection.config)
-    for extension in inspection.grouping.configured_extensions(
-            inspection.config, "sidecars", inspection.grouping.DEFAULT_SIDECAR_EXTENSIONS):
-        sidecar = exif_folder / (path.name + extension)
-        if sidecar.is_file():
-            # X10: a sidecar sits in the __EXIF of the folder holding its
-            # subject, so it moves into __RESIZED\__EXIF with it.
-            moves.append((sidecar, resized_exif / (path.name + extension)))
+    # X10: a companion sits one level below the folder holding its subject,
+    # so a sidecar moves into __RESIZED\__EXIF with it.
+    moves.extend(companion_moves(inspection, path, resized / path.name))
     return moves
 
 
@@ -553,12 +587,7 @@ def lone_fraction_repair_plan(inspection, path):
     if wanted == path.name or (path.parent / wanted).exists():
         return []
     moves = [(path, path.parent / wanted)]
-    exif_folder = inspection.taxonomy.sidecar_subdir(path.parent, inspection.config)
-    for extension in inspection.grouping.configured_extensions(
-            inspection.config, "sidecars", inspection.grouping.DEFAULT_SIDECAR_EXTENSIONS):
-        sidecar = exif_folder / (path.name + extension)
-        if sidecar.is_file():
-            moves.append((sidecar, exif_folder / (wanted + extension)))
+    moves.extend(companion_moves(inspection, path, path.parent / wanted))
     return moves
 
 
@@ -587,13 +616,7 @@ def sibling_repair_plan(inspection, path):
         if wanted == media.name and home == media.parent:
             continue
         moves.append((media, home / wanted))
-        exif_folder = inspection.taxonomy.sidecar_subdir(media.parent, inspection.config)
-        wanted_exif = inspection.taxonomy.sidecar_subdir(home, inspection.config)
-        for extension in inspection.grouping.configured_extensions(
-                inspection.config, "sidecars", inspection.grouping.DEFAULT_SIDECAR_EXTENSIONS):
-            sidecar = exif_folder / (media.name + extension)
-            if sidecar.is_file():
-                moves.append((sidecar, wanted_exif / (wanted + extension)))
+        moves.extend(companion_moves(inspection, media, home / wanted))
     return moves
 
 
