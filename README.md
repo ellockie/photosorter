@@ -266,16 +266,16 @@ and previews follow; the verified-empty legacy folder is parked under the
 month's `__EMPTY_SUBFOLDERS` (V12/L4).
 
 **Groups (§3) are written.** A dated folder holding dated child folders carries
-`__GROUP[ ... ]` directly after its start stamp, with its description in the
+`___GROUP_[ ... ]` joined straight onto its start stamp, with its description in the
 brackets, and states the whole span it covers -- the start stamp opening the
-name and ` ___` and the end closing it, in front of `_(n=N)` -- the count of
+name and `___` and the end closing it, in front of `_(n=N)` -- the count of
 nested dated folders, divided off the end stamp so the bracket does not read as
 part of the time. The end says all of the date or none of it: the time alone when the
 span closes the day it opened, and the whole canonical stamp when it crosses a
 day.
 
-    2026-08-20_(Thu)__09.14.02 __GROUP[ Norway ] ___2026-08-27_(Thu)__18.31.50_(n=7)
-    2026-08-14_(Fri)__13.40.23 __GROUP[ Kajaki z Marco ] ___17.47.04_(n=3)
+    2026-08-20_(Thu)__09.14.02___GROUP_[ Norway ]___2026-08-27_(Thu)__18.31.50_(n=7)
+    2026-08-14_(Fri)__13.40.23___GROUP_[ Kajaki z Marco ]___17.47.04_(n=3)
 
 Both stamps and the `n` count are the tool's, rebuilt from the subtree on every
 run; the description in the brackets is the only part a person owns -- and a
@@ -289,7 +289,8 @@ a prompt — and not of step 6. A group may hold one `__GEOLOCATIONS` (C3a), for
 track spanning more days than any single child, and that is the only taxonomy
 subfolder it may hold.
 
-Every earlier spelling is read and none is written again (C15a): the span welded
+Every earlier spelling is read and none is written again (C15a, C15b): v1.2's
+` __GROUP[ ... ] ___<end>` with a space before the marker and the end, the span welded
 to the start stamp with a `#`, the `____GROUP____` marker opening a ` - ` tail
 with the description after it, `(d=N)` for the count, and the `__CONTAINER__` of
 v0.8 that no tool ever wrote. The migration to the current shape is the rename

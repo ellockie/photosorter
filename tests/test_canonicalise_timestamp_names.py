@@ -619,7 +619,7 @@ def test_a_stray_from_another_year_is_reported_and_renames_nothing(tmp_path,
 @pytest.mark.parametrize("name", [
     # v1.1: the start stamp is now an ordinary dated prefix, so nothing about
     # its shape stops this pass retiming it. The marker does.
-    "2026-07-20_(Mon)__08.00.00 __GROUP[ Norway ] ___2026-07-21_(Tue)__20.00.00_(n=1)",
+    "2026-07-20_(Mon)__08.00.00___GROUP_[ Norway ]___2026-07-21_(Tue)__20.00.00_(n=1)",
     # Pre-v1.1, with the span welded to the prefix.
     "2026-07-20_(Mon)__08.00.00#21__20.00.00 - ____GROUP____(d=1) - Norway",
 ])

@@ -167,22 +167,25 @@ def apply_subsecond(name: str, subsecond: str | int | None) -> str:
 # Up to v1.0 the end was welded to the start -- "…__09.31.29#2026-08-20…" --
 # which put the longest, most machine-looking half of the name where a reader's
 # eye lands first and pushed the one word a person cares about, the
-# description, off the end of the column. Since v1.1 the end closes the name
-# instead, opened by " ___":
+# description, off the end of the column. Since v1.2 the end closes the name
+# instead, opened by "___":
 #
-#   2026-08-14_(Fri)__09.31.29 __GROUP[ Polska ] ___2026-08-20_(Thu)__11.06.58_(n=31)
+#   2026-08-14_(Fri)__09.31.29___GROUP_[ Polska ]___2026-08-20_(Thu)__11.06.58_(n=31)
 #
-# Three underscores, one more than the marker's two, so the two separators
-# cannot be misread for each other and the end is still visibly machinery. The
-# "#" opener is read forever and never written again (N5, C15a).
-RANGE_END_SEPARATOR = " ___"
+# Three underscores, the same run that opens the marker, and one more than a
+# stamp ever uses between its own parts -- so the joins between the name's
+# parts cannot be misread for a stamp's, and the end is still visibly
+# machinery. The "#" opener, and v1.2's " ___" with a space in front, are read
+# forever and never written again (N5, C15a, C15b).
+RANGE_END_SEPARATOR = "___"
+LEGACY_SPACED_RANGE_END_SEPARATOR = " ___"
 LEGACY_RANGE_END_SEPARATOR = "#"
 
 # The end itself. Two shapes, and which one is written is decided by one
 # question -- does the span cross a day?
 #
-#   " ___17.47.04"                    ends the day it starts: the time alone
-#   " ___2026-08-16_(Sun)__19.02.44"  ends on another day: the whole canonical stamp
+#   "___17.47.04"                    ends the day it starts: the time alone
+#   "___2026-08-16_(Sun)__19.02.44"  ends on another day: the whole canonical stamp
 #
 # Either nothing about the date or all of it. A same-day group repeating its
 # own date said nothing the start had not already said, and a cross-day one
@@ -212,17 +215,20 @@ _RANGE_END_BODY_PATTERN = (
     rf"(?:{DATE_TIME_SEPARATOR_PATTERN}({TIME_PATTERN}))?)"
 )
 RANGE_END_PATTERN = (
-    rf"(?:{re.escape(RANGE_END_SEPARATOR)}|{LEGACY_RANGE_END_SEPARATOR})"
+    rf"(?:{re.escape(LEGACY_SPACED_RANGE_END_SEPARATOR)}"
+    rf"|{re.escape(RANGE_END_SEPARATOR)}|{LEGACY_RANGE_END_SEPARATOR})"
     rf"{_RANGE_END_BODY_PATTERN}"
 )
 # Welded to the prefix: the pre-v1.1 position, read and never written.
 _PREFIX_RANGE_END_PATTERN = (
     rf"{LEGACY_RANGE_END_SEPARATOR}{_RANGE_END_BODY_PATTERN}")
-# Closing the name: the v1.1 position. The bracket that may follow it is
+# Closing the name: the v1.2 position. The bracket that may follow it is
 # ``grouping_names``' grammar, not this module's, so it is matched loosely --
 # all that is needed here is to know the end is still the last thing but one.
+# The spaced opener is tried first so a v1.2 end is returned with its space.
 _CLOSING_RANGE_END_RE = re.compile(
-    rf"({re.escape(RANGE_END_SEPARATOR)}{_RANGE_END_BODY_PATTERN})"
+    rf"((?:{re.escape(LEGACY_SPACED_RANGE_END_SEPARATOR)}"
+    rf"|{re.escape(RANGE_END_SEPARATOR)}){_RANGE_END_BODY_PATTERN})"
     r"(?:_?\([A-Za-z]+=\d+\))?$")
 
 # A dated folder's whole prefix: the date, the decorative weekday, the canonical
@@ -315,7 +321,8 @@ def format_range_end(start_date: str, end: datetime.datetime) -> str:
     canonical stamp when it does not -- literally ``format_stamp``, so the two
     ends of a span are written in one grammar and a reader meets the same shape
     at both ends of the name. Always opened by ``RANGE_END_SEPARATOR``; the
-    ``#`` of the older convention is read and never written again.
+    ``#`` and the spaced ``" ___"`` of the older conventions are read and never
+    written again.
     """
     if f"{end:%Y-%m-%d}" == start_date:
         return f"{RANGE_END_SEPARATOR}{end:%H.%M.%S}"

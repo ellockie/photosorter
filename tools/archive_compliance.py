@@ -645,7 +645,7 @@ def repair_siblings(inspection, failures):
         return
 
     for _path, moves, rule, headline in plans:
-        run.report("warn", "%s %s:\n%s" % (rule, headline, sibling_move_details(moves)))
+        run.report("warn", "%s %s:\n%s" % (rule, headline, inspection.tool.move_pairs(moves)))
     if not run.apply:
         return
     if not run.confirm(sibling_confirmation(inspection, plans)):
@@ -723,11 +723,6 @@ def refresh_stale_sidecars(inspection, completed, failures):
                           sidecar=str(target), subject=str(subject))
 
 
-def sibling_move_details(moves):
-    return "\n".join("    %s\n      -> %s" % (source, target)
-                     for source, target in moves)
-
-
 def sibling_confirmation(inspection, plans):
     """The single question the whole run's collision-name repairs are approved by."""
     files = sum(len(moves) for _, moves, _, _ in plans)
@@ -737,8 +732,8 @@ def sibling_confirmation(inspection, plans):
         counts[(rule, headline)] = counts.get((rule, headline), 0) + 1
     summary = "\n".join("    %-7s %d x %s" % (rule, count, headline)
                         for (rule, headline), count in sorted(counts.items()))
-    listed = "\n".join(
-        "    %s\n      -> %s" % (moves[0][0].name, moves[0][1].name)
+    listed = inspection.tool.move_pairs(
+        (moves[0][0].name, moves[0][1].name)
         for _path, moves, _rule, _headline in plans[:SIBLING_PROMPT_ITEMS])
     if len(plans) > SIBLING_PROMPT_ITEMS:
         listed += "\n    ... and %d more, each listed in full above." % (
@@ -838,11 +833,12 @@ def repair_misplaced_folders(inspection, failures):
         return
 
     for folder, destination, _tree in plans:
-        run.report("warn", "P5 %s\n    -> %s" % (folder, destination))
+        run.report("warn", "P5\n" + inspection.tool.move_pair(folder, destination))
     if not run.apply:
         return
-    listed = "\n".join("    %s\n      -> %s" % (folder, destination)
-                       for folder, destination, _tree in plans[:SIBLING_PROMPT_ITEMS])
+    listed = inspection.tool.move_pairs(
+        (folder, destination)
+        for folder, destination, _tree in plans[:SIBLING_PROMPT_ITEMS])
     if len(plans) > SIBLING_PROMPT_ITEMS:
         listed += "\n    ... and %d more, each listed in full above." % (
             len(plans) - SIBLING_PROMPT_ITEMS)
@@ -975,7 +971,7 @@ def fix(tool, run):
                 raise ValueError("T4 cannot migrate an incompletely inspected group: %s" % folder)
             moves = loose_media_plan(inspection, folder)
             if moves:
-                details = "\n".join("    %s\n      -> %s" % move for move in moves)
+                details = tool.move_pairs(moves)
                 run.report("warn", "C4 gather loose media from %s:\n%s" % (folder, details))
                 if run.apply and run.confirm("C4 move this group's files to the children shown above?\n%s" % details):
                     completed = []
@@ -994,8 +990,8 @@ def fix(tool, run):
             if folder.parent.name in inspection.months.values():
                 destination = tree.parent / str(day.year) / inspection.months[day.strftime("%m")] / folder.name
                 if tool.path_key(destination) != tool.path_key(folder):
-                    run.report("warn", "C12 %s\n    -> %s" % (folder, destination))
-                    if run.apply and run.confirm("C12 move this group?\n%s\n  -> %s" % (folder, destination)):
+                    run.report("warn", "C12\n" + tool.move_pair(folder, destination))
+                    if run.apply and run.confirm("C12 move this group?\n" + tool.move_pair(folder, destination)):
                         checked_move(inspection, folder, destination, "C12")
                         destination_tree = tree.parent / str(day.year)
                         if destination_tree not in run.trees:
@@ -1017,7 +1013,7 @@ def fix(tool, run):
             _, files = current.entries(folder)
             target = leaf_target(current, folder, files)
             if target != folder:
-                run.report("warn", "N3/N10 %s\n    -> %s" % (folder, target))
+                run.report("warn", "N3/N10\n" + current.tool.move_pair(folder, target))
                 if run.apply:
                     checked_move(current, folder, target, "N3/N10")
         except (OSError, ValueError) as error:
@@ -1050,7 +1046,7 @@ def repair_companions(inspection, failures):
     if any(rule == "T4" for rule, _, _ in inspection.issues):
         return
     def move(source, target):
-        run.report("warn", "X10 %s\n    -> %s" % (source, target))
+        run.report("warn", "X10\n" + tool.move_pair(source, target))
         if run.apply:
             checked_move(inspection, source, target, "X10")
         return Path(target)
@@ -1144,7 +1140,7 @@ def resolve_videos(inspection, failures):
             if captured.tzinfo is not None or captured.microsecond or value != captured.isoformat(timespec="seconds"):
                 raise ValueError("V11 requires a complete local capture time: YYYY-MM-DDTHH:MM:SS")
             moves = video_plan(inspection, video, captured)
-            details = "\n".join("    %s\n      -> %s" % move for move in moves)
+            details = tool.move_pairs(moves)
             run.report("warn", "V11 resolve video:\n" + details)
             if not run.apply or not run.confirm("V11 apply this capture-time decision and companion moves?\n" + details):
                 continue

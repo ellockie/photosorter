@@ -124,7 +124,7 @@ def test_c12_moves_group_to_month_of_stated_start(tmp_path, config):
     # No glob for the name: "[" is a character class to fnmatch, and a
     # group's description sits in brackets.
     assert [path.name for path in (root / "2026" / "07. July").iterdir()
-            if "__GROUP[ Trip ]" in path.name]
+            if "___GROUP_[ Trip ]" in path.name]
     assert run(str(root), "--steps", "7") == 0
 
 
@@ -671,7 +671,7 @@ def test_s7_a_group_never_holds_the_parking_folder(tmp_path, config):
     """C3: a group holds no files, so the walk climbs past it to the leaf."""
     root = make_archive(tmp_path)
     group = (root / "2026" / "07. July"
-             / "2026-07-15_(Wed)__08.00.00 __GROUP[ Roldal ] ___12.00.00_(n=2)")
+             / "2026-07-15_(Wed)__08.00.00___GROUP_[ Roldal ]___12.00.00_(n=2)")
     event = group / "2026-07-15_(Wed)__12.00.00 - Roldal"
     write(event / BASE, b"photo")
 

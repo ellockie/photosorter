@@ -123,7 +123,7 @@ the audit markers from what is finally on disk.
 What step 6 does
 ----------------
 Section 3 of the standard: a dated folder holding dated child folders is a
-*group*, it says so after its start stamp -- "__GROUP[ Polska ]" -- and the
+*group*, it says so after its start stamp -- "___GROUP_[ Polska ]" -- and the
 name states both ends of the span it covers, the start stamp opening it and
 " ___end" closing it, each read off the subtree. A folder that stopped holding
 dated children loses the marker and the span again. It runs after step 5 because the grouper (step 3) creates and
@@ -707,6 +707,33 @@ COLOUR_OFF = "\033[0m"
 # speaker, and which therefore survive being spoken by this tool.
 MEANS_SOMETHING = ("ok", "warn", FAILED)
 
+# A move reports as two lines carrying the canonicaliser's prefixes (T8), which
+# are of equal width: the source and the target path start in one column, so
+# the eye runs straight down to the character where they part. ``speak`` knows
+# the target line by its prefix and gives it the same hue one step darker --
+# different enough to tell which line is which, close enough that the pair
+# still reads as one thing said.
+MOVE_FROM_PREFIX = canonicalise.RENAME_FROM_PREFIX
+MOVE_TO_PREFIX = canonicalise.RENAME_TO_PREFIX
+
+
+def move_pair(source, target):
+    """One move as two column-aligned lines: where it is, where it goes."""
+    return "%s%s\n%s%s" % (MOVE_FROM_PREFIX, source, MOVE_TO_PREFIX, target)
+
+
+def move_pairs(moves):
+    """``[(source, target)]`` as consecutive ``move_pair`` blocks."""
+    return "\n".join(move_pair(source, target) for source, target in moves)
+
+
+def target_shade(escape):
+    """The same colour, one step darker: bright yellow -> yellow, and so on.
+
+    Only the foreground number changes; bold or faint stays as it was.
+    """
+    return re.sub(r"(?<=[\[;])9([0-7])(?=[;m])", r"3\1", escape)
+
 
 def speak(message, key, colour):
     """Render one of this tool's own lines: tagged, and cyan unless it means
@@ -721,10 +748,15 @@ def speak(message, key, colour):
         if not text.strip():
             lines.append("")
             continue
-        if key in MEANS_SOMETHING:
-            body = colourise(text, key, colour)
-        elif colour:
-            body = SPEAKER_EMPHASIS.get(key, SPEAKER_COLOUR) + text + COLOUR_OFF
+        if colour:
+            shade = (
+                canonicalise.COLOURS.get(key, "")
+                if key in MEANS_SOMETHING
+                else SPEAKER_EMPHASIS.get(key, SPEAKER_COLOUR)
+            )
+            if text.startswith(MOVE_TO_PREFIX):
+                shade = target_shade(shade)
+            body = shade + text + COLOUR_OFF
         else:
             body = text
         lines.append(
@@ -1992,7 +2024,7 @@ def park_empty_dated_folders(run):
         target = parking.free_versioned_name(area, folder.name, reserved)
         if not run.apply:
             planned.append((folder, target))
-            run.report("dim", "  %s -> %s" % (folder, target))
+            run.report("dim", move_pair(folder, target))
             continue
         try:
             move(folder, target)
@@ -2240,7 +2272,7 @@ def step_reconcile(run, label):
 
     if not run.apply:
         for source, target in run.planned:
-            run.report("dim", "    %s\n    ->  %s" % (source, target))
+            run.report("dim", move_pair(source, target))
 
     if migration.seen:
         run.report("bold", "\nLegacy containers: %s" % migration.summary())
@@ -2385,7 +2417,7 @@ def step_reconcile(run, label):
 # Step 6 -- mark and time the groups
 # --------------------------------------------------------------------------
 #
-# Section 3: a dated folder holding dated children carries "__GROUP[ ... ]"
+# Section 3: a dated folder holding dated children carries "___GROUP_[ ... ]"
 # after its start stamp (C1), one that holds none carries no marker (C2), and a
 # group states both ends of its span -- the start opening the name and the end
 # closing it (C6) -- both read off the subtree and rewritten whenever it
@@ -2542,7 +2574,7 @@ def description_for_group(folder, children, config):
          its children agree on one or somebody types one in.
 
     The alternative to (3) is the bare marker this step used to leave --
-    ``__GROUP[]`` and nothing in it -- which says the same thing by saying
+    ``___GROUP_[]`` and nothing in it -- which says the same thing by saying
     nothing, and reads in Explorer as a folder that is simply named that way. A
     group waiting for a name should look like it is waiting.
     """
@@ -2805,14 +2837,14 @@ def step_group_markers(run):
         % (groups, unmarked, len(renames)),
     )
     for source, target in renames:
-        run.report("dim", "  %s\n      -> %s" % (source, target.name))
+        run.report("dim", move_pair(source, target.name))
 
     if agreed:
         run.report(
             "ok", "\n%d group(s) named from what their children agree on:" % len(agreed)
         )
         for folder, description in agreed:
-            run.report("dim", "  %s\n      -> %s" % (folder.name, description))
+            run.report("dim", move_pair(folder.name, description))
     if awaiting:
         # Not a violation and not in ``non_compliant``: a group with no name is
         # a conforming group. This is the one thing in the step addressed to a

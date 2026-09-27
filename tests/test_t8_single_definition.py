@@ -105,6 +105,7 @@ PATTERN_PAIRS = [
     # ``stamps``' grammar, so the separator and the end's body are copied for
     # the same reason the stamp fragments are -- and held to the same rule.
     ("_RANGE_END_SEPARATOR", "RANGE_END_SEPARATOR"),
+    ("_LEGACY_SPACED_RANGE_END_SEPARATOR", "LEGACY_SPACED_RANGE_END_SEPARATOR"),
     ("_LEGACY_RANGE_END_SEPARATOR", "LEGACY_RANGE_END_SEPARATOR"),
     ("_RANGE_END_BODY_PATTERN", "_RANGE_END_BODY_PATTERN"),
 ]
@@ -128,7 +129,7 @@ def test_the_compiled_leading_stamp_regexes_are_equal():
     "2026-08-20_(Thu)__09.14.02 - Norway",
     "2026-08-20 (Thu) 09.14.02",
     "2026-08-20__09.14.02",
-    "2026-08-20_(Thu)__09.14.02 __GROUP[ Norway ] ___16.20.31_(n=3)",
+    "2026-08-20_(Thu)__09.14.02___GROUP_[ Norway ]___16.20.31_(n=3)",
     "2026-08-20_(Thu)__09.14.02#16.20.31 - ____GROUP____(d=3)",
     "not a folder",
     "08. August",

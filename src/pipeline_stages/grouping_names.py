@@ -41,7 +41,7 @@ carries either form.
 The other name this module owns is a **group**'s -- a dated folder holding
 dated children and no photographs of its own (section 3)::
 
-    2026-08-14_(Fri)__09.31.29 __GROUP[ Polska ] ___2026-08-20_(Thu)__11.06.58_(n=31)
+    2026-08-14_(Fri)__09.31.29___GROUP_[ Polska ]___2026-08-20_(Thu)__11.06.58_(n=31)
 
 The start stamp opens it, the description sits in padded brackets where a
 reader looks next, and the machinery that is rebuilt on every run -- the far
@@ -49,8 +49,10 @@ end of the span and the count of nested dated children -- closes it. Up to v1.0
 the same four things were written as
 ``...__09.31.29#2026-08-20_(Thu)__11.06.58 - ____GROUP____(d=31) - Polska``,
 which put the longest run of digits in the name first and the one word a person
-cares about last. Every earlier shape is still read and none is written again
-(N5, C15, C15a); ``split_group_name`` is where both are read and
+cares about last; v1.2 wrote the current shape with a space before the marker
+and before the end (" __GROUP[ Polska ] ___..."), which broke the name into
+fields a listing wraps between. Every earlier shape is still read and none is
+written again (N5, C15, C15a, C15b); ``split_group_name`` is where both are read and
 ``carries_legacy_group_marker`` is what says which one arrived.
 
 This lives in its own leaf module, importing nothing from the project, for the
@@ -82,12 +84,14 @@ TO_SPLIT_MARKER = "__TO_SPLIT__"
 TO_LABEL_MARKER = "__TO_LABEL__"
 
 # What a dated folder holding dated children carries, between its start stamp
-# and its description (C1). Two underscores, and nothing trailing: the bracket
-# that opens immediately after it closes the word, so the marker needs no
-# closing sigil of its own, and the pair "__GROUP[" is as unmistakable in a
-# month folder's listing as the four-underscore spelling it replaces was --
-# while leaving room for the description to sit where a reader looks first.
-GROUP_MARKER = "__GROUP"
+# and its description (C1). It opens with the same three underscores that open
+# the span end (C6): a group's name is three parts -- start, marker and
+# description, end -- joined the same way both times, by a run one longer than
+# anything a stamp uses inside itself. The trailing underscore divides the word
+# from the bracket, the way "_(n=N)" divides the count from the end. No space
+# anywhere in the machinery, so the whole name reads as one token in a listing
+# and only the description, padded inside its brackets, breathes.
+GROUP_MARKER = "___GROUP_"
 
 # The description sits in brackets, padded a space each side. The padding is
 # the point: a group's name is three machine-written parts and one human one,
@@ -95,9 +99,10 @@ GROUP_MARKER = "__GROUP"
 GROUP_DESCRIPTION_OPEN = "[ "
 GROUP_DESCRIPTION_CLOSE = " ]"
 
-# What stands between the start stamp and the marker. A plain space, so the
-# start stamp ends exactly where every other dated folder's does.
-GROUP_MARKER_SEPARATOR = " "
+# How v1.2 spelled the marker: a space off the start stamp, two underscores,
+# and the bracket straight after the word -- " __GROUP[". Read and converted;
+# never written (C15b).
+LEGACY_SPACED_GROUP_MARKER = " __GROUP"
 
 # What stands between the span end and the count. The end is a timestamp and
 # the count is not, and a bracket opening straight off the seconds reads as
@@ -230,9 +235,10 @@ _STAMP_CAPTURE_PATTERN = (
     r"(\d{2})\.(\d{2})\.(\d{2})"
 )
 # What opens a group's span end, and the end itself (C6). Written with the
-# first, read with either -- the "#" of the pre-v1.1 convention welded the end
-# to the start stamp; since v1.1 it closes the name.
-_RANGE_END_SEPARATOR = " ___"
+# first, read with any -- the "#" of the pre-v1.2 convention welded the end
+# to the start stamp; v1.2 opened it with a space in front (C15b).
+_RANGE_END_SEPARATOR = "___"
+_LEGACY_SPACED_RANGE_END_SEPARATOR = " ___"
 _LEGACY_RANGE_END_SEPARATOR = "#"
 _RANGE_END_BODY_PATTERN = (
     rf"(?:({_TIME_PATTERN})"
@@ -273,9 +279,9 @@ _EMPTY_BRACKET_RE = re.compile(
 
 # What a group is called, whole (C1, C6, C14, C16):
 #
-#   2026-08-14_(Fri)__09.31.29 __GROUP[ Polska ] ___2026-08-20_(Thu)__11.06.58_(n=31)
-#   \_____ start stamp _____/ \__ marker and __/ \____ span end ____/\_ count __/
-#                              \  description  /
+#   2026-08-14_(Fri)__09.31.29___GROUP_[ Polska ]___2026-08-20_(Thu)__11.06.58_(n=31)
+#   \_____ start stamp _____/\__ marker and ___/\_____ span end _____/\_ count _/
+#                             \  description  /
 #
 # Four parts, and only one of them is a person's. The start stamp opens the
 # name so alphabetical order stays chronological (C10); the description sits
@@ -288,12 +294,18 @@ _EMPTY_BRACKET_RE = re.compile(
 # one always -- but a name a person typed by hand is still a group, and
 # refusing to recognise it would leave the one folder that most needs
 # correcting invisible to the pass that corrects it.
+#
+# The v1.2 spelling -- " __GROUP[ Polska ] ___<end>" -- is the same four parts
+# with a space before each opener, so it is read by the same pattern and
+# reported through the ``marker`` and ``range_end`` groups (C15b). The spaced
+# end opener is tried before the bare one, so a v1.2 end keeps its space.
 _GROUP_NAME_RE = re.compile(
-    r"^(?P<base>.*?)%s%s%s(?P<description>.*?)%s"
-    r"(?P<range_end>(?:%s|%s)%s)?"
+    r"^(?P<base>.*?)(?P<marker>%s|%s)%s(?P<description>.*?)%s"
+    r"(?P<range_end>(?:%s|%s|%s)%s)?"
     r"(?:%s?\((?P<counts>[%s]=\d+)\))?$"
-    % (re.escape(GROUP_MARKER_SEPARATOR), re.escape(GROUP_MARKER),
+    % (re.escape(GROUP_MARKER), re.escape(LEGACY_SPACED_GROUP_MARKER),
        re.escape(GROUP_DESCRIPTION_OPEN), re.escape(GROUP_DESCRIPTION_CLOSE),
+       re.escape(_LEGACY_SPACED_RANGE_END_SEPARATOR),
        re.escape(_RANGE_END_SEPARATOR), re.escape(_LEGACY_RANGE_END_SEPARATOR),
        _RANGE_END_BODY_PATTERN, re.escape(GROUP_COUNT_SEPARATOR),
        "".join(COUNT_LETTERS[:1] + LEGACY_COUNT_LETTERS)))
@@ -857,7 +869,7 @@ class GroupName(NamedTuple):
     end **with its opener**, exactly as ``stamps.format_range_end`` writes one
     and as ``stamps.resolve_range_end`` expects to be handed one, or None when
     the name states no span. ``legacy`` is True when the name was written in
-    the pre-v1.1 shape and so wants converting on the next rewrite (C15a).
+    an earlier shape and so wants converting on the next rewrite (C15a, C15b).
     """
 
     base: str                 # the start stamp, exactly as the folder carries it
@@ -899,8 +911,8 @@ def group_name(base: str, children: int, description: str | None = None,
     always, which is how reading a legacy name and writing it back converts it
     (C15, C15a, N13).
     """
-    return "%s%s%s%s%s%s%s%s" % (
-        base, GROUP_MARKER_SEPARATOR, GROUP_MARKER, GROUP_DESCRIPTION_OPEN,
+    return "%s%s%s%s%s%s%s" % (
+        base, GROUP_MARKER, GROUP_DESCRIPTION_OPEN,
         description or TO_LABEL_MARKER, GROUP_DESCRIPTION_CLOSE,
         range_end, group_suffix(children))
 
@@ -908,10 +920,10 @@ def group_name(base: str, children: int, description: str | None = None,
 def split_group_name(name: str) -> GroupName | None:
     """``name`` read apart as a group, or None when it is not one.
 
-    Both conventions, one reading. The v1.1 shape is tried first -- it is what
-    every tool writes and what the archive is being moved onto -- and the
-    pre-v1.1 " - " tail second, with the span picked off the start stamp where
-    that convention welded it.
+    Every convention, one reading. The bracketed shape is tried first -- the
+    current one is what every tool writes, and v1.2's differs from it only by a
+    space before each opener -- and the pre-v1.2 " - " tail second, with the
+    span picked off the start stamp where that convention welded it.
 
     A group is a **dated** folder holding dated children (C1), so a name with
     no date in front of the marker is not one, however it is spelled. That
@@ -923,12 +935,16 @@ def split_group_name(name: str) -> GroupName | None:
     match = _GROUP_NAME_RE.match(name)
     if match is not None:
         counts = match.group("counts")
+        range_end = match.group("range_end")
         return GroupName(
             match.group("base"),
             match.group("description") or None,
-            match.group("range_end"),
+            range_end,
             int(counts[2:]) if counts else None,
-            legacy=False,
+            # v1.2 put a space before each opener (C15b): same parts, old shape.
+            legacy=(match.group("marker") != GROUP_MARKER
+                    or (range_end is not None
+                        and not range_end.startswith(_RANGE_END_SEPARATOR))),
         )
 
     base, separator, tail = name.partition(LABEL_SEPARATOR)
@@ -960,8 +976,8 @@ def carries_group_marker(name: str) -> bool:
 def carries_legacy_group_marker(name: str) -> bool:
     """True when ``name`` is written in a shape no tool writes any more.
 
-    Either of the older marker spellings, the span welded to the start stamp,
-    the " - " tail around them -- all one answer, because they are all one
+    Any of the older marker spellings, the span welded to the start stamp,
+    the " - " tail around them, v1.2's space before each opener -- all one answer, because they are all one
     thing: a group whose next rewrite will bring it onto the current
     convention (C15, C15a, N13).
     """
@@ -992,7 +1008,7 @@ def awaits_label(name: str) -> bool:
 
     Either shape of N11: the bare tail on a leaf day (" - __TO_LABEL__") and
     the marker sitting in a group's description slot
-    ("__GROUP[ __TO_LABEL__ ]"). One question -- has anybody named this yet --
+    ("___GROUP_[ __TO_LABEL__ ]"). One question -- has anybody named this yet --
     so one answer, whichever kind of folder is asking.
     """
     parsed = split_group_name(name)
