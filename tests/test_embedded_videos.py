@@ -409,3 +409,38 @@ def test_a_misplaced_extraction_is_reported_by_step_7_as_x10(
 
     out = capsys.readouterr().out
     assert "X10" in out and "__VIDEOS_EXTRACTED" in out
+
+
+def test_steps_2_and_7_reach_every_depth_of_the_archive(
+        tmp_path, config, monkeypatch, capsys):
+    """Groups inside groups, a taxonomy folder, an unrecognised folder inside an
+    event, and an event under an undated folder: step 2 extracts every one, and
+    step 7 validates the same set -- neither stops at the first level."""
+    root = make_archive(tmp_path)
+    month = root / "2026" / "07. July"
+    group = month / "2026-07-15_(Wed)__08.00.00___GROUP_[ Trip ]___2026-07-16_(Thu)__10.00.00_(n=2)"
+    inner = group / "2026-07-15_(Wed)__08.00.00___GROUP_[ Morning ]___09.00.00_(n=1)"
+    leaf = inner / "2026-07-15_(Wed)__08.00.00 - Breakfast"
+    stills = [
+        samsung_tail_jpeg(month / "2026-07-14_(Tue)__10.00.00 - Leaf" / "2026-07-14_(Tue)__10.00.00.jpg"),
+        samsung_tail_jpeg(group / "2026-07-16_(Thu)__10.00.00 - Beach" / "2026-07-16_(Thu)__10.00.00.jpg"),
+        samsung_tail_jpeg(leaf / "2026-07-15_(Wed)__08.00.00.jpg"),
+        samsung_tail_jpeg(leaf / "__RESIZED" / "2026-07-15_(Wed)__08.00.01.jpg"),
+        samsung_tail_jpeg(leaf / "Loose bits" / "2026-07-15_(Wed)__08.00.02.jpg"),
+        samsung_tail_jpeg(month / "Undated" / "2026-07-17_(Fri)__10.00.00 - Under it"
+                          / "2026-07-17_(Fri)__10.00.00.jpg"),
+    ]
+    exiftool = FakeExifTool({still.name: ("EmbeddedVideoFile", MP4) for still in stills})
+    monkeypatch.setattr(tool.embedded_videos, "_default_runner", exiftool)
+
+    run(str(root), "--steps", "7")
+    reported = [line for line in capsys.readouterr().out.splitlines()
+                if "[restructure]  X16 " in line]
+    assert len(reported) == len(stills)
+
+    run(str(root), "--steps", "2", "--apply", "--yes")
+    for still in stills:
+        assert (still.parent / "__VIDEOS_EXTRACTED" / (still.name + ".MOTION.mp4")).is_file(), still
+    capsys.readouterr()
+    run(str(root), "--steps", "7")
+    assert "[restructure]  X16 " not in capsys.readouterr().out

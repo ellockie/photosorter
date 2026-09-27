@@ -248,11 +248,22 @@ class Inspection:
                 self.unknown(path)
 
     def unknown(self, folder):
-        dirs, _ = self.entries(folder)
+        dirs, files = self.entries(folder)
+        # X16 reaches as deep as reconciliation does: any still with a dated
+        # folder above it is one step 2 extracts, so it is one step 7 checks,
+        # however unrecognised the folders around it are.
+        if any(self.stamps.day_prefix(parent.name) for parent in folder.parents) \
+                or self.stamps.day_prefix(folder.name):
+            for path in files:
+                if self.companion(path) is None \
+                        and self.tool.embedded_videos.is_carrier(path, self.config):
+                    self.carriers.append(path)
         for path in dirs:
             if self.tool.parking.is_parking_area(path.name):
                 self.issue("H2", path, "parking area below unrecognised structure")
                 continue
+            if path.name.casefold() == self.parking.casefold():
+                continue            # S7: collision losers, skipped by step 2 too
             self.issue("S2", path, "directory nested below unrecognised structure")
             self.unknown(path)
 
