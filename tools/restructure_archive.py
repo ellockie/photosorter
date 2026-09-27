@@ -2423,16 +2423,25 @@ def step_reconcile(run, label):
 # closing it (C6) -- both read off the subtree and rewritten whenever it
 # changes (C11).
 #
+# The start is retimed whole, date included (C5, C11): it is read off the
+# earliest dated folder beneath the group -- a name, never a file's timestamp,
+# so N6's refusal to derive a date from contents is not what is happening here
+# -- and the time off the earliest capture. A group whose earliest child moved
+# to the day before simply says so.
+#
+# An undated folder holding dated children is a group nobody stamped (C1a):
+# "Powrot" beside a trip's days. It is given the start stamp and span its
+# children state, and its name becomes the description. Special folders --
+# anything "_"-prefixed, a parking area, a taxonomy or legacy container -- are
+# never promoted; they are not events.
+#
 # What this step will NOT do, and why:
 #
-#   * It never rewrites the start **date**. N6 forbids deriving a date from
-#     contents -- rewriting it would move the folder out from under its month
-#     folder -- and moving the folder is C12, which since v1.0 is a prompted
-#     action of the fixing tool (section 7), not of this step. A folder whose
-#     earliest file falls before its own date is reported instead.
 #   * It never moves media out of a group (C4) and never moves a group between
-#     month folders (C12). Both rules are settled; both belong to the fixing
-#     tool, implemented in step 8.
+#     month folders (C12). A retimed start that crosses into another month
+#     leaves the group where it is, stating its true start; step 8 then offers
+#     the move under --apply and a prompt. Both rules are settled; both belong
+#     to the fixing tool.
 #
 # So this is the implemented half of section 3: the marker and the two stamps.
 
@@ -2469,11 +2478,12 @@ def dated_children(folder, refused):
 
 
 class Subtree(NamedTuple):
-    """What a group's name is computed from: the two capture ends and the last day."""
+    """What a group's name is computed from: the two capture ends and the two days."""
 
     earliest: object  # datetime, or None when nothing under it is stamped
     latest: object  # datetime, likewise
     last_day: str | None  # "YYYY-MM-DD" of the last dated folder beneath it
+    first_day: str | None = None  # "YYYY-MM-DD" of the first, likewise
 
 
 def read_subtree(folder, refused):
@@ -2484,8 +2494,8 @@ def read_subtree(folder, refused):
     (F1), where a copy's mtime says only when it was copied. An unstamped file
     is ignored rather than guessed at, which is why either end can be None.
 
-    The last day comes off the **dated folders** beneath it, at any depth,
-    rather than off the last capture time. Two reasons, and they are the same
+    The first and last days come off the **dated folders** beneath it, at any
+    depth, rather than off the capture times. Two reasons, and they are the same
     reason twice: a day folder's date already has the day boundary applied
     (N7), so a night running past midnight is one day and not two, and a nested
     group's own span may be stale on the way in -- the run that fixes it is
@@ -2517,6 +2527,7 @@ def read_subtree(folder, refused):
         grouping.earliest_capture_time(dating),
         grouping.latest_capture_time(dating),
         max(days) if days else None,
+        min(days) if days else None,
     )
 
 
@@ -2667,52 +2678,132 @@ def group_target_name(folder, children, run, config, refused):
                 None,
             )
 
-    subtree = read_subtree(folder, refused)
-    if subtree.earliest is None or subtree.latest is None:
-        return None, "no file under it carries a capture stamp (C5, C8)", None
-    if subtree.last_day is None:
-        return None, "no folder under it carries a readable date", None
-    if subtree.last_day < parsed.date:
-        return (
-            None,
-            (
-                "a folder under it is dated %s, before its own %s (C13)"
-                % (subtree.last_day, parsed.date)
-            ),
-            None,
-        )
-
-    earliest, latest = subtree.earliest, subtree.latest
-    if "%04d-%02d-%02d" % (earliest.year, earliest.month, earliest.day) < parsed.date:
-        # C12: the start belongs under an earlier month folder. Moving it is
-        # settled -- under --apply, after a prompt -- but it is the fixing
-        # tool's move, not this step's. Reported, and the name is left alone,
-        # because a start time from a day the folder does not claim is a lie.
-        return (
-            None,
-            (
-                "its earliest file is dated %04d-%02d-%02d, before the "
-                "folder's own %s -- moving it is C12, for the fixing tool"
-                % (earliest.year, earliest.month, earliest.day, parsed.date)
-            ),
-            None,
-        )
-
-    base += "__%02d.%02d.%02d" % (earliest.hour, earliest.minute, earliest.second)
-    range_end = stamps.format_range_end(
-        parsed.date, span_end_moment(subtree.last_day, latest)
-    )
+    start = group_start(folder, refused)
+    if start.reason:
+        return None, start.reason, None
     # Last, so a folder this step refuses to name is never asked what it should
     # be called -- the children are read only for a group that is getting a name.
     description, source = description_for_group(folder, children, config)
     return (
-        grouping.group_name(base, len(children), description, range_end),
+        grouping.group_name(start.base, len(children), description, start.range_end),
         None,
         source,
     )
 
 
-def group_violations(folder, config):
+class GroupStart(NamedTuple):
+    """The two stamps a group's subtree states, or why it states none."""
+
+    base: str | None  # the start stamp, "YYYY-MM-DD_(Ddd)__HH.MM.SS"
+    range_end: str | None  # what ``stamps.format_range_end`` wrote for the end
+    reason: str | None  # why there is no name to give, or None
+
+
+def group_start(folder, refused):
+    """Both ends of the span ``folder``'s subtree states (C5-C9, C11).
+
+    The start **date** is the earliest dated folder beneath it, at any depth:
+    a name somebody -- or the grouper -- already gave a day, with the day
+    boundary applied (N7). Not the earliest file's date, because one misfiled
+    stray must not drag a fortnight's trip back a year; a day folder is a claim
+    about a day, a stray is not. The start **time** is the earliest capture.
+
+    The folder's own date is not consulted at all, which is the point: a group
+    whose earliest child is from the day before now says the day before (C11),
+    rather than being reported forever as out of step with itself. If that day
+    is in another month, the group stays where it is and says so by its name;
+    moving it is C12, for step 8, under a prompt.
+    """
+    stamps = canonicalise.stamps
+    subtree = read_subtree(folder, refused)
+    if subtree.earliest is None or subtree.latest is None:
+        return GroupStart(None, None, "no file under it carries a capture stamp (C5, C8)")
+    if subtree.first_day is None:
+        return GroupStart(None, None, "no folder under it carries a readable date")
+    earliest, latest = subtree.earliest, subtree.latest
+    earliest_day = "%04d-%02d-%02d" % (earliest.year, earliest.month, earliest.day)
+    if earliest_day < subtree.first_day:
+        # The earliest shot predates every day folder beneath it: a stray, not
+        # a start. Stamping the group with it would be the lie N6 forbids.
+        return GroupStart(
+            None,
+            None,
+            "its earliest file is dated %s, before the first dated folder under "
+            "it (%s) -- a stray, not a start (N6)" % (earliest_day, subtree.first_day),
+        )
+    base = "%s__%02d.%02d.%02d" % (
+        stamps.format_day_prefix(date_of(subtree.first_day)),
+        earliest.hour,
+        earliest.minute,
+        earliest.second,
+    )
+    range_end = stamps.format_range_end(
+        subtree.first_day, span_end_moment(subtree.last_day, latest)
+    )
+    return GroupStart(base, range_end, None)
+
+
+def is_special_folder(name, config):
+    """True for a folder that is structure, not an event, and is never promoted.
+
+    Anything "_"-prefixed (the taxonomy, parking areas, "___OTHER", the working
+    folders of section 0), and the legacy containers step 1 migrates.
+    """
+    if name.startswith("_"):
+        return True
+    if parking.is_parking_area(name):
+        return True
+    legacy = {value.casefold() for value in taxonomy.legacy_container_names(config)}
+    return name.casefold() in legacy
+
+
+def undated_groups(run, config, refused):
+    """Undated folders below month level that hold dated children (C1a).
+
+    ``{path: [its dated children]}``. Such a folder is a group nobody stamped
+    -- "Powrot", holding the last two days of a trip -- and step 6 gives it the
+    stamps its children state, keeping its name as the description.
+
+    Nothing under a special folder is looked at, and the year and month levels
+    are structure, never candidates.
+    """
+    found = {}
+    for tree in run.trees:
+        root_key = path_key(tree)
+        for directory, _files in canonicalise.walk_bottom_up(tree, root_key, refused):
+            relative = directory.relative_to(tree).parts
+            if len(relative) < 2:
+                continue  # the year itself, or a month folder
+            if canonicalise.stamps.day_prefix(directory.name):
+                continue
+            if any(is_special_folder(part, config) for part in relative[1:]):
+                continue
+            if parking.is_inside_parking_area(directory):
+                continue
+            children = dated_children(directory, refused)
+            if children:
+                found[directory] = children
+    return found
+
+
+def undated_group_target_name(folder, children, refused):
+    """The name an undated grouping folder is to carry, as ``(name, reason)``.
+
+    Its name as it stands is what a person called it, so it becomes the
+    description verbatim (T7).
+    """
+    start = group_start(folder, refused)
+    if start.reason:
+        return None, start.reason
+    return (
+        canonicalise.grouping.group_name(
+            start.base, len(children), folder.name, start.range_end
+        ),
+        None,
+    )
+
+
+def group_violations(folder, config, promoted=()):
     """What ``folder`` holds that C3 does not allow. Reported, never fixed.
 
     Media, loose files of any kind and taxonomy subfolders are outside the
@@ -2759,8 +2850,8 @@ def group_violations(folder, config):
     parking_areas = {}
     tracks = 0
     for name in folders_inside:
-        if stamps.day_prefix(name):
-            continue
+        if stamps.day_prefix(name) or name in promoted:
+            continue  # promoted: an undated group this pass is stamping (C1a)
         if parking.is_parking_area(name):
             # H2: a group is a level dated folders sit on, so it is a level a
             # parking area may sit on -- it holds the children this group has
@@ -2792,7 +2883,14 @@ def step_group_markers(run):
     config = canonicalise._config()
     refused = []
 
-    folders = dated_folders(run)
+    # C1a: undated folders holding dated children are groups nobody stamped.
+    # Found first, so the folder above one counts it among its dated children
+    # in this same pass rather than on the next run.
+    undated = undated_groups(run, config, refused)
+    promoted = {}  # path -> the name it will carry, for the parent's count
+    stamped = []
+
+    folders = dated_folders(run) + list(undated)
     # Deepest first, so renaming a child never invalidates a parent's recorded
     # path -- the same reason every walk here is bottom-up.
     folders.sort(key=lambda path: (len(path.parts), str(path).lower()), reverse=True)
@@ -2802,15 +2900,37 @@ def step_group_markers(run):
     # carried a name across, read one off the children, or is asking for one.
     agreed, awaiting = [], []
     for folder in folders:
+        promoted_here = {path.name for path in promoted if path.parent == folder}
+        if folder in undated:
+            groups += 1
+            for reason in group_violations(folder, config, promoted_here):
+                run.non_compliant.append((folder, reason))
+            target, reason = undated_group_target_name(
+                folder, undated[folder] + [folder / name for name in promoted_here],
+                refused)
+            if target is None:
+                run.non_compliant.append((folder, "undated folder holding dated "
+                                          "children, not stamped: %s" % reason))
+                continue
+            promoted[folder] = target
+            stamped.append(folder)
+            renames.append((folder, folder.with_name(target)))
+            continue
         children = dated_children(folder, refused)
         if children is None:
             continue
+        # A promoted sibling is a dated child already, under the name it is
+        # about to carry -- counted, and offered to the description vote.
+        children = sorted(
+            children + [path.with_name(name) for path, name in promoted.items()
+                        if path.parent == folder],
+            key=lambda path: path.name)
         carries = grouping.carries_group_marker(folder.name)
         if not children and not carries:
             continue  # an ordinary leaf: nothing to say
         if children:
             groups += 1
-            for reason in group_violations(folder, config):
+            for reason in group_violations(folder, config, promoted_here):
                 run.non_compliant.append((folder, reason))
         else:
             unmarked += 1
@@ -2833,8 +2953,9 @@ def step_group_markers(run):
     run.report(
         "ok",
         "\n%d group(s); %d folder(s) carrying the marker with no "
-        "dated children left; %d name(s) to correct."
-        % (groups, unmarked, len(renames)),
+        "dated children left; %d undated folder(s) stamped as groups (C1a); "
+        "%d name(s) to correct."
+        % (groups, unmarked, len(stamped), len(renames)),
     )
     for source, target in renames:
         run.report("dim", move_pair(source, target.name))

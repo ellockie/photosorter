@@ -2133,15 +2133,15 @@ def test_a_parking_area_inside_a_group_is_allowed(tmp_path, config, capsys):
     assert (renamed / "__EMPTY_SUBFOLDERS").is_dir()      # left exactly where it was
 
 
-def test_a_group_whose_earliest_file_predates_its_date_is_reported_not_moved(
+def test_a_group_whose_earliest_file_predates_every_day_is_reported_not_moved(
         tmp_path, config, capsys):
-    """C12: settled since v1.0, but the move belongs to the fixing tool."""
+    """N6: a file older than every day folder beneath is a stray, not a start."""
     root = make_archive(tmp_path)
     group = make_group(root, "2026-07-15_(Wed)__08.14.02 - Sopot", {
         "2026-07-15_(Wed)__08.14.02": ["2026-06-30_(Tue)__08.14.02"],
     })
     assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
-    assert "C12, for the fixing tool" in capsys.readouterr().out
+    assert "a stray, not a start" in capsys.readouterr().out
     assert group.is_dir()                            # untouched, still where it was
 
 
@@ -2623,3 +2623,94 @@ def test_a_step_verdict_holds_back_the_long_tail():
         flags, limit=tool.STEP_VERDICT_ITEMS)
     assert len(items) == tool.STEP_VERDICT_ITEMS
     assert hidden == 5
+
+
+# --------------------------------------------------------------------------
+# Step 6 -- a group's start follows its earliest day; undated groups (C1a)
+# --------------------------------------------------------------------------
+
+def test_a_group_whose_earliest_child_is_earlier_takes_that_childs_start(
+        tmp_path, config):
+    """C5/C11: the start date moves back with the earliest dated child."""
+    root = make_archive(tmp_path)
+    group = make_group(root, "2026-07-19_(Sun)__11.34.52 - Dolina", {
+        "2026-07-18_(Sat)__21.30.31 - wieczorem": ["2026-07-18_(Sat)__21.30.31"],
+        "2026-07-19_(Sun)__08.24.39 - o poranku": ["2026-07-19_(Sun)__08.24.39"],
+    })
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(group) == [
+        "2026-07-18_(Sat)__21.30.31___GROUP_[ Dolina ]"
+        "___2026-07-19_(Sun)__08.24.39_(n=2)"]
+
+
+def test_a_group_whose_first_day_is_later_moves_forward(tmp_path, config):
+    """C11: a group that lost its first day no longer claims it."""
+    root = make_archive(tmp_path)
+    group = make_group(
+        root, "2026-07-14_(Tue)__08.00.00___GROUP_[ Sopot ]___16.20.31_(n=1)", {
+            "2026-07-16_(Thu)__09.10.44": ["2026-07-16_(Thu)__09.10.44"],
+        })
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(group) == [
+        "2026-07-16_(Thu)__09.10.44___GROUP_[ Sopot ]___09.10.44_(n=1)"]
+
+
+def test_a_stray_file_older_than_every_day_does_not_retime_the_group(
+        tmp_path, config):
+    """N6: one misfiled shot is not a start; the group is reported, not renamed."""
+    root = make_archive(tmp_path)
+    name = "2026-07-15_(Wed)__08.14.02___GROUP_[ Sopot ]___08.14.02_(n=1)"
+    group = make_group(root, name, {
+        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02",
+                                       "2025-01-02_(Thu)__10.00.00"],
+    })
+    run(str(root), "--steps", "6", "--apply", "--yes")
+    assert month_entries(group) == [name]
+
+
+def test_an_undated_folder_holding_days_is_stamped_as_a_group(tmp_path, config):
+    """C1a: its name becomes the description; the parent counts it at once."""
+    root = make_archive(tmp_path)
+    trip = make_group(root, "2026-07-15_(Wed) - Hiszpania", {
+        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+    })
+    back = trip / "Powrot"
+    for stamp in ("2026-07-17_(Fri)__01.02.44", "2026-07-17_(Fri)__02.01.29"):
+        (back / stamp).mkdir(parents=True)
+        (back / stamp / ("%s__f1.7__SG23U.jpg" % stamp)).write_bytes(b"x")
+
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(trip) == [
+        "2026-07-15_(Wed)__08.14.02___GROUP_[ Hiszpania ]"
+        "___2026-07-17_(Fri)__02.01.29_(n=2)"]
+    renamed = trip.parent / month_entries(trip)[0]
+    assert sorted(path.name for path in renamed.iterdir()) == [
+        "2026-07-15_(Wed)__08.14.02",
+        "2026-07-17_(Fri)__01.02.44___GROUP_[ Powrot ]___02.01.29_(n=2)",
+    ]
+
+
+def test_an_undated_folder_at_month_level_is_stamped_too(tmp_path, config):
+    root = make_archive(tmp_path)
+    trip = make_group(root, "Norway", {
+        "2026-07-20_(Mon)__09.00.00": ["2026-07-20_(Mon)__09.00.00"],
+        "2026-07-21_(Tue)__10.00.00": ["2026-07-21_(Tue)__18.00.00"],
+    })
+    assert run(str(root), "--steps", "6", "--apply", "--yes") == 0
+    assert month_entries(trip) == [
+        "2026-07-20_(Mon)__09.00.00___GROUP_[ Norway ]"
+        "___2026-07-21_(Tue)__18.00.00_(n=2)"]
+
+
+@pytest.mark.parametrize("special", ["__EMPTY_SUBFOLDERS", "___OTHER", "_misc"])
+def test_a_special_folder_holding_days_is_never_stamped(tmp_path, config, special):
+    root = make_archive(tmp_path)
+    trip = make_group(root, "2026-07-15_(Wed) - Sopot", {
+        "2026-07-15_(Wed)__08.14.02": ["2026-07-15_(Wed)__08.14.02"],
+    })
+    inner = trip / special / "2026-07-16_(Thu)__09.10.44"
+    inner.mkdir(parents=True)
+    (inner / "2026-07-16_(Thu)__09.10.44__f1.7__SG23U.jpg").write_bytes(b"x")
+    run(str(root), "--steps", "6", "--apply", "--yes")
+    renamed = trip.parent / month_entries(trip)[0]
+    assert special in [path.name for path in renamed.iterdir()]

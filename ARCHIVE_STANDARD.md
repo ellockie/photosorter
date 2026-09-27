@@ -1,6 +1,6 @@
 # Photo & Video Archive Standard
 
-**v1.3 — settled. Partially enforced by the restructure tool.**
+**v1.4 — settled. Partially enforced by the restructure tool.**
 
 The target structure of the photo + video archive on disk. It exists to (a) drive
 the redesign of the **already-archived** material and (b) serve as the contract
@@ -141,7 +141,7 @@ prefix:  YYYY-MM-DD_(Ddd)__HH.MM.SS      canonical — DOUBLE underscore before 
 | N3 | The time is the capture time of the folder's earliest file: earliest media where there is any, otherwise earliest `._exif` sidecar. For a group (§3) it is the earliest file in its whole subtree, and the group also carries the latest (C8). |
 | N4 | Two folders in one month folder MUST NOT share a name. The time is what separates two events on one day — which is why date-only is legal but discouraged. |
 | N5 | Historical prefixes `YYYY-MM-DD_(Ddd)_HH.MM.SS` (single underscore) and `YYYY-MM-DD__HH.MM.SS` (no weekday) MUST still be **read**. They MUST NOT be newly **written**. |
-| N6 | Only the **time** half of a prefix may ever be derived from folder contents. The **date** MUST NOT — rewriting it would move the folder out from under its month folder. A date that cannot exist (`2026-02-31`) is reported, never invented. |
+| N6 | Only the **time** half of a prefix may ever be derived from folder contents. The **date** MUST NOT — rewriting it would move the folder out from under its month folder. A date that cannot exist (`2026-02-31`) is reported, never invented. A group's start date is not derived from contents in this sense: it is read off the **names** of the dated folders beneath it (C5), each a claim somebody already made about a day. |
 | N7 | **Day boundary.** A capture at or before `04.44.44` (configurable) belongs to the **previous** day's folder. A night running past midnight is one event. Consequence: a folder's date may legitimately be one day earlier than some of its files. |
 
 **Implemented (N3)** — `with_corrected_time` in `grouping_names.py`, applied to
@@ -253,19 +253,20 @@ three words a narrow Explorer column wraps between (C15b).
 | ID | Rule |
 | --- | --- |
 | C1 | A dated folder holding ≥1 dated child folder MUST carry `___GROUP_[ <description> ]` **directly after its start stamp**, with no space between them, so it is distinguishable from a leaf at a glance and by regex: `2026-08-20_(Thu)__09.14.02___GROUP_[ Norway ]___2026-08-27_(Thu)__18.31.50_(n=7)`. The brackets are always written and always padded a space each side; an unnamed group carries N11 inside them rather than emptying them (C16). |
+| C1a | **An undated folder holding dated child folders is a group nobody stamped** — `Powrot\` beside a trip's days. Below month level, a conforming tool gives it the start stamp, marker and span its subtree states (C5–C9) and keeps its whole name as the description, verbatim (T7): `Powrot` → `2026-09-24_(Thu)__01.02.44___GROUP_[ Powrot ]___02.01.41_(n=2)`. **Special folders are never promoted**: anything `_`-prefixed (the taxonomy of §4, parking areas, `___OTHER`, the working folders of §0), and the legacy containers of §4 — they are structure, not events, and nothing beneath one is looked at. The year and month levels are structure too. If the start lands in another month, C12 applies. |
 | C2 | A leaf dated folder MUST NOT carry the marker. Adding or removing the last dated child flips it; a conforming tool maintains it. |
 | C3 | **A group's contents are closed.** Exactly four kinds may sit in one: dated leaf folders, dated groups, at most one parking area of each kind (§4.1) — the `__EMPTY_SUBFOLDERS` holding the children it has emptied, the `__ORPHANS` holding companions whose subjects have gone — and at most one `__GEOLOCATIONS` (C3a). No media, no loose files of any kind, and no other taxonomy subfolder (§4) — a group has no files for an `__EXIF` or a `__RAW` to be about. |
 | C3a | **`__GEOLOCATIONS` is the one taxonomy subfolder a group may hold.** A track covering a fortnight in Norway is about the *group*, the way a sidecar is about one shot: filing it under the day it happens to start says something false, and cutting it into seven daily fragments edits a recording to fit the folders. So it is admitted here, and narrowly — geodata only (§8 `extensions.geodata`), never media, never a further subfolder — which leaves C3's real claim standing: a person or a tool that opens a group still finds nothing in it to review, rate, stamp or de-duplicate. A `.gpx` whose span fits inside one dated child belongs in **that child's** `__GEOLOCATIONS`; this one is for the tracks no single child can hold. It is *hand* in the sense of S3: recognised and preserved, never auto-populated — deciding a track spans a whole group is a reading of the track. Its contents are **excluded from the group's span and from its counts**, exactly as a parking area's are (H5, C14): a group states the extent of the photography it holds, and a track is a record of the trip, not a shot taken during it. |
 | C4 | Loose media met in a group is **moved down, never deleted and never renamed**: the shots are gathered into a dated child folder of their own by the ordinary rules — day boundary per N7, time per N3, tail ` - __TO_LABEL__` because no person has named them yet — and their sidecars and companions travel with them (X10), which carries the taxonomy subfolders holding those companions down one level too. A tool MAY perform this: the child it creates invents no date (N7 fixes the day, N3 the time) and no name (`__TO_LABEL__` is precisely the refusal to name one), which is what separates it from the inventions N6, D4 and V4 refuse. It writes only under `--apply`, and only after naming the group, the shots and the child it proposes, and getting a yes — the way step 2 prompts. Without `--apply` it reports. This is a **migration action**; after it, nothing ever writes media into a group again. |
-| C5 | A group uses the **same prefix convention** as any dated folder (§2). Its start is the capture time of the earliest file in its **whole subtree** (N3). |
+| C5 | A group uses the **same prefix convention** as any dated folder (§2). Its start **date** is the date of the earliest dated folder anywhere in its subtree — a day boundary already applied (N7) — and its start **time** the capture time of the earliest file in its **whole subtree** (N3). The date comes off folder names rather than file stamps on purpose: a day folder is a claim about a day, and one misfiled stray must not drag a trip back a year. A subtree whose earliest file predates every dated folder in it is reported, and the group left as it is. The group's own date is not consulted: a group whose earliest child is from the day before now says the day before. |
 | C6 | **A group states both ends of its span, always** — `___<end>` closing the name, straight after the description's closing bracket and before the count. The name therefore carries an initial timestamp and a final one, and the range between them is exactly the extent of what the group holds. Three underscores, the same run that opens the marker: the name's three parts are joined the same way both times, by a run one longer than the `__` a stamp uses between its own date and time, so a join between parts cannot be misread for a stamp's own separator. |
 | C6a | The count is written **`_(n=N)`**, divided from the span end by an underscore. A bracket opening straight off the seconds — `…11.06.58(n=31)` — reads as part of the time, and the underscore is the same divider the stamp uses between its own parts, so the name breaks where a reader already expects it to. The separator belongs to the bracket: a folder with no dated children writes neither, never a trailing `_`. Read-old/write-new reaches it too — a name written without the separator still states its count. |
 | C7 | The end states **all of the date or none of it**. A span that closes on the day it opened writes the time alone — `___17.47.04` — because the start, at the head of the same name, has already said which day. One that crosses a day writes the whole canonical stamp of N1, weekday included — `___2026-08-27_(Thu)__18.31.50`. There is no third case and no abbreviation: a fragment like `#27` made the reader carry the start's year and month across the separator to work out which day was meant. |
 | C8 | The end **time** is the capture time of the latest file in the subtree, in the same `HH.MM.SS` form as the start, and is always written. A cross-day end is therefore literally `format_stamp` of that instant: one grammar at both ends of the name, so a reader meets the same shape twice rather than a stamp and an abbreviation of one. |
 | C9 | A single-day group still states its end, as the time — `…__11.03.27___GROUP_[ pier ]___22.14.09_(n=2)`. The claim is the same as a cross-day group's; only the half that would repeat the start is left off. A parser tries the time-only shape **first**: offered to the date branch, `___17.47.04` matches the 17th and leaves `.47.04` standing, silently reading a time as a day of the month. |
 | C10 | The **start** keeps the full canonical prefix (C5) and leads the name, so alphabetical order stays chronological and every parser still reads the start date and time unchanged. |
-| C11 | **Both ends are tool-maintained.** Any run that adds, removes or retimes anything in the subtree recomputes the pair and renames the group. T7 — a folder named by a human is finished — protects the **description** in the tail, never the stamp. |
-| C12 | A group sits under the month folder of its **start** (P5). If the earliest file in the subtree leaves and the start crosses into another month or year, the group moves with it — but never silently: a folder holding a fortnight of someone's life changing month is too large a surprise for a batch pass, so a tool moves it only under `--apply` and only after naming the group, the month folder it is in and the one it is bound for, and getting a yes. One prompt per group; a run that is refused reports and moves on, and P5 stands violated until a person says yes or moves it by hand. The date is still never invented (N6); it is read off the contents, which is the one thing a group's own name is made of. |
+| C11 | **Both ends are tool-maintained, date and time.** Any run that adds, removes or retimes anything in the subtree recomputes the pair and renames the group — its start date included, which moves back or forward to wherever C5 now puts it. T7 — a folder named by a human is finished — protects the **description** in the tail, never the stamp. |
+| C12 | A group sits under the month folder of its **start** (P5). If the start moves (C5, C11) into another month or year, the group is renamed where it stands and then moves with it — but never silently: a folder holding a fortnight of someone's life changing month is too large a surprise for a batch pass, so a tool moves it only under `--apply` and only after naming the group, the month folder it is in and the one it is bound for, and getting a yes. One prompt per group; a run that is refused reports and moves on, and P5 stands violated until a person says yes or moves it by hand. The date is still never invented (N6); it is read off the contents, which is the one thing a group's own name is made of. |
 | C13 | A child's date MUST fall within the group's span ±1 day. A sub-event split near the day boundary can land on the neighbouring date; anything further is a violation. |
 | C14 | Of the count letters (§2) only `n` — nested dated children — is ever written on a group. `i`/`v` cannot occur, C3 having removed them; `e`/`c`/`s`/`w` describe files a group does not hold. The one thing it may hold, a trip-wide track in `__GEOLOCATIONS` (C3a), is **not counted**: it would show up as `s`, and `s` exists to warn that files are hiding below the top level where a reviewer will not meet them. A track is not hiding. It is filed. |
 | C16 | **A group nobody has named says so.** Its description comes from one of three places, in this order: a person (the group's own description, or the label it carried before it had children — never re-derived, T7); **agreement among its children**, when every direct dated child carries the same description, which invents nothing and is adopted verbatim; or, failing both, N11's `__TO_LABEL__` in the description slot. Anything short of unanimity — one child unnamed, or two disagreeing — is a name the tool would be making up, and N6's refusal to derive a date from contents is the same refusal one step over. The marker is deliberately **not sticky**: it is re-asked on every run, so a group picks up a name the moment its children agree on one or a person types one in. |
@@ -309,7 +310,8 @@ three words a narrow Explorer column wraps between (C15b).
 ### Implemented
 
 Step 6 of `tools/restructure_archive.py` — "Mark and time the groups". It
-maintains C1, C2, C6–C11, C14 and C16: the marker, the two stamps, the `n`
+maintains C1, C1a, C2, C5–C11, C14 and C16: the marker, the two stamps — the
+start date included — the promotion of undated grouping folders, the `n`
 count and the description, rebuilt from the subtree on every run and renamed
 where they disagree with it. `GROUP_MARKER`, the name grammar, the `n` bracket
 and the three readings C16 rests on — `folder_description`,
@@ -995,7 +997,7 @@ against a single path component.
 
 ```yaml
 standard: photo-archive
-version: 1.3
+version: 1.4
 status: settled
 
 path:
@@ -1104,11 +1106,15 @@ group:
     - "<start stamp>#<end> - ____GROUP____(d=N) - <description>"   # C15a
     - "<start stamp> __GROUP[ <description> ] ___<end>_(n=N)"      # C15b
   required_when: has_dated_child
+  undated_parent_of_dated_is_group: true      # C1a - stamped, name kept as description
+  never_promoted: ["_*", parking_areas, legacy_containers]   # C1a
   marker_position: directly_after_start_stamp   # no space between them
   description_position: in_brackets_after_marker
   description_brackets_always_written: true   # C1/C16 - N11 goes inside them
   child_date_tolerance_days: 1        # C13, measured against the whole span
+  start_date_from: whole_subtree_earliest_dated_folder   # C5 - a name, never a file stamp
   start_time_from: whole_subtree_earliest_file    # C5
+  start_date_maintained_by_tool: true             # C11 - moves back or forward; C12 if the month changes
   end_time_from: whole_subtree_latest_file        # C8
   span_required: true                 # C6
   span_end_position: closes_the_name                          # C6
@@ -1399,6 +1405,29 @@ decision that was still pending. A rule that turns out to be wrong is amended in
 the open, with the reasoning kept the way the *Settled* notes in §0.1 and §4
 keep theirs: a rule whose argument has been deleted is one that gets re-argued
 from scratch in a year.
+
+### v1.4 — a group's start follows its earliest day
+
+Two amendments, to C5/C11 and a new C1a, each implemented in step 6.
+
+**The start date is maintained, not frozen.** C5 read the start off the
+earliest file but step 6 refused to write any date other than the one the folder
+already had, so a group whose earliest child turned out to be from the evening
+before — `…2026-09-19_(Sat)__11.34.52 - Dolina Torla-Ordesa` holding
+`2026-09-18_(Fri)__21.30.31 - …` — was reported on every run and fixed by
+none. And the opposite case went unnoticed: `Dzien 2`, dated 09-22, holding only
+days of 09-23, was given 09-22 with a 09-23 time. The date now comes off the
+earliest dated folder beneath, which is a name somebody already gave a day —
+not off a file, so a stray cannot move it — and C12 finally has a way to be
+reached: a start that crosses a month is written where the group stands, and
+step 8 offers the move.
+
+**Undated grouping folders are stamped (C1a).** A folder called `Powrot`
+holding the last two days of a trip was reported as an unrecognised directory
+(S1) and nothing more. It is a group in every respect but its name, and the name
+it has is what a person called it, so it becomes the description.
+
+The migration is, again, the rename itself.
 
 ### v1.3 — a group's name, joined up
 
