@@ -21,6 +21,7 @@ archive was relying on.
 """
 
 import hashlib
+import os
 from pathlib import Path
 
 # Big enough that a ".lrv" proxy on a network share is not read a page at a
@@ -36,4 +37,24 @@ def file_md5(path: str | Path, chunk_size: int = DEFAULT_CHUNK_SIZE) -> str:
     with Path(path).open("rb") as handle:
         for chunk in iter(lambda: handle.read(chunk_size), b""):
             digest.update(chunk)
+    return digest.hexdigest()
+
+
+def copy_with_md5(source: str | Path, target: str | Path,
+                  chunk_size: int = DEFAULT_CHUNK_SIZE) -> str:
+    """Copy ``source`` into a new file ``target``; return the MD5 of the bytes read.
+
+    The digest is of what was read from ``source``, so comparing it with
+    ``file_md5(target)`` proves the copy on disk is what the source gave --
+    with one read of the source, which matters when it is on a network share.
+    ``target`` is opened exclusively: if it already exists this raises
+    ``FileExistsError`` and nothing is written.
+    """
+    digest = hashlib.md5()
+    with Path(source).open("rb") as reader, Path(target).open("xb") as writer:
+        for chunk in iter(lambda: reader.read(chunk_size), b""):
+            digest.update(chunk)
+            writer.write(chunk)
+        writer.flush()
+        os.fsync(writer.fileno())
     return digest.hexdigest()

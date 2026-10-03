@@ -89,6 +89,11 @@
       "unsupported": "##   UNSUPPORTED EXTENSIONS   ##"
     }
   },
+  "nas_harvest": {
+    "enabled": true,
+    "settle_seconds": 60,
+    "harvested_folder": "__HARVESTED"
+  },
   "raw_sidecar_generation": {
     "enabled": true
   },
@@ -96,7 +101,8 @@
     "camera_uploads": "c:/Users/luxxa/Dropbox/Camera Uploads",
     "inbox_folder": "c:\\__PHOTOS\\____INGEST_PIPELINE\\INBOX",
     "ingest": {
-      "camera_uploads": "c:/Users/luxxa/Dropbox/Camera Uploads"
+      "camera_uploads": "c:/Users/luxxa/Dropbox/Camera Uploads",
+      "nas_inbox": "\\\\synology-dell\\MOJ_BACKUP_NON-ENCRYPT\\__PHOTOS\\____INGEST_PIPELINE\\INBOX"
     },
     "legacy_ready_folder": "c:\\__PHOTOS\\____TO_SORT\\__READY",
     "legacy_unsorted_folder": "c:\\__PHOTOS\\____TO_SORT\\____UNSORTED",
@@ -107,6 +113,11 @@
     "unsorted_folder": "c:\\__PHOTOS\\____INGEST_PIPELINE\\INBOX",
     "working_folder": "c:\\__PHOTOS\\____INGEST_PIPELINE"
   },
+  "photo_roots": [
+    "c:\\__PHOTOS\\",
+    "d:\\___PHOTOS\\",
+    "\\\\synology-dell\\MOJ_BACKUP_NON-ENCRYPT\\__PHOTOS\\"
+  ],
   "retry": {
     "attempts": 5,
     "delay_seconds": 0.2

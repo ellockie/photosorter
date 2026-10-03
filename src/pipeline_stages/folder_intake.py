@@ -38,7 +38,9 @@ class FolderIntakeStage(PipelineStage):
                 "folder name is journalled as its origin label first, so the label "
                 "survives a crash and can later name the event folder."
             ),
-            dependencies=("upload-harvest",),
+            # After both harvests: a folder dropped into the NAS inbox arrives
+            # as a subfolder of the INBOX and is flattened here like any other.
+            dependencies=("nas-harvest",),
         )
 
     def execute(self, context: PipelineContext) -> PipelineContext:

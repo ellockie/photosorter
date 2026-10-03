@@ -6,6 +6,7 @@ from src.core import \
     PipelineContext, \
     PipelineMode, \
     PipelinePaused, \
+    declared_root_folder, \
     load_config, \
     save_config
 from src.pipeline_stages.screenshot_grouping import \
@@ -64,6 +65,9 @@ class PipelineRuntime:
     def __init__(self, config_path=None, base_folder=None):
         self.config_path = config_path
         self.base_folder = base_folder
+        # A run on another photo root saves config.json with the root it
+        # already names, so the next run still starts from the usual one.
+        self.persisted_root = declared_root_folder(config_path) if base_folder else None
         self.context = PipelineContext(
             config=load_config(config_path, base_folder),
             mode=PipelineMode.UI,
@@ -283,7 +287,7 @@ class PipelineRuntime:
         self.context.answer_prompt(prompt_id, answer)
         if answer.get("camera_model") is not None and answer.get("symbol") is not None:
             self.context.config.setdefault("camera_symbols", {})[answer["camera_model"]] = answer["symbol"]
-            save_config(self.context.config, self.config_path)
+            save_config(self.context.config, self.config_path, self.persisted_root)
 
 
 def require_fastapi():
@@ -390,7 +394,7 @@ def create_app(config_path=None, base_folder=None):
     @app.put("/api/config")
     async def put_config(config: dict):
         runtime.context.config = config
-        save_config(config, config_path)
+        save_config(config, config_path, runtime.persisted_root)
         payload = {"event": "config_saved"}
         await events.broadcast(payload)
         return payload

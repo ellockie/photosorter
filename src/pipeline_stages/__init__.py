@@ -15,6 +15,7 @@ from src.pipeline_stages.metadata_extraction import MetadataExtractionStage
 from src.pipeline_stages.launch_dpviewer import LaunchDpviewerStage
 from src.pipeline_stages.move_results import MoveResultsStage
 from src.pipeline_stages.move_other_images import MoveOtherImagesStage
+from src.pipeline_stages.nas_harvest import NasHarvestStage
 from src.pipeline_stages.raw_staged_conversion import RawStagedConversionStage
 from src.pipeline_stages.rename_and_sort import RenameAndSortStage
 from src.pipeline_stages.screenshot_grouping import ScreenshotGroupingStage
@@ -31,6 +32,7 @@ __all__ = [
     "LaunchDpviewerStage",
     "LegacyUnsortedMigrationStage",
     "UploadHarvestStage",
+    "NasHarvestStage",
     "StaleExifRelocationStage",
     "EmptyFileQuarantineStage",
     "ExiftoolBatchStage",

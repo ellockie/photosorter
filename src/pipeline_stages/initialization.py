@@ -1,9 +1,11 @@
 from pathlib import Path
 
 from src.core import \
+    PipelineConfigError, \
     PipelineContext, \
     PipelineStage, \
     dont_move_folder_name
+from src.pipeline_stages.nas_harvest import is_nas_inbox
 from src.utils.progress import \
     format_bytes, \
     format_count
@@ -23,6 +25,15 @@ class InitializationStage(PipelineStage):
 
     def execute(self, context: PipelineContext) -> PipelineContext:
         paths = context.config.get("paths", {})
+        # Before anything is created or read: the NAS inbox sits in the backup
+        # share and is only ever harvested into a local run, never processed
+        # where it is -- however this run came to be rooted there.
+        if is_nas_inbox(context.config, paths.get("unsorted_folder", "")):
+            raise PipelineConfigError(
+                f"Refusing to run: this run's INBOX ({paths.get('unsorted_folder')}) is the "
+                "NAS inbox (paths.ingest.nas_inbox). Its files are copied into a local "
+                "run by the nas-harvest stage, never processed in place on the NAS."
+            )
         created = []
         for key in ("root_folder", "unsorted_folder", "ready_folder", "temp_root"):
             value = paths.get(key)

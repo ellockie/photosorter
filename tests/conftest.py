@@ -89,6 +89,14 @@ def _no_real_archive_writes(monkeypatch):
         for name in ("safe_move", "safe_rename", "safe_delete"):
             if hasattr(module, name):
                 monkeypatch.setattr(module, name, getattr(core, name))
+
+    # The NAS harvest moves files with its own no-replace rename and copies
+    # with its own copier (src/pipeline_stages/nas_harvest.py); guard both, so
+    # a test cannot reach the real NAS inbox either.
+    from src.pipeline_stages import nas_harvest
+
+    for name in ("rename_no_replace", "copy_with_md5"):
+        monkeypatch.setattr(nas_harvest, name, guard(name, getattr(nas_harvest, name), 2))
     yield
 
 

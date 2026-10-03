@@ -26,6 +26,9 @@ from src.utils.stage_banner import \
 
 
 CONFIG_FILE_NAME = "config.json"
+# The parallel archive trees -- a local disk, a second disk, the NAS -- each
+# with the same layout below it. Any of them can be the root a run works on.
+PHOTO_ROOTS_KEY = "photo_roots"
 # The travel/clock data is hand-edited and conceptually separate from the app
 # config, so it lives in its own sibling file (Decision 9). The loader overlays
 # it onto the config dict so the rest of the code keeps reading config["..."].
@@ -247,6 +250,15 @@ def default_config() -> dict:
         "embedded_video_extraction": {
             "enabled": True,
         },
+        # Copy what is dropped into the NAS inbox (paths.ingest.nas_inbox)
+        # into the INBOX, verify each copy, then park the original under
+        # harvested_folder on the NAS. A file is taken only once it has not
+        # changed for settle_seconds. Off until a NAS inbox is configured.
+        "nas_harvest": {
+            "enabled": False,
+            "settle_seconds": 300,
+            "harvested_folder": "__HARVESTED",
+        },
         # Archive restructuring repairs genuinely missing RAW metadata after
         # tolerant historical-name matching (ARCHIVE_STANDARD.md X14).
         "raw_sidecar_generation": {
@@ -278,7 +290,8 @@ def merge_dicts(defaults: dict, overrides: dict) -> dict:
     return merged
 
 
-def _confine_ingest_paths(paths: dict, root_path: Path, declared_paths: dict) -> None:
+def _confine_ingest_paths(paths: dict, root_path: Path, declared_paths: dict,
+                          declared_roots: list[Path] = ()) -> None:
     # Ingest sources are read-and-emptied: the pipeline harvests files out of
     # them and into the run's own tree. An absolute one pointing outside the
     # tree this run was told to operate on would therefore drain the real
@@ -288,12 +301,16 @@ def _confine_ingest_paths(paths: dict, root_path: Path, declared_paths: dict) ->
     # that was never under the old root.
     #
     # So an external ingest path is trusted only when the config file declared
-    # it *and* declared the very root this run resolved to. Anything else is
-    # confined to the root, which for a scratch run means a folder that simply
-    # does not exist and the harvest stages skip.
+    # it *and* declared the very root this run resolved to -- as root_folder,
+    # or as one of the photo roots, which are all treated alike. Anything else
+    # is confined to the root, which for a scratch run means a folder that
+    # simply does not exist and the harvest stages skip.
     logger = logging.getLogger(__name__)
     declared_root = declared_paths.get("root_folder") or declared_paths.get("photo_base_folder")
-    root_is_declared = declared_root is not None and Path(declared_root) == root_path
+    root_is_declared = (
+        (declared_root is not None and Path(declared_root) == root_path)
+        or root_path in declared_roots
+    )
 
     def confine(value: str, key: str, declared: bool) -> str:
         path = Path(value)
@@ -392,8 +409,37 @@ def normalize_config_paths(config: dict, base_folder: str | Path | None = None,
     paths.pop("photo_base_folder", None)
 
     declared_paths = (declared_config or {}).get("paths")
-    _confine_ingest_paths(paths, root_path, declared_paths if isinstance(declared_paths, dict) else {})
+    _confine_ingest_paths(
+        paths,
+        root_path,
+        declared_paths if isinstance(declared_paths, dict) else {},
+        photo_roots(declared_config or {}),
+    )
     return config
+
+
+def photo_roots(config: dict) -> list[Path]:
+    """The configured photo roots, in order, each once; empty when none are."""
+    entries = config.get(PHOTO_ROOTS_KEY)
+    roots: list[Path] = []
+    for entry in entries if isinstance(entries, list) else []:
+        if isinstance(entry, str) and entry.strip():
+            root = Path(entry)
+            if root not in roots:
+                roots.append(root)
+    return roots
+
+
+def declared_root_folder(config_path: str | Path | None = None) -> str | None:
+    """The root_folder config.json names, whatever root this run was given."""
+    path = Path(config_path) if config_path else project_root() / CONFIG_FILE_NAME
+    try:
+        with path.open("r", encoding="utf-8") as handler:
+            paths = json.load(handler).get("paths", {})
+    except (OSError, ValueError, AttributeError):
+        return None
+    root = paths.get("root_folder") if isinstance(paths, dict) else None
+    return root if isinstance(root, str) and root else None
 
 
 def timezone_file_path(config_path: str | Path | None = None, config: dict | None = None) -> Path:
@@ -469,10 +515,20 @@ def relativize_config_paths(config: dict) -> dict:
     return relativized
 
 
-def save_config(config: dict, config_path: str | Path | None = None) -> None:
+def save_config(config: dict, config_path: str | Path | None = None,
+                persisted_root: str | Path | None = None) -> None:
+    """Write *config* out.
+
+    ``persisted_root`` is the root_folder to write in place of the one this run
+    works on: a run on another photo root must not make that root the default
+    for every run after it. The working paths are stored relative, so they
+    follow whichever root is written.
+    """
     path = Path(config_path) if config_path else project_root() / CONFIG_FILE_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
     serializable = relativize_config_paths(config)
+    if persisted_root:
+        serializable.setdefault("paths", {})["root_folder"] = str(persisted_root)
 
     # Split the timezone/travel data into its own file; keep it out of config.json.
     tz_data = {key: serializable.pop(key) for key in TIMEZONE_KEYS if key in serializable}
@@ -490,6 +546,19 @@ def save_config(config: dict, config_path: str | Path | None = None) -> None:
 
 def normalize_suffix(suffix: str) -> str:
     return suffix.lower()
+
+
+def media_extensions(config: dict) -> set[str]:
+    """The suffixes the pipeline takes in as media, lower-cased."""
+    extensions = config.get("extensions", {})
+    values = []
+    values.extend(extensions.get("lossy_images", []))
+    values.extend(extensions.get("raw_images", []))
+    values.extend(extensions.get("videos", []))
+    return {
+        normalize_suffix(value)
+        for value in values
+    }
 
 
 def dont_move_folder_name(config: dict) -> str:
@@ -828,15 +897,7 @@ class PipelineContext:
         return StageProgress(self, stage_id, activity, **kwargs)
 
     def media_extensions(self) -> set[str]:
-        extensions = self.config.get("extensions", {})
-        values = []
-        values.extend(extensions.get("lossy_images", []))
-        values.extend(extensions.get("raw_images", []))
-        values.extend(extensions.get("videos", []))
-        return {
-            normalize_suffix(value)
-            for value in values
-        }
+        return media_extensions(self.config)
 
     def snapshot_inputs(self, roots: list[str | Path] | None = None,
                         stage_id: str | None = None) -> dict:

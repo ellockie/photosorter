@@ -538,13 +538,23 @@ def parse_args(argv=None):
     parser.add_argument(
         "--base-folder",
         default=None,
-        help="photo archive base folder; overrides root_folder from config.json",
+        help="photo archive base folder; overrides root_folder from config.json. "
+             "Without it, --ui picks the photo root whose INBOX has media, asking "
+             "when several do",
     )
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
+    if args.ui and not args.base_folder:
+        # The INBOX is the pipeline's; the legacy CLI reads ____TO_SORT instead.
+        from src.photo_roots import choose_root, survey_roots
+        root = choose_root(survey_roots(args.config))
+        if root is None:
+            print("No photo root chosen - nothing was run.")
+            return
+        args.base_folder = str(root)
     if args.base_folder:
         # The legacy CLI reads PHOTO_BASE_FOLDER; the new pipeline reads it as
         # a config fallback, so the override works for both modes.
