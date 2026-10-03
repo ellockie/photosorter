@@ -12,7 +12,7 @@ renames or scans archive folders. It defines:
 
 - the path `ROOT/<YYYY>/<NN>. <Month>/<dated folder>/…` and what may sit at each level
 - the dated-folder and media-file naming grammars, and the historical forms still read
-- `___GROUP_[ <description> ]` marking, and the `___` date-time span that closes
+- `___GROUP___[ <description> ]` marking, and the `___` date-time span that closes
   the name, on any dated folder holding dated children (§3; step 6 of
   `tools/restructure_archive.py` maintains both, and converts every earlier
   spelling it meets)

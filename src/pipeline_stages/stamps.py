@@ -170,7 +170,7 @@ def apply_subsecond(name: str, subsecond: str | int | None) -> str:
 # description, off the end of the column. Since v1.2 the end closes the name
 # instead, opened by "___":
 #
-#   2026-08-14_(Fri)__09.31.29___GROUP_[ Polska ]___2026-08-20_(Thu)__11.06.58_(n=31)
+#   2026-08-14_(Fri)__09.31.29___GROUP___[ Polska ]___2026-08-20_(Thu)__11.06.58_(n=31)
 #
 # Three underscores, the same run that opens the marker, and one more than a
 # stamp ever uses between its own parts -- so the joins between the name's
@@ -315,15 +315,13 @@ def range_end_time(range_end: str | None) -> str | None:
 
 
 def format_range_end(start_date: str, end: datetime.datetime) -> str:
-    """The span end for a group starting on ``start_date`` (C6-C9).
+    """The span end of a group (C6): always the whole canonical stamp.
 
-    The time alone when the span ends on the day it began, and the whole
-    canonical stamp when it does not -- literally ``format_stamp``, so the two
-    ends of a span are written in one grammar and a reader meets the same shape
-    at both ends of the name. Always opened by ``RANGE_END_SEPARATOR``; the
-    ``#`` and the spaced ``" ___"`` of the older conventions are read and never
-    written again.
+    Literally ``format_stamp``, so the two ends of a span are written in one
+    grammar. A same-day group repeats its date rather than abbreviating to the
+    time (C9): the end reads the same whichever group it closes. ``start_date``
+    is kept so callers need not change; it no longer decides the shape. Always
+    opened by ``RANGE_END_SEPARATOR``; the time-only form, ``#`` and the spaced
+    ``" ___"`` are read and never written again.
     """
-    if f"{end:%Y-%m-%d}" == start_date:
-        return f"{RANGE_END_SEPARATOR}{end:%H.%M.%S}"
     return f"{RANGE_END_SEPARATOR}{format_stamp(end)}"

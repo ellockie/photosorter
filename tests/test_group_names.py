@@ -2,7 +2,7 @@
 
 ARCHIVE_STANDARD.md section 3::
 
-    2026-08-14_(Fri)__09.31.29___GROUP_[ Polska ]___2026-08-20_(Thu)__11.06.58_(n=31)
+    2026-08-14_(Fri)__09.31.29___GROUP___[ Polska ]___2026-08-20_(Thu)__11.06.58_(n=31)
 
 The stamps at either end are ``stamps``' grammar and the arrangement around
 them is ``grouping_names``', so these are the tests that hold the seam between
@@ -22,7 +22,7 @@ from src.pipeline_stages import grouping_names as grouping
 from src.pipeline_stages import stamps
 
 
-NORWAY = ("2026-08-20_(Thu)__09.14.02___GROUP_[ Norway ]"
+NORWAY = ("2026-08-20_(Thu)__09.14.02___GROUP___[ Norway ]"
           "___2026-08-27_(Thu)__18.31.50_(n=7)")
 
 LEGACY_NORWAY = ("2026-08-20_(Thu)__09.14.02#2026-08-27_(Thu)__18.31.50"
@@ -33,10 +33,11 @@ LEGACY_NORWAY = ("2026-08-20_(Thu)__09.14.02#2026-08-27_(Thu)__18.31.50"
 # The span end (C6-C9)
 # --------------------------------------------------------------------------
 
-def test_a_span_ending_the_day_it_starts_writes_the_time_alone():
-    """C9: the start two characters to the left already said which day."""
+def test_a_span_ending_the_day_it_starts_still_writes_the_whole_stamp():
+    """C9: the end reads the same whichever group it closes -- date included."""
     assert stamps.format_range_end(
-        "2026-07-18", datetime.datetime(2026, 7, 18, 22, 14, 9)) == "___22.14.09"
+        "2026-07-18", datetime.datetime(2026, 7, 18, 22, 14, 9)
+    ) == "___2026-07-18_(Sat)__22.14.09"
 
 
 def test_a_span_crossing_a_day_writes_the_whole_stamp():
@@ -68,7 +69,7 @@ def test_the_end_closes_the_name_and_the_start_still_opens_it():
     where the eye lands first. Alphabetical order still has to come out
     chronological, so what moved is the end and only the end.
     """
-    assert NORWAY.startswith("2026-08-20_(Thu)__09.14.02___GROUP_[ ")
+    assert NORWAY.startswith("2026-08-20_(Thu)__09.14.02___GROUP___[ ")
     assert NORWAY.endswith("___2026-08-27_(Thu)__18.31.50_(n=7)")
     assert stamps.split_dated_folder(NORWAY).time == "09.14.02"
 
@@ -91,12 +92,12 @@ def test_an_end_welded_to_the_start_reads_exactly_the_same_way():
 
 
 def test_a_time_only_end_resolves_to_the_day_the_span_started():
-    name = "2026-08-14_(Fri)__13.40.23___GROUP_[ Kajaki ]___17.47.04_(n=3)"
+    name = "2026-08-14_(Fri)__13.40.23___GROUP___[ Kajaki ]___17.47.04_(n=3)"
     parsed = stamps.split_dated_folder(name)
     assert parsed.range_end == "___17.47.04"
     assert stamps.resolve_range_end(parsed.date, parsed.range_end) == "2026-08-14"
     assert stamps.range_end_time(parsed.range_end) == "17.47.04"
-    assert parsed.tail == "___GROUP_[ Kajaki ]___17.47.04_(n=3)"
+    assert parsed.tail == "___GROUP___[ Kajaki ]___17.47.04_(n=3)"
 
 
 def test_a_time_is_never_read_as_a_day_of_the_month():
@@ -106,7 +107,7 @@ def test_a_time_is_never_read_as_a_day_of_the_month():
     standing as tail -- a 17:47 span end silently becoming the 17th.
     """
     parsed = stamps.split_dated_folder(
-        "2026-08-14_(Fri)__13.40.23___GROUP_[ Kajaki ]___17.47.04_(n=2)")
+        "2026-08-14_(Fri)__13.40.23___GROUP___[ Kajaki ]___17.47.04_(n=2)")
     assert parsed.range_end == "___17.47.04"
     assert stamps.range_end_time(parsed.range_end) == "17.47.04"
     assert stamps.resolve_range_end(parsed.date, parsed.range_end) == "2026-08-14"
@@ -158,7 +159,7 @@ def test_a_group_with_no_description_is_written_asking_for_one():
     """
     assert grouping.group_name(
         "2026-07-15_(Wed)__08.14.02", 3, range_end="___19.02.44") == (
-        "2026-07-15_(Wed)__08.14.02___GROUP_[ __TO_LABEL__ ]___19.02.44_(n=3)")
+        "2026-07-15_(Wed)__08.14.02___GROUP___[ __TO_LABEL__ ]___19.02.44_(n=3)")
 
 
 def test_zero_children_is_written_as_no_bracket_at_all():
@@ -175,11 +176,11 @@ def test_the_count_is_divided_off_the_span_end_it_follows():
     """A bracket opening straight off the seconds reads as part of the time."""
     assert grouping.group_name(
         "2026-07-18_(Sat)__11.03.27", 2, "pier", "___22.14.09") == (
-        "2026-07-18_(Sat)__11.03.27___GROUP_[ pier ]___22.14.09_(n=2)")
+        "2026-07-18_(Sat)__11.03.27___GROUP___[ pier ]___22.14.09_(n=2)")
     # Read-old/write-new reaches the separator too: a name written without one
     # still reports its count rather than losing it.
     assert grouping.split_group_name(
-        "2026-07-18_(Sat)__11.03.27___GROUP_[ pier ]___22.14.09(n=2)"
+        "2026-07-18_(Sat)__11.03.27___GROUP___[ pier ]___22.14.09(n=2)"
     ).children == 2
 
 
@@ -211,7 +212,7 @@ def test_a_name_in_the_older_shape_is_read_apart_into_the_same_pieces():
 
 
 def test_a_description_carrying_its_own_separator_comes_back_whole():
-    name = ("2026-08-20_(Thu)__09.14.02___GROUP_[ Norway - day 2 ]"
+    name = ("2026-08-20_(Thu)__09.14.02___GROUP___[ Norway - day 2 ]"
             "___27__18.31.50_(n=7)")
     assert grouping.group_description(name) == "Norway - day 2"
     legacy = ("2026-08-20_(Thu)__09.14.02#27__18.31.50"
@@ -221,7 +222,7 @@ def test_a_description_carrying_its_own_separator_comes_back_whole():
 
 def test_a_name_with_no_bracket_reports_an_unknown_count_not_zero():
     """None is "nobody has counted", which is not the claim "there are none"."""
-    hand_typed = "2026-08-20_(Thu)__09.14.02___GROUP_[ Norway ]"
+    hand_typed = "2026-08-20_(Thu)__09.14.02___GROUP___[ Norway ]"
     assert grouping.split_group_name(hand_typed).children is None
     assert grouping.split_group_name(hand_typed).range_end is None
     assert grouping.split_group_name(
@@ -231,7 +232,7 @@ def test_a_name_with_no_bracket_reports_an_unknown_count_not_zero():
 def test_a_marker_with_no_date_in_front_of_it_is_not_a_group():
     """C1 is about a *dated* folder; a bare tail is not a folder name at all."""
     assert grouping.split_group_name(" - ____GROUP____") is None
-    assert grouping.split_group_name("___GROUP_[ Norway ]___17.47.04_(n=2)") is None
+    assert grouping.split_group_name("___GROUP___[ Norway ]___17.47.04_(n=2)") is None
 
 
 @pytest.mark.parametrize("name", [
@@ -249,7 +250,7 @@ def test_nothing_else_is_mistaken_for_a_group(name):
 # N11 -- a group nobody has named
 # --------------------------------------------------------------------------
 
-UNNAMED = ("2026-08-20_(Thu)__09.14.02___GROUP_[ __TO_LABEL__ ]"
+UNNAMED = ("2026-08-20_(Thu)__09.14.02___GROUP___[ __TO_LABEL__ ]"
            "___27__18.31.50_(n=7)")
 
 
@@ -298,7 +299,7 @@ def test_children_that_all_say_the_same_thing_name_their_group():
     assert grouping.shared_child_description([
         "2026-07-15_(Wed)__08.14.02 - Sopot",
         "2026-07-15_(Wed)__14.31.09 - sopot",          # case is not a difference
-        "2026-07-16_(Thu)__09.10.44___GROUP_[ Sopot ]___19.02.44_(n=2)",
+        "2026-07-16_(Thu)__09.10.44___GROUP___[ Sopot ]___19.02.44_(n=2)",
     ]) == "Sopot"                                      # the first one's spelling
 
 
@@ -328,7 +329,7 @@ def test_anything_short_of_agreement_names_nothing(names):
     "2026-08-20_(Thu)__09.14.02 __GROUP[ Malbork trip ] ___22.14.09_(n=3)",
     # C15b: either space alone is still the old shape.
     "2026-08-20_(Thu)__09.14.02 __GROUP[ Malbork trip ]___22.14.09_(n=3)",
-    "2026-08-20_(Thu)__09.14.02___GROUP_[ Malbork trip ] ___22.14.09_(n=3)",
+    "2026-08-20_(Thu)__09.14.02___GROUP___[ Malbork trip ] ___22.14.09_(n=3)",
 ])
 def test_every_older_shape_is_read_and_flagged_for_conversion(legacy):
     assert grouping.carries_group_marker(legacy)
@@ -364,7 +365,7 @@ def test_converting_a_legacy_name_keeps_the_description_and_the_count():
     rebuilt = grouping.group_name(
         parsed.base, parsed.children, parsed.description, "___22__17.40.11")
     assert rebuilt == (
-        "2026-08-20_(Thu)__09.14.02___GROUP_[ Malbork trip ]___22__17.40.11_(n=3)")
+        "2026-08-20_(Thu)__09.14.02___GROUP___[ Malbork trip ]___22__17.40.11_(n=3)")
     assert not grouping.carries_legacy_group_marker(rebuilt)
     assert grouping.group_description(rebuilt) == "Malbork trip"
 

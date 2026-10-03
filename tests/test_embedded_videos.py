@@ -418,8 +418,8 @@ def test_steps_2_and_7_reach_every_depth_of_the_archive(
     step 7 validates the same set -- neither stops at the first level."""
     root = make_archive(tmp_path)
     month = root / "2026" / "07. July"
-    group = month / "2026-07-15_(Wed)__08.00.00___GROUP_[ Trip ]___2026-07-16_(Thu)__10.00.00_(n=2)"
-    inner = group / "2026-07-15_(Wed)__08.00.00___GROUP_[ Morning ]___09.00.00_(n=1)"
+    group = month / "2026-07-15_(Wed)__08.00.00___GROUP___[ Trip ]___2026-07-16_(Thu)__10.00.00_(n=2)"
+    inner = group / "2026-07-15_(Wed)__08.00.00___GROUP___[ Morning ]___09.00.00_(n=1)"
     leaf = inner / "2026-07-15_(Wed)__08.00.00 - Breakfast"
     stills = [
         samsung_tail_jpeg(month / "2026-07-14_(Tue)__10.00.00 - Leaf" / "2026-07-14_(Tue)__10.00.00.jpg"),

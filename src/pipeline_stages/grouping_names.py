@@ -91,13 +91,17 @@ TO_LABEL_MARKER = "__TO_LABEL__"
 # from the bracket, the way "_(n=N)" divides the count from the end. No space
 # anywhere in the machinery, so the whole name reads as one token in a listing
 # and only the description, padded inside its brackets, breathes.
-GROUP_MARKER = "___GROUP_"
+GROUP_MARKER = "___GROUP___"
 
 # The description sits in brackets, padded a space each side. The padding is
 # the point: a group's name is three machine-written parts and one human one,
 # and the air around the human part is what stops it reading as another field.
 GROUP_DESCRIPTION_OPEN = "[ "
 GROUP_DESCRIPTION_CLOSE = " ]"
+
+# How v1.3 spelled the marker: one underscore short, "___GROUP_[". Read and
+# converted; never written (C15c).
+LEGACY_SHORT_GROUP_MARKER = "___GROUP_"
 
 # How v1.2 spelled the marker: a space off the start stamp, two underscores,
 # and the bracket straight after the word -- " __GROUP[". Read and converted;
@@ -246,6 +250,7 @@ _STAMP_CAPTURE_PATTERN = (
 _RANGE_END_SEPARATOR = "___"
 _LEGACY_SPACED_RANGE_END_SEPARATOR = " ___"
 _LEGACY_RANGE_END_SEPARATOR = "#"
+_TIME_ONLY_END_RE = re.compile(rf"(?:{_RANGE_END_SEPARATOR}|#){_TIME_PATTERN}")
 _RANGE_END_BODY_PATTERN = (
     rf"(?:({_TIME_PATTERN})"
     r"|(?:(?:(\d{4})-)?(\d{2})-)?(\d{2})"
@@ -306,11 +311,11 @@ _EMPTY_BRACKET_RE = re.compile(
 # reported through the ``marker`` and ``range_end`` groups (C15b). The spaced
 # end opener is tried before the bare one, so a v1.2 end keeps its space.
 _GROUP_NAME_RE = re.compile(
-    r"^(?P<base>.*?)(?P<marker>%s|%s)%s(?P<description>.*?)%s"
+    r"^(?P<base>.*?)(?P<marker>%s|%s|%s)%s(?P<description>.*?)%s"
     r"(?P<range_end>(?:%s|%s|%s)%s)?"
     r"(?:%s?\((?P<counts>[%s]=\d+)\))?$"
-    % (re.escape(GROUP_MARKER), re.escape(LEGACY_SPACED_GROUP_MARKER),
-       re.escape(GROUP_DESCRIPTION_OPEN), re.escape(GROUP_DESCRIPTION_CLOSE),
+    % (re.escape(GROUP_MARKER), re.escape(LEGACY_SHORT_GROUP_MARKER),
+       re.escape(LEGACY_SPACED_GROUP_MARKER), re.escape(GROUP_DESCRIPTION_OPEN), re.escape(GROUP_DESCRIPTION_CLOSE),
        re.escape(_LEGACY_SPACED_RANGE_END_SEPARATOR),
        re.escape(_RANGE_END_SEPARATOR), re.escape(_LEGACY_RANGE_END_SEPARATOR),
        _RANGE_END_BODY_PATTERN, re.escape(GROUP_COUNT_SEPARATOR),
@@ -976,9 +981,11 @@ def split_group_name(name: str) -> GroupName | None:
             range_end,
             int(counts[2:]) if counts else None,
             # v1.2 put a space before each opener (C15b): same parts, old shape.
+            # An end with no date is the v1.3 time-only shape (C15c).
             legacy=(match.group("marker") != GROUP_MARKER
-                    or (range_end is not None
-                        and not range_end.startswith(_RANGE_END_SEPARATOR))),
+                    or bool(range_end is not None
+                            and (not range_end.startswith(_RANGE_END_SEPARATOR)
+                                 or _TIME_ONLY_END_RE.fullmatch(range_end)))),
         )
 
     base, separator, tail = name.partition(LABEL_SEPARATOR)

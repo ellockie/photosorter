@@ -123,7 +123,7 @@ the audit markers from what is finally on disk.
 What step 6 does
 ----------------
 Section 3 of the standard: a dated folder holding dated child folders is a
-*group*, it says so after its start stamp -- "___GROUP_[ Polska ]" -- and the
+*group*, it says so after its start stamp -- "___GROUP___[ Polska ]" -- and the
 name states both ends of the span it covers, the start stamp opening it and
 " ___end" closing it, each read off the subtree. A folder that stopped holding
 dated children loses the marker and the span again. It runs after step 5 because the grouper (step 3) creates and
@@ -2527,7 +2527,7 @@ def step_reconcile(run, label):
 # Step 6 -- mark and time the groups
 # --------------------------------------------------------------------------
 #
-# Section 3: a dated folder holding dated children carries "___GROUP_[ ... ]"
+# Section 3: a dated folder holding dated children carries "___GROUP___[ ... ]"
 # after its start stamp (C1), one that holds none carries no marker (C2), and a
 # group states both ends of its span -- the start opening the name and the end
 # closing it (C6) -- both read off the subtree and rewritten whenever it
@@ -2695,7 +2695,7 @@ def description_for_group(folder, children, config):
          its children agree on one or somebody types one in.
 
     The alternative to (3) is the bare marker this step used to leave --
-    ``___GROUP_[]`` and nothing in it -- which says the same thing by saying
+    ``___GROUP___[]`` and nothing in it -- which says the same thing by saying
     nothing, and reads in Explorer as a folder that is simply named that way. A
     group waiting for a name should look like it is waiting.
     """
