@@ -1386,7 +1386,7 @@ sidecars:
     may_be_representative: false
   ocr:                                # X15
     subfolder: "__OCR"
-    extensions: [".OCR.txt"]
+    extensions: [".OCR.txt", ".OCR.layout.txt"]
     naming: "<full media filename><ocr extension>"
     match_by: longest_trailing_extension
     counts_as: s                      # never i/v, never e
@@ -1456,7 +1456,7 @@ extensions:
   raw_images:   [".arw", ".cr2", ".crw", ".dng", ".mpo", ".rw2"]
   videos:       [".mp4", ".mov", ".avi"]
   previews:     [".THM.jpg", ".PREVIEW.jpg", ".thm", ".lrv"]   # sidecars, not media — X6/X6a
-  ocr:          [".OCR.txt"]          # sidecars, not media — X15
+  ocr:          [".OCR.txt", ".OCR.layout.txt"]   # sidecars, not media — X15
   extracted_videos: [".MOTION.mp4"]   # companions, not media — X16
   geodata:      [".gpx"]
 

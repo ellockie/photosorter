@@ -61,7 +61,8 @@
       ".avi"
     ],
     "ocr": [
-      ".OCR.txt"
+      ".OCR.txt",
+      ".OCR.layout.txt"
     ],
     "extracted_videos": [
       ".MOTION.mp4"

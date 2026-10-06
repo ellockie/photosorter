@@ -169,7 +169,7 @@ DEFAULT_PREVIEW_EXTENSIONS = (".THM.jpg", ".PREVIEW.jpg", ".thm", ".lrv")
 # and lives in "__OCR" rather than "__EXIF": that folder holds what a camera
 # recorded, where OCR text is a later reading of the picture, regenerable and
 # revisable as engines improve.
-DEFAULT_OCR_EXTENSIONS = (".OCR.txt",)
+DEFAULT_OCR_EXTENSIONS = (".OCR.txt", ".OCR.layout.txt")
 
 # Matches config.json extensions.extracted_videos. The video a motion photo
 # carries, once extracted, is a companion of the still (X16) and lives in
