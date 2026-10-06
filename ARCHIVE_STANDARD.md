@@ -693,6 +693,7 @@ and a record of what its clock was doing.
 | K8 | **Name order may differ from time order, and that is reported, never fixed.** Local time repeats at a westward seam and in a DST fall-back hour. A tool MUST NOT bend a stamp to keep names in order; it reports the folder and the shots. |
 | K9 | **Re-dating a sorted shot is a move of its unit** (X10): the stamp in the subject's name and in every companion named after it is replaced and nothing after the stamp changes. A shot whose day changes (N7 on the new stamp) goes to the sibling dated folder with the same description, created in the month its date belongs to (P5); a folder's own date is never rewritten (N6). A taken name goes through F9; anything F9 cannot settle is an F4 question, reported and left. Re-dating requires `--apply` and a confirmation **per folder** — yes, yes to all remaining folders, or no. |
 | K10 | **Evidence is reported, never applied.** A reading that goes backwards while the shutter counter goes forwards, a camera's declared offset changing, a phone's offset changing: each is printed with a ready-to-paste record line for a person to confirm. |
+| K11 | **A video's reading is QuickTime time plus the offset its device recorded.** QuickTime `Create Date` is UTC by the format's definition; the device's wall-clock reading — the counterpart of a still's `Date/Time Original` — is that UTC plus `Android Time Zone` (Samsung) or `Time Zone` (Sony), or the wall time of a `Creation Date` / `Creation Date Value` carrying its own offset (Apple, Sony). The offset is used only to undo the device's own conversion, not as a statement of where it was (K7). With no offset recorded: from a mobile the UTC time is the true instant; from a camera it is taken as the camera's clock, since most write local time there. The device is named by `Camera Model Name`, else `Device Model Name`, else `Author` when that is a known camera. A file's own times are never a capture time (V4). |
 
 **Implemented** (openspec change `camera-time-correction`): the intake stage
 `timezone-and-travel` asks per proposed folder; restructure **step 0** re-dates
@@ -1441,6 +1442,13 @@ capture_time:                           # 5.3
     requires_apply: true
     confirmation: per_folder            # yes / yes to all remaining / no
   evidence: report_with_paste_lines     # K10
+  video_reading:                        # K11
+    utc_fields: [Create Date, Media Create Date, Track Create Date]
+    offset_fields: [Android Time Zone, Time Zone]
+    wall_with_offset_fields: [Creation Date, Creation Date Value]
+    without_offset: {mobile: utc_is_true_instant, camera: taken_as_camera_clock}
+    device_fields: [Camera Model Name, Device Model Name, Author, Android Model]
+    file_times_used: false              # V4
 
 extensions:
   lossy_images: [".jpg", ".jpeg"]

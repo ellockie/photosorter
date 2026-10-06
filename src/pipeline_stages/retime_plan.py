@@ -203,23 +203,25 @@ def plan_folder(folder: Path, config: dict, model: TimeModel, cache=None,
 
     planned = []
     for shot in sorted(readings, key=lambda s: str(s.subject)):
-        if shot.reading is None or not shot.subject.is_file():
+        if (shot.reading is None and shot.utc is None) or not shot.subject.is_file():
             continue
         current, tail = _stamp_tail(shot.subject.name)
         if current is None:
             continue
-        correction = model.correct(shot.camera, shot.reading, shot.counter)
+        correction = model.correct_shot(shot.camera, shot.reading, shot.counter, shot.utc)
         if shot.subdir == "":
             order_items.append((correction.stamp_text + tail, correction.true_utc, shot.subject.name))
         stamp_claims.setdefault((shot.subject.parent, format_stamp(current)), set()).add(correction.stamp)
-        in_range = (start is None or shot.reading >= start) and (end is None or shot.reading < end)
+        moment = correction.reading
+        in_range = (start is None or moment >= start) and (end is None or moment < end)
         if correction.stamp == current or not in_range:
             if shot.subdir == "":
                 top_level_after.append(current)
             continue
         flags = []
-        if current not in (shot.reading, correction.stamp):
-            flags.append(f"named {format_stamp(current)}, reading {format_stamp(shot.reading)}: renamed by hand?")
+        if current not in (correction.reading, correction.stamp):
+            flags.append(f"named {format_stamp(current)}, but the camera read {format_stamp(correction.reading)}: "
+                         "renamed by hand, or named from a file time?")
         if correction.ambiguous:
             flags.append("reading falls in a repeated hour; taken as after the clock change")
         new_day = date_folder_datetime(correction.stamp, config).date()
@@ -272,7 +274,7 @@ def plan_folder(folder: Path, config: dict, model: TimeModel, cache=None,
             targets_taken.add(str(moves[-1].target).casefold())
         if target_folder != folder and not target_folder.exists() and target_folder not in plan.new_folders:
             plan.new_folders.append(target_folder)
-        plan.shots.append(ShotPlan(shot.subject, shot.camera, shot.reading, correction, current,
+        plan.shots.append(ShotPlan(shot.subject, shot.camera, correction.reading, correction, current,
                                    new_name, target_folder, moves, flags))
 
     _plan_followers(plan, folder, config, by_subject, stamp_claims)

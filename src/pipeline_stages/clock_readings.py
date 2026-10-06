@@ -36,9 +36,26 @@ YEAR_RE = re.compile(r"^\d{4}$")
 # Counters in the order they are trusted: a body's own shutter count first,
 # then what the file numbering says (Canon writes "100-1234": folder-number).
 COUNTER_KEYS = ("Shutter Count", "Image Number", "File Number")
-FIELD_KEYS = ("Camera Model Name", "Date/Time Original", "Sub Sec Time Original",
-              "Offset Time Original", *COUNTER_KEYS)
+# Where a file names the device that made it. A still says it in "Camera Model
+# Name"; a Sony video in "Device Model Name"; a Samsung phone video in "Author"
+# (which on other files can be a person, so it counts only when it is a camera
+# the symbol table knows).
+CAMERA_MODEL_KEYS = ("Camera Model Name", "Device Model Name", "Author", "Android Model")
+# A video's capture time (K11). QuickTime "Create Date" is UTC by the format's
+# own definition; the device's wall-clock reading is that UTC plus the offset
+# the device recorded with it -- Samsung's "Android Time Zone", Sony's "Time
+# Zone" -- or a wall time carrying its own offset (Apple's "Creation Date",
+# Sony's "Creation Date Value"). File times never are one (V4).
+VIDEO_UTC_KEYS = ("Create Date", "Media Create Date", "Track Create Date")
+VIDEO_OFFSET_KEYS = ("Android Time Zone", "Time Zone")
+VIDEO_WALL_KEYS = ("Creation Date", "Creation Date Value")
+FIELD_KEYS = ("Date/Time Original", "Sub Sec Time Original", "Offset Time Original",
+              *CAMERA_MODEL_KEYS, *COUNTER_KEYS, *VIDEO_UTC_KEYS, *VIDEO_OFFSET_KEYS, *VIDEO_WALL_KEYS)
+# Bumped whenever FIELD_KEYS changes, so a cache written for fewer fields is not trusted.
+FIELDS_VERSION = 2
 EXIF_DATETIME_RE = re.compile(r"^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})")
+OFFSET_RE = re.compile(r"^([+-])(\d{2}):?(\d{2})$")
+WALL_WITH_OFFSET_RE = re.compile(r"^(\d{4}:\d{2}:\d{2} \d{2}:\d{2}:\d{2})(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})$")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -55,6 +72,10 @@ class ShotReading:
     subsecond: str | None
     declared_offset: str | None
     counter: int | None
+    # A video whose device recorded no offset: its QuickTime time, in UTC, and
+    # no wall reading. The engine decides what that means (a phone: the true
+    # instant; a camera: most write their local time there).
+    utc: datetime.datetime | None = None
 
 
 def exposures(readings) -> list[ShotReading]:
@@ -65,9 +86,9 @@ def exposures(readings) -> list[ShotReading]:
     """
     seen: dict = {}
     for shot in readings:
-        if shot.reading is None:
+        if shot.reading is None and shot.utc is None:
             continue
-        key = (shot.camera, shot.counter, shot.reading, shot.subsecond)
+        key = (shot.camera, shot.counter, shot.reading or shot.utc, shot.subsecond)
         if key not in seen or (seen[key].subdir and not shot.subdir):
             seen[key] = shot
     return list(seen.values())
@@ -100,6 +121,52 @@ def parse_exif_reading(value: str | None) -> datetime.datetime | None:
         return None
 
 
+def normalise_offset(value: str | None) -> str | None:
+    """``+0200`` / ``+02:00`` -> ``+02:00``; anything else -> None."""
+    match = OFFSET_RE.match((value or "").strip())
+    return f"{match.group(1)}{match.group(2)}:{match.group(3)}" if match else None
+
+
+def _offset_delta(text: str) -> datetime.timedelta:
+    sign = -1 if text[0] == "-" else 1
+    return sign * datetime.timedelta(hours=int(text[1:3]), minutes=int(text[4:6]))
+
+
+def video_reading(fields: dict):
+    """``(wall reading, declared offset, utc)`` of a video, from QuickTime fields (K11).
+
+    The wall reading is what the device's own clock showed, the same thing a
+    still's ``Date/Time Original`` is, so the clock model treats both alike.
+    With no offset recorded there is no wall reading, only the UTC time.
+    """
+    utc = next((value for value in (parse_exif_reading(fields.get(key)) for key in VIDEO_UTC_KEYS)
+                if value is not None), None)
+    for key in VIDEO_WALL_KEYS:
+        match = WALL_WITH_OFFSET_RE.match((fields.get(key) or "").strip())
+        if match and match.group(2) != "Z":
+            return parse_exif_reading(match.group(1)), normalise_offset(match.group(2)), utc
+    for key in VIDEO_OFFSET_KEYS:
+        offset = normalise_offset(fields.get(key))
+        if offset is not None and utc is not None:
+            return utc + _offset_delta(offset), offset, utc
+    return None, None, utc
+
+
+def camera_from_fields(fields: dict, config: dict) -> tuple[str | None, str]:
+    """``(model, symbol)``: the first model field naming a camera the table knows."""
+    unknown = camera_symbol_for_model("", config)
+    first = None
+    for key in CAMERA_MODEL_KEYS:
+        value = (fields.get(key) or "").strip()
+        if not value:
+            continue
+        symbol = camera_symbol_for_model(value, config)
+        if symbol != unknown or key == "Camera Model Name":
+            return value, symbol
+        first = first or value
+    return first, unknown
+
+
 def parse_counter(value: str | None) -> int | None:
     digits = re.sub(r"\D", "", value or "")
     return int(digits) if digits else None
@@ -111,15 +178,23 @@ def reading_from_fields(fields: dict, config: dict) -> dict:
         counter = parse_counter(fields.get(key))
         if counter is not None:
             break
-    model = fields.get("Camera Model Name")
+    model, camera = camera_from_fields(fields, config)
     subsecond = (fields.get("Sub Sec Time Original") or "").strip()
+    reading = parse_exif_reading(fields.get("Date/Time Original"))
+    declared = fields.get("Offset Time Original") or None
+    utc = None
+    if reading is None:
+        reading, declared, utc = video_reading(fields)
+        if reading is not None:
+            utc = None
     return {
         "model": model,
-        "camera": camera_symbol_for_model(model or "", config),
-        "reading": parse_exif_reading(fields.get("Date/Time Original")),
+        "camera": camera,
+        "reading": reading,
         "subsecond": subsecond if subsecond.isdigit() else None,
-        "declared_offset": fields.get("Offset Time Original") or None,
+        "declared_offset": declared,
         "counter": counter,
+        "utc": utc,
     }
 
 
@@ -137,9 +212,11 @@ class SidecarCache:
         self.dirty = False
         if path is not None and path.exists():
             try:
-                self.entries = json.loads(path.read_text(encoding="utf-8"))
+                stored = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
-                self.entries = {}
+                stored = {}
+            if isinstance(stored, dict) and stored.get("version") == FIELDS_VERSION:
+                self.entries = stored.get("entries", {})
 
     def fields(self, sidecar: Path) -> dict | None:
         try:
@@ -164,7 +241,7 @@ class SidecarCache:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(self.entries), encoding="utf-8")
+        temporary.write_text(json.dumps({"version": FIELDS_VERSION, "entries": self.entries}), encoding="utf-8")
         os.replace(temporary, self.path)
         self.dirty = False
 
@@ -293,10 +370,11 @@ def scan_roots(roots, config, years=None, use_cache=True, progress=None, cache_d
 
 
 def in_range(shot, start, end) -> bool:
-    if shot.reading is None:
+    moment = shot.reading or shot.utc
+    if moment is None:
         return False
-    if start is not None and shot.reading < start:
+    if start is not None and moment < start:
         return False
-    if end is not None and shot.reading >= end + datetime.timedelta(days=1):
+    if end is not None and moment >= end + datetime.timedelta(days=1):
         return False
     return True

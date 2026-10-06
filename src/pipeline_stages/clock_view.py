@@ -126,7 +126,7 @@ def build_view(folders, model: TimeModel, labels=None) -> View:
         phone_says, camera_says = set(), set()
         first_utc = None
         for shot in exposures(folder.readings):
-            correction = model.correct(shot.camera, shot.reading, shot.counter)
+            correction = model.correct_shot(shot.camera, shot.reading, shot.counter, shot.utc)
             if shot.camera not in cameras:
                 cameras.append(shot.camera)
             models.setdefault(shot.camera, set()).add(shot.model or "?")

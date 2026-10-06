@@ -70,3 +70,9 @@
 - [x] 8.3 Delete `src/retime_archive.py` and its tests.
 - [x] 8.4 Add a time section to `ARCHIVE_STANDARD.md` (stamps are local time; EXIF never written; whole-second errors; name-order verdict) and its §8 YAML.
 - [x] 8.5 Update AGENTS.md "where to look" rows. Add a note in `pluggable-pipeline-architecture/design.md` Decision 9 that it is superseded by this change.
+
+## 9. Video capture times (added 2026-10-06)
+
+- [x] 9.1 Read a video's wall reading as QuickTime UTC + the device's recorded offset (`Android Time Zone`, Sony `Time Zone`, Apple `Creation Date`); name the device from `Device Model Name` / `Author`; never from file times (K11, V4). One reader in `clock_readings`, used by intake (`legacy.parse_legacy_exif_text`), V12 migration and step 0.
+- [x] 9.2 `TimeModel.correct_shot`: a no-offset video from a mobile is placed by its UTC instant; from a camera it is taken as the camera's clock.
+- [x] 9.3 Tests: Samsung, Sony, Apple, no-offset phone and camera, intake parser, step 0 renaming a video named from its file time (`tests/test_video_times.py`); ARCHIVE_STANDARD K11 + §8.

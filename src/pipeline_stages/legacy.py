@@ -3,6 +3,10 @@ from pathlib import Path
 
 from src.constants.camera_symbols import \
     camera_symbol_for_model  # noqa: F401  (re-exported: one definition, T8)
+from src.pipeline_stages.clock_readings import \
+    camera_from_fields, \
+    parse_clock_fields, \
+    video_reading
 from src.constants.months import MONTH_FOLDERS
 from src.pipeline_stages.taxonomy import duplicate_name  # noqa: F401  (re-exported: F4 lives in taxonomy)
 from src.pipeline_stages.siblings import \
@@ -224,6 +228,29 @@ def parse_legacy_exif_text(text: str, config: dict) -> dict:
         elif key.startswith("Focal Length"):
             metadata["focal_length"] = "L" + reformat_focal_length(value)
 
+    fields = parse_clock_fields(text)
+    if metadata.get("camera_symbol", camera_symbol_for_model("", config)) == camera_symbol_for_model("", config):
+        # A video names its device elsewhere: Sony in "Device Model Name",
+        # a Samsung phone in "Author" (camera_from_fields, one definition).
+        model, symbol = camera_from_fields(fields, config)
+        if model:
+            metadata["camera_model"] = model
+            metadata["camera_symbol"] = symbol
+    if "Date/Time Original" not in fields:
+        # A video: its QuickTime time is UTC, its device's wall reading that
+        # plus the offset the device recorded (K11). The file's own times are
+        # never a capture time (V4), so they give way to it.
+        wall, offset, utc = video_reading(fields)
+        if wall is not None:
+            metadata["captured_at"] = wall
+            metadata["image_datetime"] = format_stamp(wall)
+            metadata["declared_offset"] = offset
+            unformatted_datetime = None
+        elif utc is not None:
+            metadata["captured_at"] = utc
+            metadata["captured_utc"] = utc
+            metadata["image_datetime"] = format_stamp(utc)
+            unformatted_datetime = None
     if unformatted_datetime:
         metadata["captured_at"] = parse_exif_datetime(unformatted_datetime)
         metadata["image_datetime"] = legacy_image_datetime(unformatted_datetime)
@@ -264,6 +291,12 @@ def intrinsic_capture_datetime_from_exif_text(text: str) -> datetime.datetime | 
         key = key.strip()
         if key in INTRINSIC_CAPTURE_TIME_FIELDS and key not in values:
             values[key] = value.strip()
+    if "Date/Time Original" not in values:
+        # QuickTime times are UTC; with the offset the device recorded they
+        # give its wall reading, which is what a stamp starts from (K11).
+        wall, _offset, _utc = video_reading(parse_clock_fields(text))
+        if wall is not None:
+            return wall
     for key in INTRINSIC_CAPTURE_TIME_FIELDS:
         value = values.get(key)
         if not value or value.startswith("0000:00:00"):

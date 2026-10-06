@@ -61,7 +61,9 @@ class TimezoneAndTravelStage(PipelineStage):
                 captured_at = datetime.datetime.fromisoformat(captured_at)
             if not isinstance(captured_at, datetime.datetime):
                 continue
-            correction = model.correct(asset.metadata.get("camera_symbol", ""), captured_at)
+            utc = asset.metadata.get("captured_utc")
+            correction = model.correct_shot(asset.metadata.get("camera_symbol", ""),
+                                            None if utc else captured_at, None, utc)
             day = format_day_prefix(date_folder_datetime(correction.stamp, context.config))
             label = asset.metadata.get("origin_label")
             groups.setdefault(day + (f" - {label}" if label else ""), []).append((asset, correction))

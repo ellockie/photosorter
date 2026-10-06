@@ -79,6 +79,8 @@ def find_evidence(readings, model: TimeModel) -> list[Finding]:
     """Every indication in ``readings`` (any number of folders), oldest first."""
     by_camera: dict[str, list] = {}
     for shot in exposures(readings):
+        if shot.reading is None:
+            continue
         by_camera.setdefault(shot.camera, []).append(shot)
     findings = []
     for camera, shots in sorted(by_camera.items()):

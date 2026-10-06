@@ -620,6 +620,29 @@ class TimeModel:
                           trip.place if trip else None, clock.label,
                           reading - true_utc.replace(tzinfo=None), error, source, ambiguous)
 
+    def correct_shot(self, camera: str, reading: datetime.datetime | None, counter: int | None = None,
+                     utc: datetime.datetime | None = None) -> Correction:
+        """``correct`` for any shot, including a video with no wall reading (K11).
+
+        A video whose device recorded no offset carries only its QuickTime time,
+        which the format defines as UTC. From a phone that is the true instant,
+        and the stamp is local time where the user was. From a camera it is
+        taken as the camera's own reading instead: most cameras that record no
+        offset write their local clock there, whatever the format says.
+        """
+        if reading is not None:
+            return self.correct(camera, reading, counter)
+        if utc is None:
+            raise ValueError("a shot needs a reading or a UTC time")
+        if camera not in self.mobiles:
+            return self.correct(camera, utc, counter)
+        true_utc = utc.replace(tzinfo=UTC, microsecond=0)
+        zone = self.zone_at(true_utc)
+        trip = self.trip_at(true_utc)
+        stamp = true_utc.astimezone(zone).replace(tzinfo=None)
+        return Correction(camera, stamp, stamp, true_utc, zone_label(zone), trip.place if trip else None,
+                          LOCAL, stamp - true_utc.replace(tzinfo=None), 0, SOURCE_MOBILE)
+
     # -- helpers for people ----------------------------------------------
 
     def candidate_clocks(self, at_wall: datetime.datetime) -> list[Clock]:
