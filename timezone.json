@@ -1,5 +1,39 @@
 {
-  "camera_clock_sets": [],
-  "locations": [],
-  "zones": {}
+  "home": "GB",
+  "mobiles": [
+    "SG23U",
+    "SG22U",
+    "SG9"
+  ],
+  "trips": [
+    {
+      "country": "Europe/Madrid",
+      "from": "2026-09-15_(Tue)__12.08.14",
+      "to": "2026-09-23_(Wed)__20.34.47"
+    }
+  ],
+  "camera_clocks": [
+    {
+      "camera": "ILC7R5",
+      "clock": "home-winter"
+    },
+    {
+      "camera": "ILC7R5",
+      "from": "2026-09-27_(Sun)__20.20.58",
+      "counter": 16879,
+      "clock": "local"
+    }
+  ],
+  "calibrations": [
+    {
+      "camera": "ILC7R5",
+      "reading": "2026-09-27_(Sun)__19.08.31.774",
+      "true": "2026-09-27_(Sun)__20.09.52.208"
+    },
+    {
+      "camera": "ILC7R5",
+      "reading": "2026-09-27_(Sun)__20.20.58.925",
+      "true": "2026-09-27_(Sun)__20.20.59.934"
+    }
+  ]
 }

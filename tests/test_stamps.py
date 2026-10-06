@@ -114,22 +114,3 @@ def test_every_earlier_span_end_is_still_read_and_expanded():
     assert single.range_end is None
     assert resolve_range_end(single.date, single.range_end) is None
 
-
-def test_retime_sees_folders_carrying_the_canonical_time():
-    """Regression: retime_archive's own regex demanded the weekday and then
-    either " - <description>" or end-of-name, so every folder carrying the
-    canonical time was silently skipped — and the canonicaliser has been
-    putting the archive onto exactly that form."""
-    from src.retime_archive import _event_description
-
-    assert _event_description("2026-07-15_(Wed)__08.14.02 - Sopot") == "Sopot"
-    assert _event_description("2026-07-15_(Wed)__08.14.02 - __TO_SPLIT__(i=79)") == \
-        "__TO_SPLIT__(i=79)"
-    assert _event_description("2026-07-15__08.14.02 - legacy grouper") == "legacy grouper"
-    # Still recognised, unchanged.
-    assert _event_description("2026-04-12_(Sun) - Japan") == "Japan"
-    assert _event_description("2026-04-12_(Sun)") is None
-    # A tail that is not the folder-name grammar is not an event folder, so an
-    # unrelated sibling is never renamed.
-    assert _event_description("2026-04-12_(Sun)_backup") is False
-    assert _event_description("__EXIF") is False

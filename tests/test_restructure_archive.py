@@ -102,6 +102,9 @@ def config(monkeypatch, fake_grouper):
                 # for the new ExifTool repair explicitly enable this pass.
                 "raw_sidecar_generation": {"enabled": False}}
     monkeypatch.setattr(tool.canonicalise, "_config", lambda: settings)
+    # Step 0 reads the repo's timezone.json; a test archive must not be re-timed
+    # by whatever the user has recorded there.
+    monkeypatch.setattr(tool, "TIMEZONE_PATH", tool.REPO_ROOT / "tests" / "fixtures" / "no_timezone.json")
     return settings
 
 
@@ -1440,7 +1443,10 @@ def test_reconcile_runs_before_and_after_grouping(tmp_path, config, fake_grouper
     numbers = [number for number, _title, _action, _repeats in tool.STEPS]
     titles = {number: title for number, title, _a, _r in tool.STEPS}
     repeats = {number: repeated for number, _t, _a, repeated in tool.STEPS}
-    assert numbers == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert numbers == [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    # Re-timing runs first, so steps 1 and 5 recompute folder times (N3) and
+    # step 6 the group spans (C11) from the stamps it wrote.
+    assert "re-time" in titles[0].lower() and repeats[0] is None
     assert "companions" in titles[2].lower()
     assert "companions" in titles[4].lower()
     assert TO_SPLIT_IN_TITLE in titles[3]
@@ -1828,7 +1834,7 @@ def test_parked_dated_folders_never_reenter_the_grouper(tmp_path, config):
 
 def test_steps_run_in_their_fixed_order_however_they_are_typed():
     assert tool.selected_steps("3,1") == [1, 3]
-    assert tool.selected_steps(None) == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert tool.selected_steps(None) == [0, 1, 2, 3, 4, 5, 6, 7, 8]
     assert tool.selected_steps("2") == [2]
 
 

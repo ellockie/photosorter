@@ -138,6 +138,28 @@ def normalise_subsecond(value: str | int | None) -> str | None:
     return digits if digits.isdigit() else None
 
 
+def parse_stamp_with_fraction(text: str) -> datetime.datetime | None:
+    """A stamp in any accepted form, keeping a ``.fff`` fraction, or None.
+
+    Only clock calibrations need this: a clock photographed at
+    ``20.09.52.208`` is a measurement to the millisecond, and rounding it away
+    before the error is worked out would add up to a second of error to it.
+    The fraction is the F9 one (``SUBSECOND_PATTERN``), read as a decimal
+    fraction of a second. Unlike ``parse_stamp`` the stamp must open the text.
+    """
+    text = str(text).strip()
+    match = LEADING_FILE_STAMP_RE.match(text)
+    if match is None:
+        return None
+    value = parse_stamp(text[:match.end()])
+    if value is None:
+        return None
+    digits = match.group(1)
+    if digits:
+        value = value.replace(microsecond=int(digits.ljust(6, "0")[:6]))
+    return value
+
+
 def leading_subsecond(name: str) -> str | None:
     """The fraction a file name's leading stamp carries, or None."""
     match = LEADING_FILE_STAMP_RE.match(name)

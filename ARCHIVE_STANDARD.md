@@ -1,6 +1,6 @@
 # Photo & Video Archive Standard
 
-**v1.6 — settled. Partially enforced by the restructure tool.**
+**v1.7 — settled. Partially enforced by the restructure tool.**
 
 The target structure of the photo + video archive on disk. It exists to (a) drive
 the redesign of the **already-archived** material and (b) serve as the contract
@@ -672,6 +672,34 @@ by the device alone.
 | F8d | A name the table does not know resolves to **nothing at all**, and no marker is written. Falling back to the owner would file someone else's photo as theirs, which is the one outcome the marker exists to prevent. Such a file is reported for a person to map. |
 | F8e | Authorship is taken from where a batch was ingested (§0.2), or from EXIF `Artist` where the camera recorded it — the only claim a file can make about itself. Both resolve through the one table. |
 
+### 5.3 Capture time and camera clocks — `K`
+
+A camera clock is a wall clock that knows nothing about where it is. It misses
+DST changes, is not reset when its owner flies, and drifts. Phones keep their
+own time right; cameras do not. A folder sorted by name is only in time order
+if every camera's stamp means the same thing, so the stamp a file is named by
+is the **local time the shot was taken**, worked out from what the camera read
+and a record of what its clock was doing.
+
+| ID | Rule |
+| --- | --- |
+| K1 | **The leading stamp (F1) is local wall time** where the shot was taken: the zone of the trip in force at the true instant, otherwise home. Home is a country, and its DST is the zone's own, never typed. |
+| K2 | **The camera's reading is never modified.** A tool MUST NOT write the capture time in a media file's EXIF. The `._exif` sidecar keeps `Date/Time Original` as the camera wrote it, and every stamp is derived from that reading plus the clock record — so re-deriving is idempotent, and removing a record entry and re-running reverses it. |
+| K3 | **The clock record is one file for every photo root**: `timezone.json` beside the configuration, never inside an archive. It holds `home`, `mobiles`, `trips` (country, local `from`/`to`), `camera_clocks` (per camera: the first reading *after* an adjustment, and what the clock then followed — `home`, `local`, `home-winter`, `home-summer`, a zone, or a fixed offset) and `calibrations` (a reading against the true local time). |
+| K4 | **Corrections are whole seconds.** A calibration's remainder is rounded half away from zero. The sub-second a camera recorded (F9) is kept exactly as written, so a shot's second and its fraction still belong together. |
+| K5 | **Defaults shift nothing that was not recorded**, with one exception that is the point of the rule: outside every trip, a camera with no record is taken as right; **inside a trip**, a camera with no record is taken as still on **home** time, and its shots are shifted — reported as *assumed* wherever they are shown. A calibration's error applies constantly across its clock segment, back to the camera's first shot for the first one. |
+| K6 | **A mobile's clock is never corrected.** A camera listed in `mobiles` is taken to show local time; a record of a clock or a calibration naming one is an error. |
+| K7 | **A declared offset is evidence, never input.** `Offset Time Original` says what a camera's zone *setting* was; the zone setting and the clock are set independently, so nothing derives a stamp from it. Tools MAY report it. |
+| K8 | **Name order may differ from time order, and that is reported, never fixed.** Local time repeats at a westward seam and in a DST fall-back hour. A tool MUST NOT bend a stamp to keep names in order; it reports the folder and the shots. |
+| K9 | **Re-dating a sorted shot is a move of its unit** (X10): the stamp in the subject's name and in every companion named after it is replaced and nothing after the stamp changes. A shot whose day changes (N7 on the new stamp) goes to the sibling dated folder with the same description, created in the month its date belongs to (P5); a folder's own date is never rewritten (N6). A taken name goes through F9; anything F9 cannot settle is an F4 question, reported and left. Re-dating requires `--apply` and a confirmation **per folder** — yes, yes to all remaining folders, or no. |
+| K10 | **Evidence is reported, never applied.** A reading that goes backwards while the shutter counter goes forwards, a camera's declared offset changing, a phone's offset changing: each is printed with a ready-to-paste record line for a person to confirm. |
+
+**Implemented** (openspec change `camera-time-correction`): the intake stage
+`timezone-and-travel` asks per proposed folder; restructure **step 0** re-dates
+sorted folders; `tools/clock_evidence_report.py` (K10),
+`tools/timezone_visualiser.py` and `tools/time_calculator.html` are read-only
+aids. The engine is `src/pipeline_stages/timezone_engine.py`.
+
 ### 5.1 Videos — `V`
 
 A video is media, not a companion. Where its own metadata can date it, it is
@@ -872,6 +900,8 @@ Any tool writing to the archive, first-party or third-party:
 | Parking-area names and where one goes | `src/pipeline_stages/parking.py` — `PARKING_AREAS`, `parking_area_for` |
 | Month names | `src/constants/months.py` — `MONTH_FOLDERS` (re-exported by the legacy modules) |
 | File checksum | `src/utils/checksums.py` — `file_md5` (a leaf: standard library only) |
+| Camera clocks, trips, calibrations → local stamp (5.3) | `src/pipeline_stages/timezone_engine.py`; the record is `timezone.json` |
+| Camera model → camera symbol | `src/constants/camera_symbols.py` (a leaf) |
 | Extensions, day boundary, collision suffixes, paths | `config.json` / `src/core.py` `default_config()` |
 
 `stamps.py` and `grouping_names.py` are deliberately **leaf modules** importing
@@ -1011,7 +1041,7 @@ against a single path component.
 
 ```yaml
 standard: photo-archive
-version: 1.6
+version: 1.7
 status: settled
 
 path:
@@ -1387,6 +1417,31 @@ sidecars:
     overwrite: false
     dry_run_reports_only: true
 
+capture_time:                           # 5.3
+  stamp_is: local_wall_time             # K1 - trip zone at the true instant, else home
+  exif_written: false                   # K2 - the reading is never modified
+  derived_from: sidecar_date_time_original
+  record: timezone.json                 # K3 - beside the configuration, one for every root
+  record_keys: [home, mobiles, trips, camera_clocks, calibrations]
+  clock_states: [home, local, home-winter, home-summer, "<country or IANA zone>", "<+HH:MM fixed offset>"]
+  adjustment_reading: first_reading_after_adjustment
+  correction_resolution: whole_seconds  # K4 - rounded half away from zero
+  default_outside_trips: no_shift       # K5
+  default_inside_trip: home_time_assumed
+  first_segment_error: constant_back_to_first_shot
+  mobiles_corrected: false              # K6
+  declared_offset_is_input: false       # K7 - evidence only
+  name_order_vs_time_order: report_only # K8
+  redate:                               # K9
+    moves_unit: true
+    day_folder: sibling_with_same_description
+    creates_missing_month: true
+    rewrites_folder_date: false
+    collision: [F9, F4_report]
+    requires_apply: true
+    confirmation: per_folder            # yes / yes to all remaining / no
+  evidence: report_with_paste_lines     # K10
+
 extensions:
   lossy_images: [".jpg", ".jpeg"]
   other_images: [".png", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".heic", ".heif"]
@@ -1434,6 +1489,21 @@ decision that was still pending. A rule that turns out to be wrong is amended in
 the open, with the reasoning kept the way the *Settled* notes in §0.1 and §4
 keep theirs: a rule whose argument has been deleted is one that gets re-argued
 from scratch in a year.
+
+### v1.7 — a file's stamp is the local time it was taken
+
+One new section, 5.3 (K1-K10). Until now the leading stamp was whatever the
+camera's clock said, and a camera's clock is wrong more often than right: it
+misses DST, is not reset on a trip, and drifts. Two cameras at one event then
+interleave out of order however carefully the folder is sorted. The stamp is
+now the local time the shot was taken, derived -- never written into EXIF --
+from the camera's untouched reading and one record of what its clock was
+doing (`timezone.json`). Phones are taken as right; a camera nobody recorded
+anything about is taken as right at home and as still on home time abroad.
+
+**The migration is restructure step 0**, folder by folder, each one asked
+about. It is reversible by editing the record and running it again, because
+every stamp is worked out from the reading rather than from the name.
 
 ### v1.6 — a group's name, shortened and made whole
 

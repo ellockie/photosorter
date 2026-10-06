@@ -233,6 +233,8 @@ Unknown camera models, manual RAW development waits, and ambiguous collisions sh
 
 ### 9. Travel & Timezone Clock Correction Engine
 
+> **Superseded** by openspec change `camera-time-correction` (2026-10): the two timelines became trips + per-camera clock states + calibrations, `retime_archive.py` became restructure step 0, and trip labels left filenames. Kept below as the record of the earlier design.
+
 Camera clocks are zone-unaware wall clocks. They go wrong in two independent ways: the world's local time changes (you cross a border, or DST flips) and the camera is not adjusted until later — or never. The earlier "interval + offset" model (`camera_clock_corrections` + `trips`, each carrying a hand-computed `offset_seconds`/`timezone_offset_hours`) conflated two genuinely separate concerns and made you compute every offset by hand. This is replaced by a **two-timeline model** driven by named IANA zones, where offsets are *derived*, never typed.
 
 #### Two independent timelines

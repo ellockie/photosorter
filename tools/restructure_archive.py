@@ -1,10 +1,13 @@
 r"""Bring an existing archive onto the current conventions, in one pass.
 
-This is the front door for restructuring work: the eight steps that turn a tree
+This is the front door for restructuring work: the steps that turn a tree
 written by an older Photosorter, an older grouper or a third-party tool into
 the shape ``ARCHIVE_STANDARD.md`` describes, run in the one order that makes
 sense, over one target, with one set of safety rules.
 
+    0. Re-time shots against timezone.json   retime_plan.py (camera clocks,
+                                   trips, calibrations; asks per folder:
+                                   yes / yes to all / no; --from/--to bound it)
     1. Canonicalise names and park the empty
                                    tools/canonicalise_timestamp_names.py
     2. Reunite companions and sidecars     companion_matching.py
@@ -3152,6 +3155,155 @@ def _standard_step(run, action):
         return 2
 
 
+# --------------------------------------------------------------------------
+# Step 0 -- re-time shots against timezone.json
+# --------------------------------------------------------------------------
+
+# The clock and travel record step 0 works from (camera-time-correction). In the
+# repo beside config.json, so every photo root is re-timed from one record.
+TIMEZONE_PATH = REPO_ROOT / "timezone.json"
+RETIME_ANSWERS = {"y": "yes", "yes": "yes", "a": "all", "all": "all", "n": "no", "no": "no", "": "no"}
+
+
+def load_time_model(run):
+    """``(engine, model, config, error)``. Zone data comes from ``tzdata``.
+
+    On Windows ``zoneinfo`` has no zones without that package. The launcher
+    runs this tool under the project's Poetry environment, which has it; a bare
+    interpreter falls back to that environment's site-packages, and when that
+    fails too the step is skipped rather than guessing (D11).
+    """
+    engine = importlib.import_module("src.pipeline_stages.timezone_engine")
+    try:
+        engine.resolve_place("GB")
+    except engine.ZoneDataUnavailable:
+        base = Path(os.environ.get("LOCALAPPDATA", "")) / "pypoetry" / "Cache" / "virtualenvs"
+        for site in sorted(base.glob("photosorter-*/Lib/site-packages")):
+            if (site / "tzdata").is_dir():
+                sys.path.append(str(site))
+                importlib.invalidate_caches()
+                engine.country_tables.cache_clear()
+                engine.country_zones.cache_clear()
+                break
+        try:
+            engine.resolve_place("GB")
+        except engine.ZoneDataUnavailable as error:
+            return engine, None, None, str(error)
+    config = dict(canonicalise._config())
+    try:
+        data = json.loads(Path(TIMEZONE_PATH).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        data = {}
+    except (OSError, ValueError) as error:
+        return engine, None, None, "cannot read %s: %s" % (TIMEZONE_PATH, error)
+    for key in (*engine.TIMEZONE_KEYS, *engine.SUPERSEDED_KEYS):
+        if key in data:
+            config[key] = data[key]
+    return engine, engine.model_from_config(config), config, None
+
+
+def ask_retime(run, args_holder):
+    """``yes`` / ``all`` / ``no`` for one folder. ``--yes`` and an earlier "all" answer ``all``."""
+    if run.assume_yes or getattr(args_holder, "retime_all", False):
+        return "all"
+    if not (sys.stdin and sys.stdin.isatty()):
+        return None
+    while True:
+        try:
+            answer = input("  Re-date this folder?  [y] yes   [a] yes to all remaining folders   [n] no : ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return "no"
+        choice = RETIME_ANSWERS.get(answer.strip().lower())
+        if choice:
+            return choice
+
+
+def step_retime(run):
+    """Rename (and, across a day boundary, move) shots to the local time they were taken.
+
+    The camera-time-correction change. Every folder whose shots would be
+    re-dated is shown and asked about -- yes, yes to all remaining folders, or
+    no -- and a dry run only shows. Stamps are always worked out from the
+    untouched EXIF reading, so a second run plans nothing and a removed
+    timezone.json entry plans the way back.
+    """
+    engine, model, config, error = load_time_model(run)
+    if error:
+        run.report(FAILED, "Re-timing skipped: %s" % error)
+        run.flag("Re-timing skipped", "timezone data", error)
+        return 1
+    for message in model.errors:
+        run.report(FAILED, "timezone.json: %s" % message)
+    if model.errors:
+        run.flag("timezone.json cannot be used", "timezone.json", "; ".join(model.errors))
+        return 1
+    for message in model.warnings:
+        run.report("warn", "timezone.json: %s" % message)
+    if model.is_identity:
+        run.report("dim", "timezone.json records no trips, clocks or calibrations: nothing to re-time.")
+        return 0
+    retime_plan = importlib.import_module("src.pipeline_stages.retime_plan")
+    clock_readings = importlib.import_module("src.pipeline_stages.clock_readings")
+    args_holder = run.args_holder
+    start = datetime.datetime.fromisoformat(args_holder.retime_from) if getattr(args_holder, "retime_from", None) else None
+    end = datetime.datetime.fromisoformat(args_holder.retime_to) + datetime.timedelta(days=1) \
+        if getattr(args_holder, "retime_to", None) else None
+    cache = clock_readings.SidecarCache(None)
+
+    folders = dated_folders(run)
+    run.report("dim", "%d dated folder(s) to check against timezone.json" % len(folders))
+    affected = retimed = declined = files = 0
+    for folder in folders:
+        if not folder.is_dir():
+            continue
+        plan = retime_plan.plan_folder(folder, config, model, cache, start, end)
+        for path, reason in plan.skipped:
+            run.flag("Shot not re-timed", path, reason)
+        if plan.inversions:
+            run.flag("Name order is not time order (reported only)", folder,
+                     "%d shot(s), e.g. %s" % (len(plan.inversions), plan.inversions[0][0]))
+        if not plan.changes:
+            continue
+        affected += 1
+        print()
+        for index, text in enumerate(retime_plan.describe(plan)):
+            run.report("bold" if index == 0 else "dim", text)
+        if not run.apply:
+            files += len(plan.moves)
+            continue
+        choice = ask_retime(run, args_holder)
+        if choice is None:
+            run.report(FAILED, "No terminal to ask at. Re-run from a console, or pass --yes.")
+            run.flag("Re-timing not confirmed", folder, "no terminal")
+            declined += 1
+            continue
+        if choice == "all":
+            args_holder.retime_all = True
+        if choice == "no":
+            declined += 1
+            run.journal.write("retime_declined", folder=str(folder))
+            continue
+        try:
+            done = retime_plan.apply_plan(plan, log=lambda text: run.report("dim", text))
+        except OSError as error:
+            run.report(FAILED, "Could not re-time %s: %s" % (folder, error))
+            run.flag("Re-timing failed part-way", folder, str(error))
+            continue
+        for source, target in done:
+            run.journal.write("retime", source=str(source), target=str(target))
+        retimed += 1
+        files += len(done)
+
+    print()
+    if not run.apply:
+        run.report("bold", "%d folder(s) would be re-dated, %d file(s) renamed or moved. "
+                           "Nothing was changed (dry run)." % (affected, files))
+        return 1 if affected else 0
+    run.report("bold", "%d folder(s) re-dated (%d file(s)), %d declined." % (retimed, files, declined))
+    return 1 if declined else 0
+
+
 def step_standard_check(run):
     return _standard_step(run, compliance.check)
 
@@ -3171,6 +3323,7 @@ def step_standard_fix(run):
 # and the second would print the first's report word for word. Those are
 # skipped, with a line saying why, unless asked for on their own.
 STEPS = (
+    (0, "Re-time shots against timezone.json", step_retime, None),
     (
         1,
         "Canonicalise names and park the empty",
@@ -3490,6 +3643,9 @@ class Run:
     def __init__(self, args, target, trees, colour):
         self.target = target
         self.trees = trees
+        # The arguments themselves, for what must outlive one year's run: a
+        # "yes to all" given while re-timing 2019 still holds in 2020.
+        self.args_holder = args
         self.apply = args.apply
         self.quiet = args.quiet
         self.colour = colour
@@ -3566,7 +3722,7 @@ def selected_steps(text):
             continue
         if not piece.isdigit() or int(piece) not in numbers:
             raise argparse.ArgumentTypeError(
-                "%r is not a step number (1-%d)" % (piece, len(STEPS))
+                "%r is not a step number (0-%d)" % (piece, len(STEPS) - 1)
             )
         wanted.add(int(piece))
     # Fixed order regardless of how they were typed: "3,1" still canonicalises
@@ -3623,7 +3779,21 @@ def build_parser():
         "--steps",
         default=None,
         metavar="N[,N...]",
-        help="run only these steps (default: all of 1-%d)" % len(STEPS),
+        help="run only these steps (default: all of 0-%d)" % (len(STEPS) - 1),
+    )
+    parser.add_argument(
+        "--from",
+        dest="retime_from",
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="step 0: only re-time shots whose camera reading is on or after this day",
+    )
+    parser.add_argument(
+        "--to",
+        dest="retime_to",
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="step 0: only re-time shots whose camera reading is on or before this day",
     )
     parser.add_argument(
         "--list-to-split",

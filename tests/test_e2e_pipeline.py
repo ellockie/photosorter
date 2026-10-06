@@ -11,19 +11,11 @@ from src.pipeline_stages.legacy import final_event_folder
 from src.core import MediaAsset
 
 
-# Two-timeline model: camera NE71 is on home (London, BST=+1h on 2026-04-12) and
-# was never re-set for the trip; the location timeline places the photographer in
-# Tokyo. So reading 10:00 London -> 09:00 UTC -> Tokyo 18:00, suffix "Japan".
-ZONES = {"UK": "Europe/London", "JP": "Asia/Tokyo"}
-
-LOCATIONS = [
-    {"since": "2000-01-01_(Sat)_00.00.00", "zone": "UK"},
-    {
-        "since": "2026-04-10_(Fri)_00.00.00",
-        "zone": "JP",
-        "label": "Japan",
-        "until": "2026-04-20_(Mon)_23.59.59",
-    },
+# Camera NE71 has no clock entry, so inside the Japan trip it is assumed to have
+# stayed on home time (London, BST=+1h on 2026-04-12): reading 10:00 London ->
+# 09:00 UTC -> Tokyo 18:00. Trips no longer write a label into names.
+TRIPS = [
+    {"country": "JP", "from": "2026-04-10_(Fri)__00.00.00", "to": "2026-04-20_(Mon)__23.59.59"},
 ]
 
 
@@ -67,9 +59,9 @@ def build_config(tmp_path):
             "raw_marker": "RAW__",
         },
         "safety": {"enabled": True, "hash_chunk_size": 1024},
-        "zones": ZONES,
-        "locations": LOCATIONS,
-        "camera_clock_sets": [],
+        "home": "GB",
+        "trips": TRIPS,
+        "camera_clocks": [],
     }
 
 
@@ -132,6 +124,8 @@ def no_legacy_uploads(monkeypatch):
 
 def test_e2e_fixture_matrix_full_default_dag(tmp_path, monkeypatch, no_legacy_uploads):
     config = build_config(tmp_path)
+    # A headless run declines re-dating (nobody to ask); this run says yes to all.
+    monkeypatch.setattr("src.pipeline_stages.timezone_and_travel.HEADLESS_ANSWER", {"action": "all"})
     inbox = Path(config["paths"]["inbox_folder"])
     root = Path(config["paths"]["root_folder"])
     inbox.mkdir(parents=True)
@@ -156,8 +150,8 @@ def test_e2e_fixture_matrix_full_default_dag(tmp_path, monkeypatch, no_legacy_up
     context = PipelineContext(config=config, mode=PipelineMode.CLI)
     build_default_orchestrator().run(context)
 
-    japan_folder = root / "2026" / "04. April" / "2026-04-12_(Sun) - Japan"
-    expected_stem = "2026-04-12_(Sun)__18.00.00__Japan__f4.0__T1_250__L28.0__I100__NE71"
+    japan_folder = root / "2026" / "04. April" / "2026-04-12_(Sun) - 1. ######"
+    expected_stem = "2026-04-12_(Sun)__18.00.00__f4.0__T1_250__L28.0__I100__NE71"
     # test1 and test4 both generate this name and hold different bytes, so
     # neither is the representative: both are marked (F4c), and the folder
     # holds the question rather than an answer to it.
@@ -215,8 +209,8 @@ def test_e2e_fixture_matrix_full_default_dag(tmp_path, monkeypatch, no_legacy_up
 
 def test_e2e_labeled_folder_stays_separate_from_loose_files(tmp_path, monkeypatch, no_legacy_uploads):
     config = build_config(tmp_path)
-    config["locations"] = []
-    config["camera_clock_sets"] = []
+    config["trips"] = []
+    config["camera_clocks"] = []
     inbox = Path(config["paths"]["inbox_folder"])
     root = Path(config["paths"]["root_folder"])
     origin = inbox / "2026-04-12 Birthday"

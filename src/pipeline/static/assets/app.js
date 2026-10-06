@@ -795,6 +795,15 @@ function promptActions(prompt) {
   if (prompt.prompt_type === "unknown_camera") {
     return null; // handled by the camera mapping form
   }
+  if (prompt.prompt_type === "retime") {
+    // Re-dating shots to the local time they were taken (camera-time-correction).
+    // "No" keeps the camera's own time; restructure step 0 can re-date later.
+    return [
+      ["Yes", { action: "yes" }],
+      ["Yes to all remaining folders", { action: "all" }],
+      ["No", { action: "no" }],
+    ];
+  }
   return [["Done", { done: true }]];
 }
 
@@ -871,6 +880,8 @@ function renderPrompts(prompts) {
     if (prompt.prompt_type === "name_collision") {
       card.appendChild(describeFile("Existing", prompt.payload.existing));
       card.appendChild(describeFile("New file", prompt.payload.candidate));
+    } else if (prompt.prompt_type === "retime") {
+      card.appendChild(describeList("Re-date to local time", prompt.payload.lines));
     } else if (prompt.prompt_type === "grouping_review") {
       const names = prompt.payload.names || [];
       card.appendChild(describeList(`Still unnamed (${names.length})`, names));

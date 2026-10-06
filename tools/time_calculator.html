@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera time calculator</title>
+<style>
+:root { --bg:#fbfbf9; --panel:#fff; --fg:#1d1d1b; --muted:#6f6d67; --line:#e2e0da; --accent:#2f6fde; --good:#1f7a3a; --warn:#b4471f; }
+@media (prefers-color-scheme: dark) { :root { --bg:#17181a; --panel:#202124; --fg:#e9e7e2; --muted:#a19e96; --line:#34353a; --accent:#7aa7ff; --good:#6cc287; --warn:#ff9a73; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui, sans-serif; }
+main { max-width:860px; margin:0 auto; padding:20px 16px 48px; }
+h1 { font-size:22px; margin:0 0 4px; } p.lede { color:var(--muted); margin:0 0 18px; }
+section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:14px; }
+h2 { font-size:15px; margin:0 0 10px; }
+label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+input, select { width:100%; font:inherit; padding:7px 9px; border:1px solid var(--line); border-radius:7px; background:var(--bg); color:var(--fg); }
+.row { display:grid; grid-template-columns:1fr 1fr; gap:0 14px; }
+@media (max-width:600px) { .row { grid-template-columns:1fr; } }
+.modes { display:flex; gap:18px; flex-wrap:wrap; } .modes label { display:flex; gap:6px; align-items:center; margin:0; color:var(--fg); font-size:14px; }
+.modes input { width:auto; }
+.hint { font-size:12px; color:var(--muted); margin-top:3px; }
+.result { font-size:26px; font-family:ui-monospace, Consolas, monospace; margin:2px 0 6px; overflow-wrap:anywhere; }
+dl { display:grid; grid-template-columns:max-content 1fr; gap:4px 14px; margin:8px 0 0; font-size:14px; } dt { color:var(--muted); } dd { margin:0; font-family:ui-monospace, Consolas, monospace; }
+pre { margin:6px 0 0; padding:9px 11px; background:var(--bg); border:1px solid var(--line); border-radius:7px; overflow-x:auto; font-size:13px; }
+button { font:inherit; font-size:13px; padding:4px 10px; border-radius:6px; border:1px solid var(--line); background:var(--bg); color:var(--fg); cursor:pointer; }
+.error { color:var(--warn); } .ok { color:var(--good); }
+.paste-head { display:flex; justify-content:space-between; align-items:center; margin-top:12px; font-size:13px; color:var(--muted); }
+.hidden { display:none; }
+</style></head><body><main>
+<h1>Camera time calculator</h1>
+<p class="lede">Turn a photo of a clock (or a phone photo taken at the same moment) into what the camera's clock was set to and how far off it was &mdash; or translate any camera reading into local time. Nothing leaves this page.</p>
+
+<section>
+  <div class="modes">
+    <label><input type="radio" name="mode" value="calibrate" checked> Calibrate from a clock or phone photo</label>
+    <label><input type="radio" name="mode" value="translate"> Translate a reading</label>
+  </div>
+  <div class="row">
+    <div><label for="camera">Camera symbol</label><input id="camera" value="ILC7R5" autocomplete="off"><div class="hint">As in the filename, e.g. ILC7R5, C6D.</div></div>
+    <div><label for="home">Home</label><select id="home"></select></div>
+  </div>
+  <label for="reading">Camera reading</label>
+  <input id="reading" placeholder="2026-09-27_(Sun)__19.08.31.774" autocomplete="off">
+  <div class="hint">Paste the photo's filename or stamp. Add the sub-second (<code>.774</code>, from <code>Sub Sec Time Original</code>) for a precise calibration.</div>
+  <div id="reference-box">
+    <label for="reference">True local time at that moment</label>
+    <input id="reference" placeholder="20:09:52.208   or   2026-09-27_(Sun)__20.09.52.208" autocomplete="off">
+    <div class="hint">The clock visible in the photo, or the stamp of a phone photo taken at the same moment.</div>
+  </div>
+  <div class="row">
+    <div><label for="country">Where you were</label><select id="country"></select></div>
+    <div id="region-box" class="hidden"><label for="region">Region</label><select id="region"></select></div>
+  </div>
+  <div id="state-box" class="hidden">
+    <div class="row">
+      <div><label for="state">Camera clock</label>
+        <select id="state">
+          <option value="home">home &mdash; home time, kept up with DST</option>
+          <option value="home-winter">home-winter &mdash; home winter time all year (DST off)</option>
+          <option value="home-summer">home-summer &mdash; home summer time all year</option>
+          <option value="local">local &mdash; set to where I was</option>
+          <option value="other">other zone or offset&hellip;</option>
+        </select></div>
+      <div><label for="error">Error (seconds, camera minus truth)</label><input id="error" type="number" value="0" step="1"></div>
+    </div>
+    <div id="other-box" class="hidden"><label for="other">Zone or fixed offset</label><input id="other" placeholder="Europe/Warsaw   or   +02:00"></div>
+  </div>
+</section>
+
+<section aria-live="polite">
+  <h2>Local time</h2>
+  <div id="out-stamp" class="result">&mdash;</div>
+  <div id="out-error" class="error"></div>
+  <dl id="out-details"></dl>
+  <div id="out-paste"></div>
+</section>
+</main>
+<script>/*
+ * The camera time calculator's arithmetic -- a browser copy of
+ * timezone_engine.calculate() (src/pipeline_stages/timezone_engine.py).
+ *
+ * A second spelling of the same rule, which T8 allows only because a page
+ * opened from disk cannot run Python. It is held to the engine by test:
+ * tests/test_time_calculator.py runs tests/fixtures/time_vectors.json through
+ * this file with Node and compares every answer. Change one, change both.
+ *
+ * Zones come from the browser's own time-zone database (Intl), so DST is exact
+ * and nothing is typed. Errors are whole seconds, camera minus truth, rounded
+ * half away from zero; a stamp is truncated to the second.
+ */
+(function (root) {
+  "use strict";
+
+  var WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  var STATES = ["home", "home-winter", "home-summer", "local"];
+  // stamps.STAMP_CAPTURE_PATTERN plus the F9 fraction (stamps.SUBSECOND_PATTERN).
+  var STAMP_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[ _]+\([A-Za-z]{3}\))?[ _]+(\d{2})\.(\d{2})\.(\d{2})(?:\.(\d{1,6}))?/;
+  var ISO_RE = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?/;
+  var TIME_RE = /^(\d{1,2})[:.](\d{2})[:.](\d{2})(?:\.(\d{1,6}))?$/;
+  var OFFSET_RE = /^([+-])(\d{1,2}):(\d{2})$/;
+  var formatters = {};
+
+  function fractionMs(digits) {
+    return digits ? Math.floor(parseInt((digits + "000000").slice(0, 6), 10) / 1000) : 0;
+  }
+
+  // A stamp as a "wall" millisecond count (the wall clock read as if it were UTC).
+  function parseStamp(text) {
+    text = String(text || "").trim();
+    var m = STAMP_RE.exec(text) || ISO_RE.exec(text);
+    if (!m) return null;
+    return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6], fractionMs(m[7]));
+  }
+
+  // A bare time of day ("20:09:52.208") as milliseconds since midnight, or null.
+  function parseTime(text) {
+    var m = TIME_RE.exec(String(text || "").trim());
+    if (!m) return null;
+    return ((+m[1] * 60 + +m[2]) * 60 + +m[3]) * 1000 + fractionMs(m[4]);
+  }
+
+  function pad(n, w) { n = String(n); while (n.length < (w || 2)) n = "0" + n; return n; }
+
+  function formatStamp(wall) {
+    var d = new Date(wall);
+    return d.getUTCFullYear() + "-" + pad(d.getUTCMonth() + 1) + "-" + pad(d.getUTCDate()) +
+      "_(" + WEEKDAYS[d.getUTCDay()] + ")__" + pad(d.getUTCHours()) + "." + pad(d.getUTCMinutes()) + "." +
+      pad(d.getUTCSeconds());
+  }
+
+  function formatStampFraction(wall) {
+    var ms = ((wall % 1000) + 1000) % 1000;
+    return formatStamp(wall) + (ms ? "." + pad(ms, 3) : "");
+  }
+
+  // Offset of a zone at a UTC instant, in milliseconds.
+  function offsetAt(zone, utc) {
+    var f = formatters[zone];
+    if (!f) {
+      f = formatters[zone] = new Intl.DateTimeFormat("en-US", {
+        timeZone: zone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit"
+      });
+    }
+    var parts = {};
+    f.formatToParts(new Date(utc)).forEach(function (p) { parts[p.type] = p.value; });
+    var wall = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour % 24, +parts.minute, +parts.second);
+    var whole = utc - (((utc % 1000) + 1000) % 1000);
+    return Math.round((wall - whole) / 60000) * 60000;
+  }
+
+  // Wall time in a zone -> UTC, the way Python's zoneinfo does with fold=0: in a
+  // repeated hour the first occurrence, in a skipped hour the offset before it.
+  function wallToUtc(zone, wall) {
+    var before = offsetAt(zone, wall - 12 * 3600000);
+    var after = offsetAt(zone, wall + 12 * 3600000);
+    var first = wall - before;
+    if (offsetAt(zone, first) === before) return first;
+    var second = wall - after;
+    if (offsetAt(zone, second) === after) return second;
+    return first;
+  }
+
+  function utcToWall(zone, utc) { return utc + offsetAt(zone, utc); }
+
+  function winterSummer(zone, year) {
+    var a = offsetAt(zone, Date.UTC(year, 0, 15, 12)), b = offsetAt(zone, Date.UTC(year, 6, 15, 12));
+    return [Math.min(a, b), Math.max(a, b)];
+  }
+
+  function fixedOffset(text) {
+    var m = OFFSET_RE.exec(String(text || "").trim());
+    if (!m) return null;
+    var ms = (+m[2] * 60 + +m[3]) * 60000;
+    return m[1] === "-" ? -ms : ms;
+  }
+
+  // A clock state as {zone} (with that zone's DST) or {offset(year)} (fixed).
+  function clockFor(state, home, location) {
+    if (state === "home") return { zone: home };
+    if (state === "local") return { zone: location };
+    if (state === "home-winter" || state === "home-summer") {
+      return { fixed: function (year) { return winterSummer(home, year)[state === "home-winter" ? 0 : 1]; } };
+    }
+    var offset = fixedOffset(state);
+    if (offset !== null) return { fixed: function () { return offset; } };
+    return { zone: state };  // an IANA zone the page has already resolved
+  }
+
+  function clockUtc(clock, wall) {
+    if (clock.zone) return wallToUtc(clock.zone, wall);
+    return wall - clock.fixed(new Date(wall).getUTCFullYear());
+  }
+
+  function roundSeconds(ms) {
+    var seconds = ms / 1000;
+    return (seconds < 0 ? -1 : 1) * Math.floor(Math.abs(seconds) + 0.5) || 0;
+  }
+
+  /*
+   * opts: home, location (IANA zones), reading (stamp, fraction allowed),
+   * reference (true local stamp, or a bare time), state, error (seconds).
+   * With a reference the state leaving the smallest remainder is inferred.
+   */
+  function calculate(opts) {
+    var home = opts.home, location = opts.location;
+    var reading = parseStamp(opts.reading);
+    if (reading === null) throw new Error("The camera reading is not a stamp like 2026-09-27_(Sun)__19.08.31");
+    var state = opts.state || "home", error = +opts.error || 0, remainderMs = null, trueWall = null;
+    if (opts.reference !== undefined && opts.reference !== null && String(opts.reference).trim() !== "") {
+      var candidates = [];
+      var ref = parseStamp(opts.reference);
+      if (ref !== null) {
+        candidates.push(ref);
+      } else {
+        var time = parseTime(opts.reference);
+        if (time === null) throw new Error("The reference is neither a stamp nor a time like 20:09:52.208");
+        var day = reading - (((reading % 86400000) + 86400000) % 86400000);
+        [-86400000, 0, 86400000].forEach(function (shift) { candidates.push(day + shift + time); });
+      }
+      var best = null;
+      candidates.forEach(function (candidate) {
+        var trueUtc = wallToUtc(location, candidate);
+        STATES.forEach(function (name) {
+          var remainder = clockUtc(clockFor(name, home, location), reading) - trueUtc;
+          if (best === null || Math.abs(remainder) < Math.abs(best.remainder)) {
+            best = { state: name, remainder: remainder, trueWall: candidate };
+          }
+        });
+      });
+      state = best.state; error = roundSeconds(best.remainder); remainderMs = best.remainder; trueWall = best.trueWall;
+    }
+    var clock = clockFor(state, home, location);
+    var whole = reading - (((reading % 1000) + 1000) % 1000);
+    var stamp;
+    if (clock.zone && clock.zone === location) {
+      stamp = whole - error * 1000;
+    } else {
+      stamp = utcToWall(location, clockUtc(clock, whole) - error * 1000);
+    }
+    return {
+      state: state, error: error, stamp: formatStamp(stamp), remainderMs: remainderMs,
+      reading: formatStampFraction(reading), trueStamp: trueWall === null ? null : formatStampFraction(trueWall),
+      shiftSeconds: Math.round((stamp - whole) / 1000)
+    };
+  }
+
+  function formatDuration(seconds) {
+    var sign = seconds < 0 ? "-" : "+";
+    seconds = Math.abs(seconds);
+    var h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60), s = seconds % 60;
+    if (h) return sign + h + "h " + pad(m) + "m " + pad(s) + "s";
+    if (m) return sign + m + "m " + pad(s) + "s";
+    return sign + s + "s";
+  }
+
+  var api = {
+    calculate: calculate, parseStamp: parseStamp, formatStamp: formatStamp, offsetAt: offsetAt,
+    formatDuration: formatDuration, STATES: STATES
+  };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.TimeCalc = api;
+})(this);
+</script>
+<script>
+var COUNTRIES = {"AD":["Andorra",["Europe/Andorra"]],"AE":["United Arab Emirates",["Asia/Dubai"]],"AF":["Afghanistan",["Asia/Kabul"]],"AG":["Antigua & Barbuda",["America/Antigua"]],"AI":["Anguilla",["America/Anguilla"]],"AL":["Albania",["Europe/Tirane"]],"AM":["Armenia",["Asia/Yerevan"]],"AO":["Angola",["Africa/Luanda"]],"AQ":["Antarctica",["Antarctica/McMurdo","Antarctica/Casey","Antarctica/Davis","Antarctica/DumontDUrville","Antarctica/Mawson","Antarctica/Palmer","Antarctica/Rothera","Antarctica/Syowa","Antarctica/Troll","Antarctica/Vostok"]],"AR":["Argentina",["America/Argentina/Buenos_Aires","America/Argentina/Cordoba","America/Argentina/Salta","America/Argentina/Jujuy","America/Argentina/La_Rioja","America/Argentina/San_Juan","America/Argentina/Mendoza","America/Argentina/San_Luis"]],"AS":["Samoa (American)",["Pacific/Pago_Pago"]],"AT":["Austria",["Europe/Vienna"]],"AU":["Australia",["Australia/Lord_Howe","Antarctica/Macquarie","Australia/Hobart","Australia/Broken_Hill","Australia/Brisbane","Australia/Lindeman","Australia/Darwin","Australia/Perth","Australia/Eucla"]],"AW":["Aruba",["America/Aruba"]],"AX":["\u00c5land Islands",["Europe/Mariehamn"]],"AZ":["Azerbaijan",["Asia/Baku"]],"BA":["Bosnia & Herzegovina",["Europe/Sarajevo"]],"BB":["Barbados",["America/Barbados"]],"BD":["Bangladesh",["Asia/Dhaka"]],"BE":["Belgium",["Europe/Brussels"]],"BF":["Burkina Faso",["Africa/Ouagadougou"]],"BG":["Bulgaria",["Europe/Sofia"]],"BH":["Bahrain",["Asia/Bahrain"]],"BI":["Burundi",["Africa/Bujumbura"]],"BJ":["Benin",["Africa/Porto-Novo"]],"BL":["St Barthelemy",["America/St_Barthelemy"]],"BM":["Bermuda",["Atlantic/Bermuda"]],"BN":["Brunei",["Asia/Brunei"]],"BO":["Bolivia",["America/La_Paz"]],"BQ":["Caribbean NL",["America/Kralendijk"]],"BR":["Brazil",["America/Noronha","America/Belem","America/Fortaleza","America/Araguaina","America/Maceio","America/Bahia","America/Sao_Paulo","America/Campo_Grande","America/Cuiaba","America/Santarem","America/Porto_Velho","America/Boa_Vista","America/Manaus","America/Eirunepe","America/Rio_Branco"]],"BS":["Bahamas",["America/Nassau"]],"BT":["Bhutan",["Asia/Thimphu"]],"BW":["Botswana",["Africa/Gaborone"]],"BY":["Belarus",["Europe/Minsk"]],"BZ":["Belize",["America/Belize"]],"CA":["Canada",["America/St_Johns","America/Halifax","America/Blanc-Sablon","America/Toronto","America/Iqaluit","America/Atikokan","America/Winnipeg","America/Resolute","America/Rankin_Inlet","America/Regina","America/Edmonton","America/Cambridge_Bay","America/Creston","America/Fort_Nelson","America/Whitehorse","America/Vancouver"]],"CC":["Cocos (Keeling) Islands",["Indian/Cocos"]],"CD":["Congo (Dem. Rep.)",["Africa/Kinshasa","Africa/Lubumbashi"]],"CF":["Central African Rep.",["Africa/Bangui"]],"CG":["Congo (Rep.)",["Africa/Brazzaville"]],"CH":["Switzerland",["Europe/Zurich"]],"CI":["C\u00f4te d'Ivoire",["Africa/Abidjan"]],"CK":["Cook Islands",["Pacific/Rarotonga"]],"CL":["Chile",["America/Santiago","America/Coyhaique","America/Punta_Arenas","Pacific/Easter"]],"CM":["Cameroon",["Africa/Douala"]],"CN":["China",["Asia/Shanghai","Asia/Urumqi"]],"CO":["Colombia",["America/Bogota"]],"CR":["Costa Rica",["America/Costa_Rica"]],"CU":["Cuba",["America/Havana"]],"CV":["Cape Verde",["Atlantic/Cape_Verde"]],"CW":["Cura\u00e7ao",["America/Curacao"]],"CX":["Christmas Island",["Indian/Christmas"]],"CY":["Cyprus",["Asia/Nicosia","Asia/Famagusta"]],"CZ":["Czech Republic",["Europe/Prague"]],"DE":["Germany",["Europe/Berlin"]],"DJ":["Djibouti",["Africa/Djibouti"]],"DK":["Denmark",["Europe/Copenhagen"]],"DM":["Dominica",["America/Dominica"]],"DO":["Dominican Republic",["America/Santo_Domingo"]],"DZ":["Algeria",["Africa/Algiers"]],"EC":["Ecuador",["America/Guayaquil","Pacific/Galapagos"]],"EE":["Estonia",["Europe/Tallinn"]],"EG":["Egypt",["Africa/Cairo"]],"EH":["Western Sahara",["Africa/El_Aaiun"]],"ER":["Eritrea",["Africa/Asmara"]],"ES":["Spain",["Europe/Madrid","Atlantic/Canary"]],"ET":["Ethiopia",["Africa/Addis_Ababa"]],"FI":["Finland",["Europe/Helsinki"]],"FJ":["Fiji",["Pacific/Fiji"]],"FK":["Falkland Islands",["Atlantic/Stanley"]],"FM":["Micronesia",["Pacific/Chuuk","Pacific/Pohnpei","Pacific/Kosrae"]],"FO":["Faroe Islands",["Atlantic/Faroe"]],"FR":["France",["Europe/Paris"]],"GA":["Gabon",["Africa/Libreville"]],"GB":["Britain (UK)",["Europe/London"]],"GD":["Grenada",["America/Grenada"]],"GE":["Georgia",["Asia/Tbilisi"]],"GF":["French Guiana",["America/Cayenne"]],"GG":["Guernsey",["Europe/Guernsey"]],"GH":["Ghana",["Africa/Accra"]],"GI":["Gibraltar",["Europe/Gibraltar"]],"GL":["Greenland",["America/Nuuk","America/Danmarkshavn","America/Scoresbysund","America/Thule"]],"GM":["Gambia",["Africa/Banjul"]],"GN":["Guinea",["Africa/Conakry"]],"GP":["Guadeloupe",["America/Guadeloupe"]],"GQ":["Equatorial Guinea",["Africa/Malabo"]],"GR":["Greece",["Europe/Athens"]],"GS":["South Georgia & the South Sandwich Islands",["Atlantic/South_Georgia"]],"GT":["Guatemala",["America/Guatemala"]],"GU":["Guam",["Pacific/Guam"]],"GW":["Guinea-Bissau",["Africa/Bissau"]],"GY":["Guyana",["America/Guyana"]],"HK":["Hong Kong",["Asia/Hong_Kong"]],"HN":["Honduras",["America/Tegucigalpa"]],"HR":["Croatia",["Europe/Zagreb"]],"HT":["Haiti",["America/Port-au-Prince"]],"HU":["Hungary",["Europe/Budapest"]],"ID":["Indonesia",["Asia/Jakarta","Asia/Makassar","Asia/Jayapura"]],"IE":["Ireland",["Europe/Dublin"]],"IL":["Israel",["Asia/Jerusalem"]],"IM":["Isle of Man",["Europe/Isle_of_Man"]],"IN":["India",["Asia/Kolkata"]],"IO":["British Indian Ocean Territory",["Indian/Chagos"]],"IQ":["Iraq",["Asia/Baghdad"]],"IR":["Iran",["Asia/Tehran"]],"IS":["Iceland",["Atlantic/Reykjavik"]],"IT":["Italy",["Europe/Rome"]],"JE":["Jersey",["Europe/Jersey"]],"JM":["Jamaica",["America/Jamaica"]],"JO":["Jordan",["Asia/Amman"]],"JP":["Japan",["Asia/Tokyo"]],"KE":["Kenya",["Africa/Nairobi"]],"KG":["Kyrgyzstan",["Asia/Bishkek"]],"KH":["Cambodia",["Asia/Phnom_Penh"]],"KI":["Kiribati",["Pacific/Tarawa","Pacific/Kanton","Pacific/Kiritimati"]],"KM":["Comoros",["Indian/Comoro"]],"KN":["St Kitts & Nevis",["America/St_Kitts"]],"KP":["Korea (North)",["Asia/Pyongyang"]],"KR":["Korea (South)",["Asia/Seoul"]],"KW":["Kuwait",["Asia/Kuwait"]],"KY":["Cayman Islands",["America/Cayman"]],"KZ":["Kazakhstan",["Asia/Almaty","Asia/Qyzylorda","Asia/Qostanay","Asia/Aqtobe","Asia/Aqtau","Asia/Atyrau","Asia/Oral"]],"LA":["Laos",["Asia/Vientiane"]],"LB":["Lebanon",["Asia/Beirut"]],"LC":["St Lucia",["America/St_Lucia"]],"LI":["Liechtenstein",["Europe/Vaduz"]],"LK":["Sri Lanka",["Asia/Colombo"]],"LR":["Liberia",["Africa/Monrovia"]],"LS":["Lesotho",["Africa/Maseru"]],"LT":["Lithuania",["Europe/Vilnius"]],"LU":["Luxembourg",["Europe/Luxembourg"]],"LV":["Latvia",["Europe/Riga"]],"LY":["Libya",["Africa/Tripoli"]],"MA":["Morocco",["Africa/Casablanca"]],"MC":["Monaco",["Europe/Monaco"]],"MD":["Moldova",["Europe/Chisinau"]],"ME":["Montenegro",["Europe/Podgorica"]],"MF":["St Martin (French)",["America/Marigot"]],"MG":["Madagascar",["Indian/Antananarivo"]],"MH":["Marshall Islands",["Pacific/Majuro","Pacific/Kwajalein"]],"MK":["North Macedonia",["Europe/Skopje"]],"ML":["Mali",["Africa/Bamako"]],"MM":["Myanmar (Burma)",["Asia/Yangon"]],"MN":["Mongolia",["Asia/Ulaanbaatar","Asia/Hovd"]],"MO":["Macau",["Asia/Macau"]],"MP":["Northern Mariana Islands",["Pacific/Saipan"]],"MQ":["Martinique",["America/Martinique"]],"MR":["Mauritania",["Africa/Nouakchott"]],"MS":["Montserrat",["America/Montserrat"]],"MT":["Malta",["Europe/Malta"]],"MU":["Mauritius",["Indian/Mauritius"]],"MV":["Maldives",["Indian/Maldives"]],"MW":["Malawi",["Africa/Blantyre"]],"MX":["Mexico",["America/Mexico_City","America/Cancun","America/Matamoros","America/Chihuahua","America/Ciudad_Juarez","America/Ojinaga","America/Mazatlan","America/Bahia_Banderas","America/Hermosillo","America/Tijuana"]],"MY":["Malaysia",["Asia/Kuala_Lumpur"]],"MZ":["Mozambique",["Africa/Maputo"]],"NA":["Namibia",["Africa/Windhoek"]],"NC":["New Caledonia",["Pacific/Noumea"]],"NE":["Niger",["Africa/Niamey"]],"NF":["Norfolk Island",["Pacific/Norfolk"]],"NG":["Nigeria",["Africa/Lagos"]],"NI":["Nicaragua",["America/Managua"]],"NL":["Netherlands",["Europe/Amsterdam"]],"NO":["Norway",["Europe/Oslo"]],"NP":["Nepal",["Asia/Kathmandu"]],"NR":["Nauru",["Pacific/Nauru"]],"NU":["Niue",["Pacific/Niue"]],"NZ":["New Zealand",["Pacific/Auckland","Pacific/Chatham"]],"OM":["Oman",["Asia/Muscat"]],"PA":["Panama",["America/Panama"]],"PE":["Peru",["America/Lima"]],"PF":["French Polynesia",["Pacific/Tahiti","Pacific/Marquesas","Pacific/Gambier"]],"PG":["Papua New Guinea",["Pacific/Port_Moresby","Pacific/Bougainville"]],"PH":["Philippines",["Asia/Manila"]],"PK":["Pakistan",["Asia/Karachi"]],"PL":["Poland",["Europe/Warsaw"]],"PM":["St Pierre & Miquelon",["America/Miquelon"]],"PN":["Pitcairn",["Pacific/Pitcairn"]],"PR":["Puerto Rico",["America/Puerto_Rico"]],"PS":["Palestine",["Asia/Gaza"]],"PT":["Portugal",["Europe/Lisbon","Atlantic/Madeira","Atlantic/Azores"]],"PW":["Palau",["Pacific/Palau"]],"PY":["Paraguay",["America/Asuncion"]],"QA":["Qatar",["Asia/Qatar"]],"RE":["R\u00e9union",["Indian/Reunion"]],"RO":["Romania",["Europe/Bucharest"]],"RS":["Serbia",["Europe/Belgrade"]],"RU":["Russia",["Europe/Kaliningrad","Europe/Moscow","Europe/Kirov","Europe/Volgograd","Europe/Astrakhan","Europe/Saratov","Europe/Ulyanovsk","Europe/Samara","Asia/Yekaterinburg","Asia/Omsk","Asia/Novosibirsk","Asia/Barnaul","Asia/Tomsk","Asia/Novokuznetsk","Asia/Krasnoyarsk","Asia/Irkutsk","Asia/Chita","Asia/Yakutsk","Asia/Khandyga","Asia/Vladivostok","Asia/Ust-Nera","Asia/Magadan","Asia/Sakhalin","Asia/Srednekolymsk","Asia/Kamchatka"]],"RW":["Rwanda",["Africa/Kigali"]],"SA":["Saudi Arabia",["Asia/Riyadh"]],"SB":["Solomon Islands",["Pacific/Guadalcanal"]],"SC":["Seychelles",["Indian/Mahe"]],"SD":["Sudan",["Africa/Khartoum"]],"SE":["Sweden",["Europe/Stockholm"]],"SG":["Singapore",["Asia/Singapore"]],"SH":["St Helena",["Atlantic/St_Helena"]],"SI":["Slovenia",["Europe/Ljubljana"]],"SJ":["Svalbard & Jan Mayen",["Arctic/Longyearbyen"]],"SK":["Slovakia",["Europe/Bratislava"]],"SL":["Sierra Leone",["Africa/Freetown"]],"SM":["San Marino",["Europe/San_Marino"]],"SN":["Senegal",["Africa/Dakar"]],"SO":["Somalia",["Africa/Mogadishu"]],"SR":["Suriname",["America/Paramaribo"]],"SS":["South Sudan",["Africa/Juba"]],"ST":["Sao Tome & Principe",["Africa/Sao_Tome"]],"SV":["El Salvador",["America/El_Salvador"]],"SX":["St Maarten (Dutch)",["America/Lower_Princes"]],"SY":["Syria",["Asia/Damascus"]],"SZ":["Eswatini (Swaziland)",["Africa/Mbabane"]],"TC":["Turks & Caicos Is",["America/Grand_Turk"]],"TD":["Chad",["Africa/Ndjamena"]],"TF":["French S. Terr.",["Indian/Kerguelen"]],"TG":["Togo",["Africa/Lome"]],"TH":["Thailand",["Asia/Bangkok"]],"TJ":["Tajikistan",["Asia/Dushanbe"]],"TK":["Tokelau",["Pacific/Fakaofo"]],"TL":["East Timor",["Asia/Dili"]],"TM":["Turkmenistan",["Asia/Ashgabat"]],"TN":["Tunisia",["Africa/Tunis"]],"TO":["Tonga",["Pacific/Tongatapu"]],"TR":["Turkey",["Europe/Istanbul"]],"TT":["Trinidad & Tobago",["America/Port_of_Spain"]],"TV":["Tuvalu",["Pacific/Funafuti"]],"TW":["Taiwan",["Asia/Taipei"]],"TZ":["Tanzania",["Africa/Dar_es_Salaam"]],"UA":["Ukraine",["Europe/Simferopol","Europe/Kyiv"]],"UG":["Uganda",["Africa/Kampala"]],"UM":["US minor outlying islands",["Pacific/Midway","Pacific/Wake"]],"US":["United States",["America/New_York","America/Kentucky/Monticello","America/Indiana/Indianapolis","America/Indiana/Vincennes","America/Indiana/Winamac","America/Chicago","America/Indiana/Tell_City","America/Indiana/Knox","America/North_Dakota/Center","America/North_Dakota/New_Salem","America/North_Dakota/Beulah","America/Denver","America/Phoenix","America/Los_Angeles","America/Anchorage","America/Metlakatla","America/Adak","Pacific/Honolulu"]],"UY":["Uruguay",["America/Montevideo"]],"UZ":["Uzbekistan",["Asia/Samarkand","Asia/Tashkent"]],"VA":["Vatican City",["Europe/Vatican"]],"VC":["St Vincent",["America/St_Vincent"]],"VE":["Venezuela",["America/Caracas"]],"VG":["Virgin Islands (UK)",["America/Tortola"]],"VI":["Virgin Islands (US)",["America/St_Thomas"]],"VN":["Vietnam",["Asia/Ho_Chi_Minh"]],"VU":["Vanuatu",["Pacific/Efate"]],"WF":["Wallis & Futuna",["Pacific/Wallis"]],"WS":["Samoa (western)",["Pacific/Apia"]],"YE":["Yemen",["Asia/Aden"]],"YT":["Mayotte",["Indian/Mayotte"]],"ZA":["South Africa",["Africa/Johannesburg"]],"ZM":["Zambia",["Africa/Lusaka"]],"ZW":["Zimbabwe",["Africa/Harare"]]};
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var codes = Object.keys(COUNTRIES).sort(function (a, b) { return COUNTRIES[a][0].localeCompare(COUNTRIES[b][0]); });
+  function fill(select, selected) {
+    codes.forEach(function (code) {
+      var o = document.createElement("option");
+      o.value = code; o.textContent = COUNTRIES[code][0] + " (" + code + ")" + (COUNTRIES[code][1].length > 1 ? " — several zones" : "");
+      if (code === selected) o.selected = true;
+      select.appendChild(o);
+    });
+  }
+  fill($("home"), "GB"); fill($("country"), "GB");
+  try { var saved = JSON.parse(localStorage.getItem("timecalc") || "{}");
+    ["camera", "home", "country"].forEach(function (k) { if (saved[k]) $(k).value = saved[k]; }); } catch (e) {}
+
+  function zoneOf(code, region) {
+    var zones = COUNTRIES[code][1];
+    return zones.length === 1 ? zones[0] : (region || zones[0]);
+  }
+  function placeName(code, zone) { return COUNTRIES[code][1].length === 1 ? code : zone; }
+  function mode() { return document.querySelector("input[name=mode]:checked").value; }
+
+  function updateRegion() {
+    var zones = COUNTRIES[$("country").value][1], box = $("region-box"), select = $("region");
+    if (zones.length < 2) { box.classList.add("hidden"); return; }
+    if (select.dataset.country !== $("country").value) {
+      select.innerHTML = ""; select.dataset.country = $("country").value;
+      zones.forEach(function (z) { var o = document.createElement("option"); o.value = o.textContent = z; select.appendChild(o); });
+    }
+    box.classList.remove("hidden");
+  }
+
+  function line(obj) { return JSON.stringify(obj).replace(/":/g, "\": ").replace(/,"/g, ", \"").replace(/^\{/, "{ ").replace(/\}$/, " },"); }
+  function pasteBlock(title, text) {
+    var id = "p" + Math.random().toString(36).slice(2);
+    return '<div class="paste-head"><span>' + title + '</span><button data-copy="' + id + '">Copy</button></div><pre id="' + id + '">' +
+      text.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</pre>";
+  }
+
+  function run() {
+    updateRegion();
+    var isCal = mode() === "calibrate";
+    $("reference-box").classList.toggle("hidden", !isCal);
+    $("state-box").classList.toggle("hidden", isCal);
+    $("other-box").classList.toggle("hidden", $("state").value !== "other");
+    try { localStorage.setItem("timecalc", JSON.stringify({ camera: $("camera").value, home: $("home").value, country: $("country").value })); } catch (e) {}
+    $("out-error").textContent = ""; $("out-details").innerHTML = ""; $("out-paste").innerHTML = ""; $("out-stamp").textContent = "—";
+    var reading = $("reading").value.trim();
+    if (!reading) return;
+    var home = zoneOf($("home").value), location = zoneOf($("country").value, $("region").value);
+    var opts = { home: home, location: location, reading: reading };
+    if (isCal) {
+      if (!$("reference").value.trim()) { $("out-error").textContent = "Enter the true local time to calibrate."; return; }
+      opts.reference = $("reference").value;
+    } else {
+      opts.state = $("state").value === "other" ? $("other").value.trim() : $("state").value;
+      opts.error = parseInt($("error").value || "0", 10);
+    }
+    var r;
+    try { r = TimeCalc.calculate(opts); } catch (e) { $("out-error").textContent = e.message; return; }
+    $("out-stamp").textContent = r.stamp;
+    var camera = $("camera").value.trim() || "CAMERA";
+    var details = [["Clock", r.state], ["Error", (r.error >= 0 ? "+" : "") + r.error + " s"],
+                   ["Shift applied", TimeCalc.formatDuration(r.shiftSeconds)], ["Zone", location]];
+    if (r.remainderMs !== null) details.push(["Measured", (r.remainderMs / 1000).toFixed(3) + " s off (" + r.state + ")"]);
+    if (Math.abs(r.error) >= 900) details.push(["Note", "Over 15 min left over: probably a clock setting not listed here"]);
+    $("out-details").innerHTML = details.map(function (d) { return "<dt>" + d[0] + "</dt><dd>" + d[1] + "</dd>"; }).join("");
+    var clock = r.state === "local" ? "local" : r.state;
+    var html = "";
+    if (isCal) {
+      html += pasteBlock("calibrations — one measurement", line({ camera: camera, reading: r.reading, "true": r.trueStamp }));
+      html += pasteBlock("camera_clocks — if not recorded yet (drop “from” to mean “since the first shot”; otherwise use the first reading after you set it)",
+        line({ camera: camera, from: r.reading.slice(0, 26), clock: clock }));
+    } else if ($("country").value !== $("home").value) {
+      html += pasteBlock("trips — if this place is not recorded yet", line({ country: placeName($("country").value, location), from: r.stamp, to: "??" }));
+    }
+    $("out-paste").innerHTML = html;
+  }
+  document.addEventListener("input", run);
+  document.addEventListener("change", run);
+  document.addEventListener("click", function (e) {
+    var id = e.target.getAttribute && e.target.getAttribute("data-copy");
+    if (!id) return;
+    var text = $(id).textContent;
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function () {
+      e.target.textContent = "Copied"; setTimeout(function () { e.target.textContent = "Copy"; }, 1200);
+    }, function () { var range = document.createRange(); range.selectNodeContents($(id)); getSelection().removeAllRanges(); getSelection().addRange(range); });
+  });
+  run();
+})();
+</script>
+</body></html>

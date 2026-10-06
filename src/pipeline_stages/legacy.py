@@ -1,8 +1,8 @@
 import datetime
 from pathlib import Path
 
-from src.constants.constants import \
-    KNOWN_CAMERAS_SYMBOLS
+from src.constants.camera_symbols import \
+    camera_symbol_for_model  # noqa: F401  (re-exported: one definition, T8)
 from src.constants.months import MONTH_FOLDERS
 from src.pipeline_stages.taxonomy import duplicate_name  # noqa: F401  (re-exported: F4 lives in taxonomy)
 from src.pipeline_stages.siblings import \
@@ -145,14 +145,6 @@ def legacy_image_datetime(value: str) -> str:
     return format_stamp(captured)
 
 
-def camera_symbol_for_model(camera_name: str, config: dict) -> str:
-    configured = config.get("camera_symbols", {})
-    if camera_name in configured:
-        return configured[camera_name]
-    for known_name, symbol in KNOWN_CAMERAS_SYMBOLS:
-        if known_name == camera_name:
-            return symbol
-    return configured.get("", "NOID")
 
 
 # The archive owner's own media carries no author marker: absent means "mine".

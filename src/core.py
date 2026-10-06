@@ -33,7 +33,9 @@ PHOTO_ROOTS_KEY = "photo_roots"
 # config, so it lives in its own sibling file (Decision 9). The loader overlays
 # it onto the config dict so the rest of the code keeps reading config["..."].
 TIMEZONE_FILE_NAME = "timezone.json"
-TIMEZONE_KEYS = ("zones", "locations", "camera_clock_sets")
+# Which keys it holds is the engine's to say (T8), so it is asked, lazily:
+# importing src.pipeline_stages here would import every stage, and they import
+# this module.
 DEFAULT_COLLISION_THRESHOLD = 0.5
 DEFAULT_DASHBOARD_PORT = 8888
 DEFAULT_RETRY_ATTEMPTS = 5
@@ -264,11 +266,14 @@ def default_config() -> dict:
         "raw_sidecar_generation": {
             "enabled": True,
         },
-        # Two-timeline timezone & travel model (design.md Decision 9). Zones are
-        # a small alias map over IANA names; offsets are derived, never typed.
-        "zones": {},
-        "locations": [],
-        "camera_clock_sets": [],
+        # Camera clocks, trips and calibrations (openspec change
+        # camera-time-correction). Held in timezone.json, overlaid here; empty
+        # means no shot is ever shifted.
+        "home": "GB",
+        "mobiles": [],
+        "trips": [],
+        "camera_clocks": [],
+        "calibrations": [],
         "safety": {
             "enabled": True,
             "hash_chunk_size": 1024 * 1024,
@@ -464,7 +469,9 @@ def _load_timezone_file(config: dict, config_path: str | Path | None) -> None:
         logging.getLogger(__name__).warning("Could not read timezone file %s", tz_path)
         return
     if isinstance(data, dict):
-        for key in TIMEZONE_KEYS:
+        from src.pipeline_stages.timezone_engine import SUPERSEDED_KEYS, TIMEZONE_KEYS
+
+        for key in (*TIMEZONE_KEYS, *SUPERSEDED_KEYS):
             if key in data:
                 config[key] = data[key]
 
@@ -488,8 +495,9 @@ def load_config(config_path: str | Path | None = None, base_folder: str | Path |
 
 
 def _warn_timezone_config(config: dict) -> None:
-    # Enforce the at_reading "first corrected reading" convention at load time;
-    # this is the one timezone field that otherwise fails silently (Decision 9).
+    # Said at load time, because a wrong "from" frame or a clock setting typed as
+    # drift fails silently otherwise. Errors stop retiming where it runs; here
+    # they are only announced.
     from src.pipeline_stages.timezone_engine import validate_timezone_config
 
     for message in validate_timezone_config(config):
@@ -531,7 +539,11 @@ def save_config(config: dict, config_path: str | Path | None = None,
         serializable.setdefault("paths", {})["root_folder"] = str(persisted_root)
 
     # Split the timezone/travel data into its own file; keep it out of config.json.
+    from src.pipeline_stages.timezone_engine import SUPERSEDED_KEYS, TIMEZONE_KEYS
+
     tz_data = {key: serializable.pop(key) for key in TIMEZONE_KEYS if key in serializable}
+    for key in SUPERSEDED_KEYS:
+        serializable.pop(key, None)
     with path.open("w", encoding="utf-8") as handler:
         json.dump(serializable, handler, indent=2, sort_keys=True)
         handler.write("\n")

@@ -359,9 +359,9 @@ the Python engine and the page's JS, so the two cannot drift (T8 by test).
 **Rollback:** remove or adjust the `timezone.json` entries and re-run step 0.
 Names are recomputed from untouched EXIF.
 
-## Open Questions
+## Resolved Questions
 
-- Should the visualiser also emit an HTML version, beyond the terminal or text
-  output? This is deferrable; the text form comes first.
-- Intake "no": should those shots also get a log entry under `__LOGS` listing
-  them for a later restructure? The default is yes, as part of the run log.
+- The visualiser emits an HTML page as well as the terminal/text output
+  (decided 2026-10-06). It shows the same rows, lanes, rules and annotations.
+- Intake "no": the declined shots are listed in a file under `__LOGS` for a
+  later restructure, as well as in the run log (decided 2026-10-06).

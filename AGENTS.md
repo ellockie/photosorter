@@ -73,6 +73,7 @@ photosorter — Python 3.13 photo processing pipeline: rename, sort, and organis
 | Companion + sidecar matching | `src/pipeline_stages/companion_matching.py` | Leaf module: the engine. `reconcile_folder` (per event folder, capture time), `place_companions` (whole target, gather-then-distribute, name match; X10/X13 + MD5 on collision), `migrate_legacy_containers` (`##   EXIFs   ##`->`__EXIF`), `survey_trees` (read-only: non-compliant folders, legacy containers). Pipeline stage AND restructure tool both run it |
 | Motion photos (X16) | `src/pipeline_stages/embedded_videos.py` | Leaf module: finds stills carrying an embedded video (byte sniff, then ExifTool reading the file) and extracts it to `__VIDEOS_EXTRACTED\<still>.MOTION.mp4`. Run by the `embedded-video-extraction` stage (after folder sorting) and by reconciliation pass 7 of `tools/restructure_archive.py`; step 7 reports a missing one as X16. The clip is a companion kind, so matching carries it with its still |
 | NAS inbox intake | `src/pipeline_stages/nas_harvest.py` | Copies `paths.ingest.nas_inbox` into the INBOX (MD5-verified), then parks each original under `__HARVESTED\<run>\` on the NAS by a no-replace rename. Never deletes or overwrites on the NAS; a delivery ledger in `.JOURNAL` stops a half-finished run delivering twice. `nas_harvest.enabled` switches it on |
+| Camera clocks, trips, time zones | `src/pipeline_stages/timezone_engine.py` + `timezone.json` (repo root) | ARCHIVE_STANDARD §5.3 (K1-K10). One engine: reading + camera clock + trips + calibrations -> local stamp. Intake stage `timezone-and-travel` asks per folder (yes / yes to all / no); restructure **step 0** re-dates sorted folders via `retime_plan.py`. Read-only aids: `tools/clock_evidence_report.py`, `tools/timezone_visualiser.py` (text + HTML), `tools/time_calculator.html` (built by `tools/build_time_calculator.py`; its JS is held to the engine by `tests/fixtures/time_vectors.json`). Countries resolve via tzdata; `python -m src.list_zones` lists them |
 | Stage progress + ETA | `src/utils/progress.py` | Leaf module: `StageProgress` — the one definition of how a long stage reports where it is (bar, rate, ETA) to both the dashboard and the log. Built via `context.progress(...)` |
 | What a stage is for | `PipelineStage.description` in `src/core.py` | One sentence per stage, shown in the dashboard and logged on entry. `tests/test_stage_insights.py` fails if a stage ships without one |
 | Where a run's time went | `PipelineOrchestrator._close_run` | Times every stage from a `finally` (so a failed one is timed too) and ranks the slowest five |
@@ -123,6 +124,12 @@ _photosorter.bat
 # not implemented). Dry run by default; .ps1 is the same, for PowerShell.
 _restructure_archive.bat
 _restructure_archive.bat "d:\__PHOTOS_BACKUP" --year 2024 --apply
+# Re-time shots against timezone.json only (step 0), for one month
+_restructure_archive.bat --steps 0 --from 2026-09-01 --to 2026-09-30
+# What clock was every camera on? (read-only; also writes an HTML page)
+poetry run python tools/timezone_visualiser.py --year 2026 --open
+# Where did clocks change or trips begin? (read-only, paste-ready lines)
+poetry run python tools/clock_evidence_report.py --year 2026
 # --year ALL: every year the root holds, oldest first, one run each (PS-6)
 _restructure_archive.bat "d:\__PHOTOS_BACKUP" --year ALL --apply
 

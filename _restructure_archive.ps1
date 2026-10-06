@@ -1,8 +1,9 @@
 <#
 .SYNOPSIS
-Restructure an existing photo archive: canonicalise names, reunite companions,
-group every "__TO_SPLIT__" folder in the GUI, canonicalise again, mark the
-groups, then check and fix compliance with ARCHIVE_STANDARD.md.
+Restructure an existing photo archive: re-time shots against timezone.json
+(step 0, asking per folder: yes / yes to all / no), canonicalise names,
+reunite companions, group every "__TO_SPLIT__" folder in the GUI, canonicalise
+again, mark the groups, then check and fix compliance with ARCHIVE_STANDARD.md.
 
 .DESCRIPTION
 The PowerShell twin of _restructure_archive.bat. Same tool, same arguments,
@@ -16,6 +17,7 @@ any still missing one as X16. The still itself is never rewritten.
 
     .\_restructure_archive.ps1 --steps 7            # validate only
     .\_restructure_archive.ps1 --steps 2 --apply    # extract what is missing
+    .\_restructure_archive.ps1 --steps 0 --from 2026-09-01 --to 2026-09-30   # preview re-timing
 
 Nothing is changed without --apply. With no arguments this is a dry run over
 the configured archive root's current year. "--year ALL" runs every year the

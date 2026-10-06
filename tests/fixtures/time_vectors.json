@@ -1,0 +1,127 @@
+{
+  "_comment": "Shared by the Python engine (src/pipeline_stages/timezone_engine.py) and the calculator page (tools/build_time_calculator.py). Both must give these answers. Stamps are the photo grammar; errors are whole seconds, camera minus truth.",
+  "corrections": [
+    {
+      "name": "acceptance: a7R V before the phone sync (GMT clock in BST, 80 s slow)",
+      "config": {
+        "home": "GB",
+        "camera_clocks": [
+          {"camera": "ILC7R5", "clock": "home-winter"},
+          {"camera": "ILC7R5", "from": "2026-09-27_(Sun)__20.20.58", "counter": 16879, "clock": "local"}
+        ],
+        "calibrations": [
+          {"camera": "ILC7R5", "reading": "2026-09-27_(Sun)__19.08.31.774", "true": "2026-09-27_(Sun)__20.09.52.208"},
+          {"camera": "ILC7R5", "reading": "2026-09-27_(Sun)__20.20.58.925", "true": "2026-09-27_(Sun)__20.20.59.934"}
+        ]
+      },
+      "camera": "ILC7R5", "reading": "2026-09-27_(Sun)__19.08.31", "counter": 16878,
+      "expect": {"stamp": "2026-09-27_(Sun)__20.09.51", "error": -80, "source": "calibrated", "ambiguous": false}
+    },
+    {
+      "name": "acceptance: a7R V after the phone sync",
+      "config": "@0",
+      "camera": "ILC7R5", "reading": "2026-09-27_(Sun)__20.20.58", "counter": 16879,
+      "expect": {"stamp": "2026-09-27_(Sun)__20.20.59", "error": -1, "source": "calibrated", "ambiguous": false}
+    },
+    {
+      "name": "the pre-sync error applies constantly back to the first shot, winter included",
+      "config": "@0",
+      "camera": "ILC7R5", "reading": "2026-01-10_(Sat)__12.00.00",
+      "expect": {"stamp": "2026-01-10_(Sat)__12.01.20", "error": -80}
+    },
+    {
+      "name": "DST-off camera in summer, no calibration",
+      "config": {"home": "GB", "camera_clocks": [{"camera": "C6D", "clock": "home-winter"}]},
+      "camera": "C6D", "reading": "2026-07-01_(Wed)__12.00.00",
+      "expect": {"stamp": "2026-07-01_(Wed)__13.00.00", "error": 0, "source": "configured"}
+    },
+    {
+      "name": "empty config is identity",
+      "config": {"home": "GB"},
+      "camera": "C6D", "reading": "2026-07-01_(Wed)__12.00.00",
+      "expect": {"stamp": "2026-07-01_(Wed)__12.00.00", "error": 0, "source": "default"}
+    },
+    {
+      "name": "no record outside a trip: no shift",
+      "config": {"home": "GB", "trips": [{"country": "JP", "from": "2026-04-11_(Sat)__07.12.40", "to": "2026-04-20_(Mon)__21.03.11"}]},
+      "camera": "C6D", "reading": "2026-05-01_(Fri)__14.30.00",
+      "expect": {"stamp": "2026-05-01_(Fri)__14.30.00", "source": "default"}
+    },
+    {
+      "name": "no record inside a trip: the camera stayed on home time (assumed)",
+      "config": "@5",
+      "camera": "C6D", "reading": "2026-04-12_(Sun)__09.00.00",
+      "expect": {"stamp": "2026-04-12_(Sun)__17.00.00", "source": "assumed"}
+    },
+    {
+      "name": "a mobile is never shifted, even inside a trip",
+      "config": {"home": "GB", "mobiles": ["SG23U"], "trips": [{"country": "JP", "from": "2026-04-11_(Sat)__07.12.40", "to": "2026-04-20_(Mon)__21.03.11"}]},
+      "camera": "SG23U", "reading": "2026-04-12_(Sun)__09.00.00",
+      "expect": {"stamp": "2026-04-12_(Sun)__09.00.00", "source": "mobile"}
+    },
+    {
+      "name": "set to local on arrival: Tokyo time, no shift",
+      "config": {"home": "GB", "trips": [{"country": "JP", "from": "2026-04-11_(Sat)__07.12.40", "to": "2026-04-20_(Mon)__21.03.11"}],
+                 "camera_clocks": [{"camera": "C6D", "from": "2026-04-11_(Sat)__18.00.00", "clock": "local"}]},
+      "camera": "C6D", "reading": "2026-04-12_(Sun)__09.00.00",
+      "expect": {"stamp": "2026-04-12_(Sun)__09.00.00", "source": "configured"}
+    },
+    {
+      "name": "set to local in Tokyo, never set back: still Tokyo time at home",
+      "config": "@8",
+      "camera": "C6D", "reading": "2026-04-25_(Sat)__18.00.00",
+      "expect": {"stamp": "2026-04-25_(Sat)__10.00.00"}
+    },
+    {
+      "name": "backward adjustment, repeated reading, counter says before",
+      "config": {"home": "GB", "camera_clocks": [{"camera": "X", "from": "2026-08-01_(Sat)__10.00.00", "counter": 500, "clock": "home-winter"}]},
+      "camera": "X", "reading": "2026-08-01_(Sat)__10.30.00", "counter": 498,
+      "expect": {"stamp": "2026-08-01_(Sat)__10.30.00", "ambiguous": false}
+    },
+    {
+      "name": "backward adjustment, repeated reading, counter says after",
+      "config": "@10",
+      "camera": "X", "reading": "2026-08-01_(Sat)__10.30.00", "counter": 501,
+      "expect": {"stamp": "2026-08-01_(Sat)__11.30.00", "ambiguous": false}
+    },
+    {
+      "name": "backward adjustment, repeated reading, no counter: after, flagged",
+      "config": "@10",
+      "camera": "X", "reading": "2026-08-01_(Sat)__10.30.00",
+      "expect": {"stamp": "2026-08-01_(Sat)__11.30.00", "ambiguous": true}
+    },
+    {
+      "name": "fixed offset clock",
+      "config": {"home": "GB", "camera_clocks": [{"camera": "X", "clock": "+02:00"}]},
+      "camera": "X", "reading": "2026-01-10_(Sat)__12.00.00",
+      "expect": {"stamp": "2026-01-10_(Sat)__10.00.00"}
+    },
+    {
+      "name": "country clock tracks that country's DST",
+      "config": {"home": "GB", "camera_clocks": [{"camera": "X", "clock": "PL"}]},
+      "camera": "X", "reading": "2026-07-01_(Wed)__12.00.00",
+      "expect": {"stamp": "2026-07-01_(Wed)__11.00.00"}
+    }
+  ],
+  "config_errors": [
+    {"name": "multi-zone country", "config": {"home": "GB", "trips": [{"country": "US", "from": "2026-01-01_(Thu)__00.00.00", "to": "2026-01-02_(Fri)__00.00.00"}]}, "contains": "America/New_York"},
+    {"name": "superseded schema", "config": {"camera_clock_sets": []}, "contains": "camera_clocks"},
+    {"name": "mobile with a clock entry", "config": {"mobiles": ["SG23U"], "camera_clocks": [{"camera": "SG23U", "clock": "home"}]}, "contains": "mobile"},
+    {"name": "local without from", "config": {"camera_clocks": [{"camera": "X", "clock": "local"}]}, "contains": "'local' needs a 'from'"}
+  ],
+  "config_warnings": [
+    {"name": "a clock setting typed as drift", "config": {"home": "GB", "camera_clocks": [{"camera": "X", "clock": "home"}], "calibrations": [{"camera": "X", "reading": "2026-09-27_(Sun)__19.08.31.774", "true": "2026-09-27_(Sun)__20.09.52.208"}]}, "contains": "home-winter"},
+    {"name": "calibrations disagree", "config": {"home": "GB", "calibrations": [{"camera": "X", "reading": "2026-09-01_(Tue)__12.00.00", "true": "2026-09-01_(Tue)__12.00.10"}, {"camera": "X", "reading": "2026-09-02_(Wed)__12.00.00", "true": "2026-09-02_(Wed)__12.00.00"}]}, "contains": "disagree"},
+    {"name": "from recorded in the old frame", "config": {"home": "GB", "camera_clocks": [{"camera": "X", "from": "2026-04-11_(Sat)__08.00.00", "clock": "home"}, {"camera": "X", "from": "2026-04-11_(Sat)__09.00.00", "clock": "JP"}]}, "contains": "AFTER the adjustment"}
+  ],
+  "calculator": [
+    {"name": "acceptance: clock photo before the sync", "location": "GB", "reading": "2026-09-27_(Sun)__19.08.31.774", "reference": "2026-09-27_(Sun)__20.09.52.208",
+     "expect": {"state": "home-winter", "error": -80, "stamp": "2026-09-27_(Sun)__20.09.51"}},
+    {"name": "acceptance: clock photo after the sync", "location": "GB", "reading": "2026-09-27_(Sun)__20.20.58.925", "reference": "2026-09-27_(Sun)__20.20.59.934",
+     "expect": {"state": "home", "error": -1, "stamp": "2026-09-27_(Sun)__20.20.59"}},
+    {"name": "camera on UK time in Japan, phone reference", "location": "JP", "reading": "2026-04-12_(Sun)__09.00.05", "reference": "2026-04-12_(Sun)__17.00.00",
+     "expect": {"state": "home", "error": 5, "stamp": "2026-04-12_(Sun)__17.00.00"}},
+    {"name": "translate a DST-off reading", "location": "GB", "reading": "2026-07-01_(Wed)__12.00.00", "state": "home-winter",
+     "expect": {"stamp": "2026-07-01_(Wed)__13.00.00"}}
+  ]
+}

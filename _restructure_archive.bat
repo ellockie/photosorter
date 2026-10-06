@@ -2,10 +2,11 @@
 setlocal
 cd /d "%~dp0"
 
-rem Restructure an existing photo archive: canonicalise names, reunite
-rem companions, group every "__TO_SPLIT__" folder in the GUI, canonicalise
-rem again, mark the groups, then check and fix compliance with
-rem ARCHIVE_STANDARD.md. Motion photos whose video has not been extracted
+rem Restructure an existing photo archive: re-time shots against
+rem timezone.json (step 0, asking per folder: yes / yes to all / no),
+rem canonicalise names, reunite companions, group every "__TO_SPLIT__"
+rem folder in the GUI, canonicalise again, mark the groups, then check and fix
+rem compliance with ARCHIVE_STANDARD.md. Motion photos whose video has not been extracted
 rem into "__VIDEOS_EXTRACTED" are listed (and extracted under --apply) by
 rem steps 2 and 4, and reported as X16 by step 7.
 rem
@@ -18,6 +19,7 @@ rem   _restructure_archive.bat --apply
 rem   _restructure_archive.bat --year ALL
 rem   _restructure_archive.bat "d:\__PHOTOS_BACKUP" --year 2024 --apply
 rem   _restructure_archive.bat "d:\__PHOTOS_BACKUP" --year ALL --apply
+rem   _restructure_archive.bat --steps 0 --from 2026-09-01 --to 2026-09-30 --apply
 rem   _restructure_archive.bat "\\NAS\PhotoBackup" --year 2024 --apply
 rem   _restructure_archive.bat --list-to-split
 rem
