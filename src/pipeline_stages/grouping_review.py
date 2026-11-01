@@ -191,9 +191,18 @@ class GroupingReviewStage(PipelineStage):
             )
             # No UI to ask means no one can rename them either, so continuing is
             # the only honest fallback — and it is logged, not silent.
-            answer = context.await_prompt(prompt, auto_answer={"action": "continue"})
+            # The window stays for a moment so a rename-and-rescan is still
+            # possible, then closes itself: the findings above are in the log.
+            answer = context.await_prompt(
+                prompt,
+                auto_answer={"action": "continue"},
+                dismiss_after=float(settings.get("dismiss_after_seconds", 5)),
+            )
             if str(answer.get("action", "continue")) != "rescan":
                 context.log(
-                    f"Continuing with {len(pending)} folder(s) still unnamed"
+                    f"Continuing with {len(pending)} folder(s) still unnamed "
+                    "(name them later, then re-run the restructuring tool):"
                 )
+                for folder in pending:
+                    context.log(f"  - {folder.name}")
                 return

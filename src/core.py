@@ -1155,7 +1155,8 @@ class PipelineContext:
                     prompt.answered_event.set()
                     break
 
-    def await_prompt(self, prompt: PromptRequest, auto_answer: dict | None = None) -> dict:
+    def await_prompt(self, prompt: PromptRequest, auto_answer: dict | None = None,
+                     dismiss_after: float | None = None) -> dict:
         """Block until the user answers `prompt`. There is no timeout.
 
         A prompt exists because the pipeline cannot proceed without a human
@@ -1172,6 +1173,11 @@ class PipelineContext:
         Outside UI mode nobody can answer. Rather than hang a headless run
         forever, `auto_answer` supplies the documented fallback and the choice
         is logged; without one, the run pauses as it always has.
+
+        `dismiss_after` is the one exception to "no timeout", for a prompt
+        that only reports findings (the log carries them) and whose
+        `auto_answer` is the harmless "carry on": after that many seconds the
+        window is answered for you, and the log says so. It needs `auto_answer`.
         """
         if prompt.answered:
             return prompt.answer or {}
@@ -1190,12 +1196,23 @@ class PipelineContext:
         with self.lock:
             self.waiting_prompt_id = prompt.prompt_id
         self.log(f"Waiting for you: {prompt.prompt_type} (the pipeline will not time out)")
+        deadline = (
+            time.monotonic() + dismiss_after
+            if dismiss_after and auto_answer is not None else None
+        )
         try:
             while not prompt.answered_event.wait(PROMPT_POLL_SECONDS):
                 if self.abort_event.is_set():
                     raise PipelinePaused(
                         f"Run aborted while waiting for {prompt.prompt_type}"
                     )
+                if deadline is not None and time.monotonic() >= deadline:
+                    self.log(
+                        f"{prompt.prompt_type} dismissed after {dismiss_after:g}s, "
+                        f"continuing with {auto_answer}"
+                    )
+                    self.answer_prompt(prompt.prompt_id, auto_answer)
+                    break
         finally:
             with self.lock:
                 self.waiting_prompt_id = None
