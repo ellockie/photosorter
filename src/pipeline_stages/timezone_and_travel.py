@@ -82,7 +82,7 @@ class TimezoneAndTravelStage(PipelineStage):
                     "instructions": "These shots would be re-dated to the local time they were taken. "
                                     "Yes / yes to all remaining folders / no (no keeps the camera's own "
                                     "time and lists them for restructure step 0).",
-                    "lines": describe_group(folder, members, context.config),
+                    "lines": describe_group(folder, members, context.config, model),
                 }, self.stage_id)
                 choice = context.await_prompt(prompt, auto_answer=HEADLESS_ANSWER).get("action", "no")
             if choice == "all":
@@ -108,7 +108,7 @@ class TimezoneAndTravelStage(PipelineStage):
         return context
 
 
-def describe_group(folder: str, members: list, config: dict) -> list[str]:
+def describe_group(folder: str, members: list, config: dict, model=None) -> list[str]:
     """What the prompt shows: per camera the clock, error and shift, examples, day moves, order."""
     lines = [f"Folder: {folder}"]
     cameras: dict = {}
@@ -134,8 +134,11 @@ def describe_group(folder: str, members: list, config: dict) -> list[str]:
         if ambiguous:
             lines.append(f"    {ambiguous} reading(s) in a repeated hour, taken as after the clock change")
     inversions = order_inversions([(c.stamp_text, c.true_utc, asset.primary_path.name) for asset, c in members])
-    lines.append(f"Name order: {len(inversions)} shot(s) out of time order (reported only)" if inversions
-                 else "Name order: chronological")
+    if inversions and model is not None and model.accepts_order(folder):
+        lines.append(f"Name order: {len(inversions)} shot(s) out of time order, accepted in timezone.json")
+    else:
+        lines.append(f"Name order: {len(inversions)} shot(s) out of time order (reported only)" if inversions
+                     else "Name order: chronological")
     return lines
 
 

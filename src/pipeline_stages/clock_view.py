@@ -160,7 +160,7 @@ def build_view(folders, model: TimeModel, labels=None) -> View:
             notes.append(f"{camera} declares {said} but its clock is taken as {assumed} "
                          "(declared offsets are evidence only -- check with a calibration)")
         inversions = order_inversions(items)
-        if inversions:
+        if inversions and not model.accepts_order(folder.relative.name):
             notes.append(f"{len(inversions)} shot(s) would sort out of time order, e.g. {inversions[0][0]}")
         for cell in cells.values():
             if cell.ambiguous:

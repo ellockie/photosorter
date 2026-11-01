@@ -56,11 +56,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from src.pipeline_stages.stamps import \
     format_stamp, \
     parse_stamp, \
-    parse_stamp_with_fraction
+    parse_stamp_with_fraction, \
+    split_dated_folder
 
 UTC = datetime.timezone.utc
 
-TIMEZONE_KEYS = ("home", "mobiles", "trips", "camera_clocks", "calibrations")
+TIMEZONE_KEYS = ("home", "mobiles", "trips", "camera_clocks", "calibrations", "order_accepted")
 # Decision 9's schema. Rejected, never read: its "set_to, frozen at the moment
 # of setting" could not say "on GMT, 80 s slow", and reading it would quietly
 # mean something different from what it meant when it was written.
@@ -374,6 +375,31 @@ class TimeModel:
         self.calibrations: dict[str, list[Calibration]] = {}
         self._calibrations(data.get("calibrations") or [])
         self._check_frames()
+        self.accepted_orders = self._accepted_orders(data.get("order_accepted") or [])
+
+    def _accepted_orders(self, entries) -> set[tuple[str, str]]:
+        """Folders whose name order may differ from time order, as ``(date, tail)`` (K8).
+
+        A phone that switches to local time on arrival makes the first shots
+        abroad sort before the last ones taken on the plane; that is expected,
+        and recording it here stops it being reported. Matched on the folder's
+        date and description, not its time, which re-dating may change, and
+        not its root, so every copy of the folder is covered.
+        """
+        accepted = set()
+        for index, entry in enumerate(entries):
+            name = entry.get("folder") if isinstance(entry, dict) else entry
+            split = split_dated_folder(str(name or ""))
+            if split is None:
+                self.errors.append(f"order_accepted[{index}]: {name!r} is not a dated folder name")
+                continue
+            accepted.add((split.date, split.tail))
+        return accepted
+
+    def accepts_order(self, folder_name: str) -> bool:
+        """Whether ``folder_name``'s out-of-order names were accepted in the record."""
+        split = split_dated_folder(folder_name)
+        return split is not None and (split.date, split.tail) in self.accepted_orders
 
     # -- loading ---------------------------------------------------------
 

@@ -136,3 +136,17 @@ def test_collision_is_reported_not_overwritten(tmp_path, timezone, monkeypatch, 
     run(str(root), "--year", "2026", "--steps", "0", "--apply")
     assert taken.read_bytes() == b"someone else"
     assert "F4: needs a person" in capsys.readouterr().out
+
+
+def test_accepted_order_is_not_raised(tmp_path, timezone, capsys):
+    from tests.test_order_accepted import FOLDER, TRIP, barcelona
+    root = tmp_path / "__PHOTOS_BACKUP"
+    barcelona(root)
+    record = {"home": "GB", "mobiles": ["SG23U"], "trips": [TRIP]}
+    timezone(record)
+    run(str(root), "--year", "2026", "--steps", "0")
+    out = capsys.readouterr().out
+    assert "Name order is not time order" in out and '"order_accepted"' in out
+    timezone({**record, "order_accepted": [{"folder": FOLDER, "why": "phone synced on landing"}]})
+    run(str(root), "--year", "2026", "--steps", "0")
+    assert "Name order is not time order" not in capsys.readouterr().out

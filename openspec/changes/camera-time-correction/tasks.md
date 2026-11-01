@@ -76,3 +76,9 @@
 - [x] 9.1 Read a video's wall reading as QuickTime UTC + the device's recorded offset (`Android Time Zone`, Sony `Time Zone`, Apple `Creation Date`); name the device from `Device Model Name` / `Author`; never from file times (K11, V4). One reader in `clock_readings`, used by intake (`legacy.parse_legacy_exif_text`), V12 migration and step 0.
 - [x] 9.2 `TimeModel.correct_shot`: a no-offset video from a mobile is placed by its UTC instant; from a camera it is taken as the camera's clock.
 - [x] 9.3 Tests: Samsung, Sony, Apple, no-offset phone and camera, intake parser, step 0 renaming a video named from its file time (`tests/test_video_times.py`); ARCHIVE_STANDARD K11 + §8.
+
+## 10. NOID names and expected order differences (added 2026-10-06)
+
+- [x] 10.1 Step 0 replaces `__NOID` in a name once the sidecar names the device, even when the time is already right; companions follow (`retime_plan.with_camera_symbol`).
+- [x] 10.2 `order_accepted` in `timezone.json`: folders (matched on date + description) whose name order is expected to differ from time order; muted in step 0's issues, the visualiser and the intake prompt; step 0 prints the paste line for an unaccepted one.
+- [x] 10.3 Tests (`tests/test_order_accepted.py`, `tests/test_video_times.py`, `tests/test_restructure_retime.py`); ARCHIVE_STANDARD K3/K8/K11 + §8.

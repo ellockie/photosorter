@@ -33,8 +33,10 @@ Leaf module: engine, readings, stamps, taxonomy, siblings, legacy (N7, months).
 import dataclasses
 import datetime
 import os
+import re
 from pathlib import Path
 
+from src.constants.camera_symbols import camera_symbol_for_model
 from src.constants.months import MONTH_FOLDERS
 from src.pipeline_stages.clock_readings import \
     YEAR_RE, \
@@ -96,6 +98,8 @@ class FolderPlan:
     notes: list
     folder_time_before: str | None = None
     folder_time_after: str | None = None
+    # Name order differing from time order was accepted in timezone.json (K8).
+    order_accepted: bool = False
 
     @property
     def changes(self) -> bool:
@@ -168,6 +172,20 @@ def _target_day_folder(folder: Path, day: datetime.date) -> tuple[Path | None, s
     return parent / f"{prefix}{tail}", None
 
 
+def with_camera_symbol(tail: str, camera: str, config: dict) -> str:
+    """``tail`` with an unknown camera (``__NOID``) replaced by the one the sidecar names.
+
+    Written by earlier runs that read the device from "Camera Model Name"
+    only, which videos do not carry. Replaced only when the field occurs once
+    and the sidecar now names a camera the table knows (K11).
+    """
+    unknown = camera_symbol_for_model("", config)
+    if not camera or camera == unknown:
+        return tail
+    fixed, count = re.subn(rf"__{re.escape(unknown)}(?=[_.]|$)", f"__{camera}", tail)
+    return fixed if count == 1 else tail
+
+
 def _companions(subject: Path, config: dict) -> list[Path]:
     found = []
     for name in sidecar_dir_names(config):
@@ -209,12 +227,13 @@ def plan_folder(folder: Path, config: dict, model: TimeModel, cache=None,
         if current is None:
             continue
         correction = model.correct_shot(shot.camera, shot.reading, shot.counter, shot.utc)
+        old_tail, tail = tail, with_camera_symbol(tail, shot.camera, config)
         if shot.subdir == "":
             order_items.append((correction.stamp_text + tail, correction.true_utc, shot.subject.name))
         stamp_claims.setdefault((shot.subject.parent, format_stamp(current)), set()).add(correction.stamp)
         moment = correction.reading
         in_range = (start is None or moment >= start) and (end is None or moment < end)
-        if correction.stamp == current or not in_range:
+        if (correction.stamp == current and tail == old_tail) or not in_range:
             if shot.subdir == "":
                 top_level_after.append(current)
             continue
@@ -224,6 +243,8 @@ def plan_folder(folder: Path, config: dict, model: TimeModel, cache=None,
                          "renamed by hand, or named from a file time?")
         if correction.ambiguous:
             flags.append("reading falls in a repeated hour; taken as after the clock change")
+        if tail != old_tail:
+            flags.append(f"camera symbol {camera_symbol_for_model('', config)} -> {shot.camera}")
         new_day = date_folder_datetime(correction.stamp, config).date()
         current_day = date_folder_datetime(current, config).date()
         target_folder = folder
@@ -279,6 +300,7 @@ def plan_folder(folder: Path, config: dict, model: TimeModel, cache=None,
 
     _plan_followers(plan, folder, config, by_subject, stamp_claims)
     plan.inversions = order_inversions(order_items)
+    plan.order_accepted = bool(plan.inversions) and model.accepts_order(folder.name)
     if top_level_after:
         plan.folder_time_after = min(top_level_after).strftime("%H.%M.%S")
     return plan
@@ -341,7 +363,9 @@ def describe(plan: FolderPlan) -> list[str]:
         lines.append(f"  {count} file(s) change day -> {target.name}{new}")
     if not moved:
         lines.append("  day folder unchanged")
-    if plan.inversions:
+    if plan.inversions and plan.order_accepted:
+        lines.append(f"  name order: {len(plan.inversions)} shot(s) out of time order, accepted in timezone.json")
+    elif plan.inversions:
         lines.append(f"  name order: {len(plan.inversions)} shot(s) would sort out of time order, "
                      f"e.g. {plan.inversions[0][0]} (reported only)")
     else:

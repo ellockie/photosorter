@@ -35,5 +35,11 @@
       "reading": "2026-09-27_(Sun)__20.20.58.925",
       "true": "2026-09-27_(Sun)__20.20.59.934"
     }
+  ],
+  "order_accepted": [
+    {
+      "folder": "2026-09-15_(Tue)__11.08.17 - Barcelona z samolotu",
+      "why": "phone switched to local time on landing"
+    }
   ]
 }

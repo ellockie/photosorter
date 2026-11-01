@@ -96,8 +96,21 @@ def test_step_zero_renames_the_mis_named_video(tmp_path):
     name = "2026-09-15_(Tue)__16.31.28__fNA__T---__LNA__I---s__NOID.mp4"
     write_shot(folder, name, SAMSUNG)
     plan = plan_folder(folder, CONFIG, TimeModel(TRIP))
-    assert plan.shots[0].new_name == "2026-09-15_(Tue)__17.31.28__fNA__T---__LNA__I---s__NOID.mp4"
+    assert plan.shots[0].new_name == "2026-09-15_(Tue)__17.31.28__fNA__T---__LNA__I---s__SG23U.mp4"
     assert any("file time" in flag for flag in plan.shots[0].flags)
     apply_plan(plan, log=lambda _: None)
-    assert (folder / "__EXIF" / "2026-09-15_(Tue)__17.31.28__fNA__T---__LNA__I---s__NOID.mp4._exif").exists()
+    assert (folder / "__EXIF" / "2026-09-15_(Tue)__17.31.28__fNA__T---__LNA__I---s__SG23U.mp4._exif").exists()
     assert folder_readings(folder, CONFIG)[0].camera == "SG23U"
+
+
+def test_noid_is_replaced_once_the_device_is_known(tmp_path):
+    from src.pipeline_stages.retime_plan import with_camera_symbol
+    assert with_camera_symbol("__fNA__T---__LNA__I---s__NOID.mp4", "SG23U", CONFIG) == "__fNA__T---__LNA__I---s__SG23U.mp4"
+    assert with_camera_symbol("__f2.8__NOID_HAS_RAW.jpg", "C6D", CONFIG) == "__f2.8__C6D_HAS_RAW.jpg"
+    assert with_camera_symbol("__f2.8__NOID.jpg", "NOID", CONFIG) == "__f2.8__NOID.jpg"
+    # Already the right time: the symbol alone is still worth a rename.
+    folder = tmp_path / "2026" / "09. September" / "2026-09-15_(Tue)__17.31.28 - X"
+    write_shot(folder, "2026-09-15_(Tue)__17.31.28__fNA__NOID.mp4", SAMSUNG)
+    plan = plan_folder(folder, CONFIG, TimeModel(TRIP))
+    assert plan.shots[0].new_name == "2026-09-15_(Tue)__17.31.28__fNA__SG23U.mp4"
+    assert "camera symbol NOID -> SG23U" in plan.shots[0].flags
