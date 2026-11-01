@@ -903,8 +903,10 @@ def issue_body(groups, notes=True):
             )
         for item, item_note in items:
             lines.append(line("warn", "    %s %s" % (glyph("dot"), item)))
-            if item_note:
-                lines.append(line("dim", "        %s" % item_note))
+            # A note may run to several lines (a paste-ready hint); each is its
+            # own framed line rather than one that breaks out of the border.
+            for piece in str(item_note or "").splitlines():
+                lines.append(line("dim", "        %s" % piece.strip()))
         if hidden:
             lines.append(
                 line(
@@ -1011,7 +1013,7 @@ def scan_roots(target, report):
 
 
 def years_to_run(target, report):
-    """``(year_trees, error_message)``: what ``--year ALL`` covers (PS-6).
+    r"""``(year_trees, error_message)``: what ``--year ALL`` covers (PS-6).
 
     The root is read for the years it actually holds rather than a range being
     guessed, so a gap year costs nothing and a year added since the last run is
@@ -3260,9 +3262,14 @@ def step_retime(run):
         plan = retime_plan.plan_folder(folder, config, model, cache, start, end)
         for path, reason in plan.skipped:
             run.flag("Shot not re-timed", path, reason)
-        if plan.inversions:
+        if plan.inversions and not plan.order_accepted:
+            # Expected where a phone switched to local time on arrival; a person
+            # says so once, in timezone.json, and the folder is not raised again.
             run.flag("Name order is not time order (reported only)", folder,
-                     "%d shot(s), e.g. %s" % (len(plan.inversions), plan.inversions[0][0]))
+                     "%d shot(s), e.g. %s\n"
+                     "        expected here? add to \"order_accepted\" in timezone.json:\n"
+                     "        { \"folder\": %s, \"why\": \"??\" },"
+                     % (len(plan.inversions), plan.inversions[0][0], json.dumps(folder.name, ensure_ascii=False)))
         if not plan.changes:
             continue
         affected += 1
