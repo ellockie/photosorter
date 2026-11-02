@@ -47,6 +47,19 @@
         <h2>Pending decisions</h2>
         <div id="prompt-list" class="prompt-list"></div>
       </dialog>
+      <!-- Shown once, when a run ends cleanly. Not modal-blocking: nothing is
+           waiting on it, so Escape or Close just dismisses it. -->
+      <dialog id="done-dialog" class="prompt-dialog done-dialog">
+        <h2>Job complete</h2>
+        <p id="done-summary"></p>
+        <p class="prompt-file">The restructuring tool (<code>_restructure_archive.ps1</code>)
+          opens in its own window. A dry run changes nothing.</p>
+        <div class="prompt-actions">
+          <button id="done-restructure" class="primary">Run restructuring (dry run)</button>
+          <button id="done-close">Close</button>
+        </div>
+        <p id="done-error" class="hidden"></p>
+      </dialog>
     </div>
   </body>
 </html>

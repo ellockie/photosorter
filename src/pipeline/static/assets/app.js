@@ -247,6 +247,34 @@ if (soundToggleEl) {
 const IMAGE_GROUPER_STAGE_ID = "screenshot-grouping";
 
 // Diffing state used to detect transitions between renderState() calls.
+// Offered only on a live running -> idle transition, never on a page load that
+// finds a finished run, and never after a failure or a pause: a run that did
+// not finish has nothing to restructure yet.
+const doneDialogEl = document.querySelector("#done-dialog");
+const doneErrorEl = document.querySelector("#done-error");
+
+function showJobComplete(state) {
+  if (!doneDialogEl || state.paused) return;
+  const run = (state.stage_timings || {}).__run__ || {};
+  const took = run.duration_seconds ? ` in ${formatDuration(run.duration_seconds)}` : "";
+  document.querySelector("#done-summary").textContent = `The pipeline finished${took}.`;
+  doneErrorEl.classList.add("hidden");
+  if (!doneDialogEl.open) doneDialogEl.show();
+}
+
+if (doneDialogEl) {
+  document.querySelector("#done-close").addEventListener("click", () => doneDialogEl.close());
+  document.querySelector("#done-restructure").addEventListener("click", () =>
+    api("/api/restructure/launch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apply: false }),
+    }).then(() => doneDialogEl.close()).catch(error => {
+      doneErrorEl.textContent = error.message;
+      doneErrorEl.classList.remove("hidden");
+    }));
+}
+
 let stateBaselineCaptured = false;
 let previousRunning = false;
 let previousStageStates = {};
@@ -278,7 +306,10 @@ function detectAndPlayTransitionSounds(state) {
     SOUNDS.pipelineStart();
   } else if (!running && previousRunning) {
     if (state.error) SOUNDS.pipelineFailure();
-    else SOUNDS.pipelineSuccess();
+    else {
+      SOUNDS.pipelineSuccess();
+      showJobComplete(state);
+    }
   }
 
   Object.entries(stageStates).forEach(([stageId, value]) => {

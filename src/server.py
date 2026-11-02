@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 import threading
 from pathlib import Path
 
@@ -32,6 +33,33 @@ except ImportError:
 
 class WebDependencyError(RuntimeError):
     pass
+
+
+RESTRUCTURE_SCRIPT = Path(__file__).resolve().parent.parent / "_restructure_archive.ps1"
+
+
+def launch_restructure_tool(apply: bool = False) -> list[str]:
+    """Open `_restructure_archive.ps1` in a console window of its own.
+
+    Its own window because the tool asks questions (step 0, the grouper) and
+    ends on "press a key" -- neither fits behind the dashboard. Nothing is
+    changed unless `apply` is set: the script's default is a dry run, and this
+    never adds `--apply` on its own.
+    """
+    if not RESTRUCTURE_SCRIPT.is_file():
+        raise RuntimeError(f"{RESTRUCTURE_SCRIPT.name} is missing from {RESTRUCTURE_SCRIPT.parent}")
+    command = [
+        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-File", str(RESTRUCTURE_SCRIPT),
+    ]
+    if apply:
+        command.append("--apply")
+    subprocess.Popen(
+        command,
+        cwd=RESTRUCTURE_SCRIPT.parent,
+        creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+    )
+    return command
 
 
 class EventHub:
@@ -377,6 +405,19 @@ def create_app(config_path=None, base_folder=None):
         payload = {"event": "pipeline_stepped", "state": runtime.state()}
         await events.broadcast(payload)
         return payload
+
+    @app.post("/api/restructure/launch")
+    async def restructure_launch(options: dict | None = None):
+        apply = bool((options or {}).get("apply", False))
+        try:
+            command = launch_restructure_tool(apply)
+        except (RuntimeError, OSError) as error:
+            raise HTTPException(status_code=409, detail=str(error))
+        runtime.context.log(
+            "Restructuring tool opened in its own window"
+            + (" (--apply)" if apply else " (dry run)")
+        )
+        return {"event": "restructure_launched", "command": command}
 
     @app.post("/api/server/shutdown")
     async def server_shutdown():
