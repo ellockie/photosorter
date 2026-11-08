@@ -1,6 +1,6 @@
 # Photo & Video Archive Standard
 
-**v1.7 — settled. Partially enforced by the restructure tool.**
+**v1.8 — settled. Partially enforced by the restructure tool.**
 
 The target structure of the photo + video archive on disk. It exists to (a) drive
 the redesign of the **already-archived** material and (b) serve as the contract
@@ -356,7 +356,8 @@ Inside a dated folder, exactly these are permitted. All optional.
 | `__EXIF` | `._exif` sidecars, JSON camera logs | tool |
 | `__EXPORTED` | Full-resolution exports for print/archive | tool |
 | `__GEOLOCATIONS` | `.gpx` tracks and other event geodata | tool |
-| `__HASHES` | Content hashes / integrity records | tool |
+| `__HASHES` | Content hashes / integrity records — the folder's one hash manifest, `manifest.tsv`. See M1–M9 | tool |
+| `__NAS_DUPLICATES` | Files proved byte-identical to a copy already held in the permanent archive on the NAS — S8. Not a collision loser (that is `__DUPLICATES`, S7): the twin is elsewhere, not beside it | tool |
 | `__OCR` | Text recognised out of an image — `.OCR.txt`. See X15 | tool |
 | `__PANORAMAS` | Panorama sources and stitches | hand |
 | `__PEOPLE` | Per-person crops / selections | hand |
@@ -380,6 +381,7 @@ Inside a dated folder, exactly these are permitted. All optional.
 | S7 | **A collision loser is parked in the `__DUPLICATES` of the dated folder its subject sits in** (F4, L3, and the placement rules of §6). **A loser here means a file proved to be a byte-identical copy of another** — a `_DUPE`, or a companion that lost its place to an identical one. A pair whose bytes differ is not parked (F4c): it is a question about the event, and it is asked where the event is looked at — the timestamped event folder, never a group and never the year. A loser parked beside the file whose name it lost stays with its own event: it travels when that event is moved, renamed or regrouped; it is reviewed alongside the shots it belongs to; and it survives the year tree being reorganised around it. It shares the folder with what the table describes — burst discards and unused brackets a person put there — because both are the same thing to a reviewer: a file from this event that is not the representative. |
 | S7a | **A group never holds one.** C3 allows a group no files but geodata, so a tool resolving where to park climbs past a group to the dated folder below it. |
 | S7b | **`<YYYY>\__DUPLICATES` is read, never written.** Earlier versions pooled a whole year's losers there, and an existing archive still has one; it is recognised as a legal year child (P6) and MUST NOT be reported as malformed. Nothing drains it automatically — where each of those files belongs is a decision for a person (L5). The pooling was reversed because it optimised the wrong thing: counting a year's losers got easier, and putting any one of them back got impossible, since two folder levels from its event nothing but the file's own name says where it came from. |
+| S8 | **`__NAS_DUPLICATES` holds a file proved byte-identical to a copy that is already in the permanent archive** — equal size and equal digest, confirmed by the archive index at the moment of parking, which also checks that the twin is still on disk (M7). It is parked in the dated folder its subject sits in, the placement S7 gives a collision loser and for the same reason: it stays with its event. It is a separate folder from `__DUPLICATES` because the two answer different questions: a `__DUPLICATES` file has its twin beside it, a `__NAS_DUPLICATES` file has its twin on another machine, and a reviewer must be able to tell which. Parked, never deleted (T1). Excluded from the manifest and from the archive index (M2), or a parked file would make its own twin look already safe. |
 
 ### Implemented
 
@@ -873,6 +875,32 @@ a JPEG, so `Path.suffix` reads `.jpg` and the X2 rule — match on the trailing
 extension — would count it as media. Matching the *longest* trailing extension,
 compound forms first, is what keeps X7 true for a file the standard now expects
 tools to write.
+
+### 6.1 Hash manifests — `M`
+
+A **manifest** is one file per dated folder recording what every file in it was
+when a tool last read it: its size, its modification time and its content hash.
+It exists so that a second tool — an archive index, a verifier — can learn the
+hashes of a folder without reading a single photograph. It is not a sidecar: it
+is named after no subject, pairs with nothing (X-rules do not apply) and is
+never media.
+
+| ID | Rule |
+| --- | --- |
+| M1 | **One manifest per dated leaf folder**, at `<dated folder>\__HASHES\manifest.tsv`. A group (§3) carries none: it holds only geodata (C3), which an index reads for itself. |
+| M2 | **It covers every file below the dated folder, at any depth** — the taxonomy subfolders included (`__RAW\IMG_1.CR3`, `__EXIF\IMG_1.jpg._exif`) — **except** `__HASHES` itself, `__DUPLICATES` and `__NAS_DUPLICATES`. A file parked as a duplicate is not a copy worth finding, and listing it would let it vouch for its own twin. Paths are relative to the dated folder, with `/` as the separator. |
+| M3 | **Format.** UTF-8, LF line ends, tab-separated. The first line is `# archive-manifest v1`, the second the column names `path`, `size`, `mtime_ns`, `algo`, `digest`. One row per file, sorted by path in ordinal order, so two runs over unchanged files write identical bytes. |
+| M4 | **`algo` is `md5` today**, the digest lower-case hex — the one hash the archive already writes into `_DUPE_` names (F4a). A reader meeting an `algo` it does not know ignores that row and hashes the file itself; it never fails the folder. |
+| M5 | **A row is advisory.** It says what the file was, not what it is. A reader trusts a row only when the file's size is equal and its modification time is equal **at whole-second resolution** (filesystems and copy tools differ below that); anything else is re-hashed. A row for a file that is gone is dropped; a file with no row is hashed. A mismatch is never an error. |
+| M6 | **Only a tool writes it, only under `--apply` (T3), and it is regenerable.** Because its content is derived from the files and losing the old one loses nothing, M6 is the one place a tool may **replace** a file: write `manifest.tsv.tmp` beside it, then replace. This is a stated exception to T2, which guards content that cannot be regenerated. Nothing is ever deleted (T1). |
+| M7 | **A reader never writes into the archive.** An index mounts it read-only, keeps the hashes of manifest-less folders in its own store, and answers "is this file present?" only after checking that the file it names still exists with that size. A stale index may miss a duplicate; it must never claim a copy that is gone. A manifest is written for a folder only by a tool run on purpose (a *seal*), never as a side effect of reading. |
+| M8 | **A manifest travels with its folder.** Moving or renaming a dated folder moves its `__HASHES`, and nothing in it names the folder, so nothing is rewritten. Renaming a file inside invalidates that row (M5), not the manifest. |
+| M9 | **It carries no leading stamp** and is exempt from F-naming, as the other tool records in `__HASHES` are. It is not offered to a grouper or counted as a file of the event (N10a). |
+
+**Not built.** M1–M9 and S8 are decided and unimplemented. Only the name
+`__NAS_DUPLICATES` is in `taxonomy.py`, so the closed set (S1) and the standard
+agree. The writer, the archive index and the PC stage that parks a file are
+specified in `docs/NAS_ARCHIVE_INDEX_DESIGN.md`.
 ---
 
 ## 7. Tool obligations — `T`
@@ -1042,7 +1070,7 @@ against a single path component.
 
 ```yaml
 standard: photo-archive
-version: 1.7
+version: 1.8
 status: settled
 
 path:
@@ -1233,6 +1261,30 @@ parking_areas:                        # section 4.1
     delete: never                     # H11 / T1
     no_allowed_level_above: report_and_leave                # H11
 
+manifests:                            # section 6.1
+  folder: "__HASHES"
+  file: "manifest.tsv"
+  written_at: dated_leaf_folder_only            # M1 - a group carries none
+  header: "# archive-manifest v1"
+  columns: [path, size, mtime_ns, algo, digest] # M3
+  separator: tab
+  encoding: utf-8
+  line_end: lf
+  path_separator: "/"                           # M2 - relative to the dated folder
+  covers: every_file_below_the_dated_folder     # M2 - taxonomy subfolders included
+  excluded: ["__HASHES", "__DUPLICATES", "__NAS_DUPLICATES"]   # M2
+  sorted_by: path_ordinal                       # M3
+  algo_written: md5                             # M4
+  digest_case: lower
+  unknown_algo: ignore_row_and_rehash           # M4
+  row_is: advisory                              # M5
+  mtime_compared_at: whole_seconds              # M5
+  replace: write_temp_then_replace              # M6 - the one stated exception to T2
+  requires_apply: true                          # M6 / T3
+  delete: never                                 # T1
+  reader_writes_to_archive: never               # M7
+  carries_leading_stamp: false                  # M9
+
 subfolders:
   closed_set: true
   also_allowed: dated_child_folder
@@ -1247,6 +1299,7 @@ subfolders:
     - "__EXPORTED"
     - "__GEOLOCATIONS"
     - "__HASHES"
+    - "__NAS_DUPLICATES"            # S8 - twin held in the permanent archive
     - "__OCR"
     - "__PREVIEWS"
     - "__RAW"
@@ -1270,7 +1323,7 @@ subfolders:
 
 files:
   leading_stamp_required: true
-  leading_stamp_exemptions: ["^__TO_RENAME__", "unkeyed derivative in __EDITED"]  # V10, D5
+  leading_stamp_exemptions: ["^__TO_RENAME__", "unkeyed derivative in __EDITED", "manifest in __HASHES"]  # V10, D5, M9
   markers:                            # in-name markers, distinct from folder_tail.markers
     raw: "RAW__"                      # F2
     to_rename: "__TO_RENAME__"       # V8; a prefix, anchor it to ^
@@ -1498,6 +1551,28 @@ decision that was still pending. A rule that turns out to be wrong is amended in
 the open, with the reasoning kept the way the *Settled* notes in §0.1 and §4
 keep theirs: a rule whose argument has been deleted is one that gets re-argued
 from scratch in a year.
+
+### v1.8 — a folder's hashes are written down, and a file the NAS already holds is parked
+
+One new section, 6.1 (M1-M9), and one new subfolder, `__NAS_DUPLICATES` (S8).
+
+The archive had a place for hashes (`__HASHES`) and nothing in it, so the only
+way to learn whether a photograph was already held was to read it. A permanent
+archive on a NAS cannot be asked that cheaply from a PC, and a second copy of a
+folder nobody could tell was a copy is exactly what T1 makes expensive to
+undo. The manifest is the answer that needs no server: one tab-separated file
+per dated folder, written once, travelling with the folder, advisory enough
+(M5) that a stale one costs a re-hash and never a wrong answer. An index built
+over the archive is then a cache of manifests, rebuildable from them (M7).
+
+`__NAS_DUPLICATES` is parked in the event like `__DUPLICATES` (S7) and for the
+same reason, but is not pooled with it: a collision loser has its twin beside
+it, this one has its twin on another machine, and a person emptying either
+folder needs to know which they are looking at.
+
+**The migration is nothing yet**: no existing folder is renamed, and no manifest
+exists until a tool is run on purpose with `--apply`. M6 is a stated exception
+to T2 (a regenerable file may be replaced), not a loosening of it.
 
 ### v1.7 — a file's stamp is the local time it was taken
 

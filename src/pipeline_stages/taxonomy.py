@@ -33,6 +33,7 @@ DEFAULT_TAXONOMY = {
     "raw_extracted_jpgs": "__RAW_EXTRACTED_JPGS",
     "geolocations": "__GEOLOCATIONS",
     "hashes": "__HASHES",
+    "nas_duplicates": "__NAS_DUPLICATES",
     "ocr": "__OCR",
     "panoramas": "__PANORAMAS",
     "people": "__PEOPLE",

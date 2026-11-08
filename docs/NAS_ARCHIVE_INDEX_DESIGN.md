@@ -144,15 +144,18 @@ less ceremony.
 
 ```
 # archive-manifest v1
-name<TAB>size<TAB>mtime_ns<TAB>algo<TAB>digest
+path<TAB>size<TAB>mtime_ns<TAB>algo<TAB>digest
 IMG_0001.jpg    4821733    1731027412000000000    md5    9e107d9d372bb6826bd81d3542a419d6
+__RAW/IMG_0001.CR3    25190412    1731027412000000000    md5    1f3870be274f6c49b3e31a0c6728957f
 ```
 
-- Paths are relative to the folder; names are exactly as on disk.
-- A manifest describes its own folder's direct files only. Subfolders carry their own.
-- Rows are advisory: a size or mtime mismatch means "re-hash", never "trust".
-- Tool-written, replaced atomically (write temp, rename), never edited by hand.
-- `__HASHES` itself is excluded from the manifest.
+This is now normative as **ARCHIVE_STANDARD §6.1, rules M1–M9 (v1.8)**; the summary:
+
+- One manifest per dated **leaf** folder, covering every file below it at any depth
+  (taxonomy subfolders cannot hold their own `__HASHES`, S2). Paths are relative with `/`.
+- Excluded: `__HASHES`, `__DUPLICATES`, `__NAS_DUPLICATES`.
+- Rows are advisory: size or whole-second mtime mismatch means "re-hash", never "trust".
+- Tool-written under `--apply`; replaced via temp file (a stated exception to T2, M6).
 
 ## 6. Lookup API (draft)
 
@@ -247,5 +250,7 @@ duplicate the existing archive path. It moves nothing.
 
 - Archive size and file count (§11).
 - Whether the DSM VM's volume is fast enough for the first scan (disk passthrough vs virtual disk on Proxmox).
-- Where `__NAS_DUPLICATES` sits (sibling of what it parks, like other parking areas, §4.1).
+- ~~Where `__NAS_DUPLICATES` sits~~ — settled in ARCHIVE_STANDARD S8: a subfolder of the
+  dated folder its subject sits in, like `__DUPLICATES` (S7), not a §4.1 parking area.
+  Still open: the PC stage must run after folder sorting, or park by destination.
 - Whether `mtime` survives your usual copy method; if not, rows verify on size alone and re-hash more.
