@@ -32,6 +32,8 @@ maintenance tool can load it by file path without dragging the whole pipeline
 import collections
 import os
 import subprocess
+import threading
+import time
 from pathlib import Path
 from typing import NamedTuple
 
@@ -83,12 +85,127 @@ def run_grouper(python_exe: Path, project_path: Path, folder: Path):
     could not be started at all; every caller decides for itself whether that
     ends the batch.
     """
-    return subprocess.run(
-        grouper_command(python_exe, project_path, folder),
-        cwd=str(project_path),
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    finished = threading.Event()
+    threading.Thread(
+        target=_announce_window, args=(finished,), daemon=True).start()
+    try:
+        return subprocess.run(
+            grouper_command(python_exe, project_path, folder),
+            cwd=str(project_path),
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    finally:
+        finished.set()
+
+
+# --------------------------------------------------------------------------
+# Making the window noticed
+# --------------------------------------------------------------------------
+#
+# The GUI opens behind whatever the operator is looking at, and the batch then
+# waits on it silently. So the moment its window appears we play a distinct
+# sound and try to bring it forward. Best effort throughout: any failure here
+# is swallowed, because a missing beep must never cost a grouping run.
+
+_ANNOUNCE_TIMEOUT_S = 60.0
+_ANNOUNCE_POLL_S = 0.25
+
+
+def _process_tree_pids(root_pid: int) -> set:
+    """``root_pid`` and every descendant. A venv ``python.exe`` is a launcher
+    that starts the real interpreter as a child, and that child owns the
+    window."""
+    import ctypes
+    from ctypes import wintypes
+
+    class ProcessEntry(ctypes.Structure):
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+                    ("th32ProcessID", wintypes.DWORD),
+                    ("th32DefaultHeapID", ctypes.c_void_p),
+                    ("th32ModuleID", wintypes.DWORD),
+                    ("cntThreads", wintypes.DWORD),
+                    ("th32ParentProcessID", wintypes.DWORD),
+                    ("pcPriClassBase", ctypes.c_long),
+                    ("dwFlags", wintypes.DWORD),
+                    ("szExeFile", ctypes.c_wchar * 260)]
+
+    kernel32 = ctypes.windll.kernel32
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    snapshot = kernel32.CreateToolhelp32Snapshot(0x2, 0)   # TH32CS_SNAPPROCESS
+    children = collections.defaultdict(list)
+    try:
+        entry = ProcessEntry()
+        entry.dwSize = ctypes.sizeof(ProcessEntry)
+        more = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+        while more:
+            children[entry.th32ParentProcessID].append(entry.th32ProcessID)
+            more = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+    finally:
+        kernel32.CloseHandle(snapshot)
+    found, queue = {root_pid}, [root_pid]
+    while queue:
+        for child in children.get(queue.pop(), []):
+            if child not in found:
+                found.add(child)
+                queue.append(child)
+    return found
+
+
+def _visible_windows_of(pids: set) -> set:
+    """Handles of the visible, titled top-level windows owned by ``pids``."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    hits = set()
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def visit(hwnd, _lparam):
+        if user32.IsWindowVisible(hwnd) and user32.GetWindowTextLengthW(hwnd):
+            owner = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+            if owner.value in pids:
+                hits.add(hwnd)
+        return True
+
+    user32.EnumWindows(visit, 0)
+    return hits
+
+
+def _bring_forward(hwnd) -> None:
+    """Foreground the window. Windows refuses a background process the focus
+    unless the calling thread has just seen input, hence the Alt tap."""
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    user32.keybd_event(0x12, 0, 0, 0)          # Alt down
+    user32.ShowWindow(hwnd, 9)                 # SW_RESTORE
+    user32.SetForegroundWindow(hwnd)
+    user32.keybd_event(0x12, 0, 0x2, 0)        # Alt up
+
+
+def _announce_window(finished) -> None:
+    """Wait for a new window of ours (the grouper is a descendant of this
+    process), then sound a chime and focus it. Windows already open when the
+    launch began are not the grouper's, so they are ignored."""
+    if os.name != "nt":
+        return
+    try:
+        import winsound
+
+        ours = {os.getpid()}
+        already = _visible_windows_of(ours | _process_tree_pids(os.getpid()))
+        deadline = time.monotonic() + _ANNOUNCE_TIMEOUT_S
+        while not finished.wait(_ANNOUNCE_POLL_S) and time.monotonic() < deadline:
+            new = _visible_windows_of(_process_tree_pids(os.getpid())) - already
+            if new:
+                for frequency, length in ((880, 120), (1175, 120), (1568, 220)):
+                    winsound.Beep(frequency, length)
+                _bring_forward(next(iter(new)))
+                return
+    except Exception:
+        pass
 
 
 # --------------------------------------------------------------------------
